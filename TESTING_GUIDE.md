@@ -1,14 +1,14 @@
 # One-Sitting Layer-by-Layer Testing Guide
 
-This guide is intentionally ordered from lowest-level runtime sanity to the full stack. The current development host has no Isaac Sim, ROS 2, or RTAB-Map installation, so runtime layers are **implemented, not yet interactively verified**. Run this on the supported target environment with the repository root as the working directory.
+This guide is intentionally ordered from lowest-level runtime sanity to the full stack. On the current host, Layers 1–7 plus the dashboard ROS/backend portions of Layers 5 and 8 are verified with Isaac Sim 6.1 and native ROS 2 Jazzy Pixi. Browser visual QA and Layers 9–11 remain open; Layers 9–11 are gated on the native RTAB-Map Windows build.
 
 Before starting, open a terminal for each long-running process, keep logs visible, and record screenshots plus the exact command for every failed layer. Use simulation time everywhere.
 
 ## 1. Environment/runtime sanity
 
 **Goal:** Confirm the target can run the intended stack.
-**Prerequisites:** Isaac Sim, ROS 2, RTAB-Map, NVIDIA driver.
-**Commands:** `Get-ComputerInfo -Property WindowsProductName,OsBuildNumber`; `nvidia-smi`; `ros2 --help`; `python --version`; `ros2 pkg prefix rtabmap_odom`.
+**Prerequisites:** Isaac Sim, ROS 2, RTAB-Map binaries, NVIDIA driver.
+**Commands:** `C:\isaacsim\isaac-sim.compatibility_check.bat`; `C:\Users\suyog\AppData\Local\pixi\bin\pixi.exe run ros2 --help`; `C:\Users\suyog\AppData\Local\pixi\bin\pixi.exe run ros2 pkg prefix grocery_sim_mapping`.
 **What should open:** Nothing; commands should return tool/version information.
 **What success looks like:** Target OS/GPU and all required commands are present.
 **What failure looks like:** Missing command, unsupported runtime, or GPU initialization error.
@@ -19,8 +19,8 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Verify deterministic procedural geometry.
 **Prerequisites:** Layer 1; Isaac Sim session.
-**Commands:** Open the Isaac runtime integration and load `config/scenarios/baseline_straight.yaml`; run `scripts/run_sim.ps1 -PreflightOnly` first.
-**What should open:** Isaac Sim scene with a floor, two shelf rows, multiple bays/levels, and simple product proxies.
+**Commands:** `./scripts/run_sim.ps1 -Frames 1200 -Realtime -StartZenohRouter`; run `scripts/run_sim.ps1 -PreflightOnly` first if desired.
+**What should open:** The Isaac runtime log should show a built stage with a floor, two shelf rows, multiple bays/levels, and simple product proxies; the repository launcher runs headless for repeatable ROS testing.
 **What success looks like:** Shelves are upright, aisle is navigable, lighting is usable, and repeated fixed-seed loads match.
 **What failure looks like:** Empty stage, overlapping shelves, missing products, or runtime import errors.
 **Evidence:** Scene screenshot and preflight JSON.
@@ -30,7 +30,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Verify the rig owns pose and moves independently of sensor code.
 **Prerequisites:** Layer 2.
-**Commands:** Use the straight trajectory from `config/trajectories/straight.yaml`; inspect rig pose over 5–10 seconds.
+**Commands:** The native runner consumes `config/trajectories/straight.yaml`; inspect `/tf` and `/sim/ground_truth/pose` over 5–10 seconds.
 **What should open:** The camera and LiDAR children move with `/World/SensorRig` down the aisle.
 **What success looks like:** Forward motion is smooth and deterministic; sensor offsets remain fixed.
 **What failure looks like:** Sensor floats, rotates unexpectedly, or motion is embedded only in camera behavior.
@@ -51,7 +51,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 ## 5. Localhost RGB stream
 
 **Goal:** Verify browser data comes from the ROS camera cache.
-**Prerequisites:** Layer 4; Python web dependencies.
+**Prerequisites:** Layer 4; run the Zenoh router and native Pixi dashboard.
 **Commands:** `./scripts/run_dashboard.ps1`; browse to `http://localhost:8080`; in a second terminal `Invoke-RestMethod http://localhost:8080/api/health`.
 **What should open:** Diagnostic page with a live RGB panel and status JSON.
 **What success looks like:** Frame updates, source status becomes connected, and receive age stays low.
@@ -62,7 +62,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 ## 6. LiDAR publication
 
 **Goal:** Verify LiDAR points exist on the public ROS topic.
-**Prerequisites:** Layer 3; simulator running.
+**Prerequisites:** Layer 3; simulator and Zenoh router running.
 **Commands:** `ros2 topic hz /sim/lidar/points`; `ros2 topic echo --once /sim/lidar/points`; inspect `frame_id`.
 **What should open:** PointCloud2 messages near 10 Hz.
 **What success looks like:** Non-zero point count, ranges within configured limits, frame `lidar_link`.
@@ -73,7 +73,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 ## 7. TF / ground-truth sanity
 
 **Goal:** Verify transform ownership and truth isolation.
-**Prerequisites:** Layers 4 and 6.
+**Prerequisites:** Layers 4 and 6; simulator and Zenoh router running.
 **Commands:** `ros2 topic echo --once /sim/ground_truth/pose`; `ros2 run tf2_ros tf2_echo sim_world sensor_rig`; `ros2 run tf2_tools view_frames`.
 **What should open:** Ground-truth pose plus a TF graph for sensor frames.
 **What success looks like:** `sim_world -> sensor_rig -> camera_link/camera_optical_frame/lidar_link` is coherent; no simulator `map -> odom`; ground truth is not `/slam/odom`.

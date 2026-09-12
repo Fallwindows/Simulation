@@ -4,8 +4,8 @@
 
 - Repository: `Fallwindows/Simulation`
 - Branch: `master`
-- Base commit: `d428baa335a7e0375b9ec9362026dc824c8905e5`
-- Final commit: `daabc6a880aa205a121c1b6ecb8858022f177fbe`
+- Base commit: repository history before the native runtime milestone.
+- Current verified commit: see `git log -1` and `origin/master` after this handoff update.
 
 ## Implemented
 
@@ -20,14 +20,16 @@
 - Windows scripts under `scripts/`.
 - Automated core tests under `tests/`.
 
-## Not yet interactively verified
+## Verified on the current host
 
-- Isaac Sim startup and actual aisle rendering.
-- RTX camera/LiDAR creation and ROS 2 writers.
-- `/clock`, TF, RGB, LiDAR, and ground-truth messages on a live ROS graph.
-- RTAB-Map ICP odometry and 3D map accumulation.
-- Browser MJPEG/WebSocket updates fed by live ROS subscriptions.
-- GPU performance and walking/noise behavior on the target runtime.
+- Isaac Sim 6.1 startup and actual aisle USD creation.
+- RTX camera graph, native OmniLidar creation, and ROS 2 writers.
+- `/clock`, TF, RGB, LiDAR, and ground-truth messages across the live native ROS/Zenoh graph.
+- Browser backend `/api/health` plus live RGB/LiDAR cache status.
+
+## Remaining external gate
+
+- RTAB-Map ICP odometry and 3D map accumulation are not runnable yet because the native Windows source build has no Windows SDK/MSVC libraries. The ROS 2 source checkout and repository launch/remappings are ready at the external Jazzy workspace; install Visual Studio Build Tools 2022 Desktop C++/Windows SDK, rerun the source build, then run Layers 9–11 of `TESTING_GUIDE.md`.
 
 ## Automated/development checks
 
@@ -48,13 +50,13 @@
 
 ## Important architecture
 
-The simulator publishes sensor observations and ground truth. Ground truth is never remapped to `/slam/odom`. RTAB-Map/ICP owns estimator odometry and `map -> odom`. The dashboard consumes ROS-visible caches, not Isaac internals.
+The simulator publishes sensor observations and ground truth. Ground truth is never remapped to `/slam/odom`. RTAB-Map/ICP owns estimator odometry and `map -> odom` once its native binaries are installed. The dashboard consumes ROS-visible caches, not Isaac internals.
 
 ## Known risks
 
-- The live machine is Windows 10 Home build 26200 and lacks Isaac Sim, ROS 2, and RTAB-Map on `PATH`.
-- Exact runtime support and current Isaac/ROS API behavior require a supported installation.
-- The browser point viewer uses a pinned Three.js module URL; live browser performance and offline CDN behavior remain to be verified.
+- The live machine is Windows 11 Home v25H2 build 26200 with Isaac Sim 6.1 and native ROS 2 Jazzy installed; RTAB-Map binaries remain gated on the Windows C++ toolchain.
+- RTAB-Map source is available in the external Jazzy workspace, but its native build still needs Visual Studio Build Tools 2022 Desktop C++ and the Windows SDK.
+- The browser point viewer uses a pinned Three.js module URL; backend ROS integration is verified, while browser rendering remains a visual QA step.
 
 ## Files to review first
 

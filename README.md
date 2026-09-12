@@ -4,9 +4,11 @@ This repository is a layered simulation harness for a grocery-store aisle sensor
 
 ## Current implementation state
 
-The dependency-light configuration, geometry, trajectory, transform, dashboard-state, and evaluation layers are implemented and covered by non-interactive tests. Isaac Sim, ROS 2, and RTAB-Map runtime integration is present as explicit launch/adaptor boundaries but is **implemented, not yet interactively verified** on this machine.
+The dependency-light core and the native Isaac runtime are implemented. Isaac Sim 6.1.0 is installed at `C:\isaacsim`; the compatibility checker passed on this Windows 11 Home 25H2 host with an RTX 4070 Ti, and the native ROS 2 Jazzy Pixi workspace is installed at `C:\IsaacSim-ros_workspaces\jazzy_ws`.
 
-The live host audit found Windows 10 Home build 26200, an NVIDIA RTX 4070 Ti, and no `ros2`, Isaac Sim, or `rtabmap` executable on `PATH`. See [GATE_HANDOFF.md](GATE_HANDOFF.md) and [TESTING_GUIDE.md](TESTING_GUIDE.md).
+The real runtime is `simulator/runtime/isaac_sim_runner.py`. It builds the USD aisle, publishes RGB and camera info through the Isaac ROS 2 bridge, publishes an RTX LiDAR PointCloud2 writer, publishes `/clock`, publishes the required TF chain, and publishes ground truth separately from SLAM. `scripts/run_dashboard.ps1` runs the ROS-fed localhost dashboard at `http://localhost:8080`.
+
+RTAB-Map ROS 2 source is checked out in the external Pixi workspace, but its native Windows build is currently blocked by the missing Windows SDK/MSVC libraries; the repository launch boundary and remappings are ready for the consolidated test once that toolchain is installed.
 
 ## Architecture
 

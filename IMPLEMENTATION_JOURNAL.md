@@ -3,16 +3,19 @@
 ## Phase 0 — live rediscovery
 
 **Date:** 2026-09-12
-**Status:** complete; runtime dependencies are not installed on this host.
+**Status:** Isaac/ROS runtime verified; RTAB-Map native Windows build remains blocked by the missing Windows C++ SDK.
 
 Observed live state:
 
-- Windows 10 Home, build 26200 (the prompt's Windows 11 assumption was not confirmed).
-- NVIDIA GeForce RTX 4070 Ti, driver `32.0.15.9571`; an AMD integrated adapter is also present.
+- Windows 11 Home v25H2, build 26200 (confirmed by Isaac's checker and runtime).
+- NVIDIA GeForce RTX 4070 Ti, driver `595.71`, 11.99 GB VRAM; an AMD integrated adapter is also present.
+- C: free space before installation: 841.6 GiB; Isaac archive MD5 matched NVIDIA's published `a07968e980072c9ca27b2166443e2d89`.
 - Repository is `Fallwindows/Simulation`, branch `master`, remote `origin` points to the expected GitHub SSH URL.
 - Port 8080 is free.
-- `ros2`, Isaac Sim, RTAB-Map, `rtabmap-console`, and `npm` are not on `PATH`.
-- Bundled Python 3.12 runtime is available under the local Codex runtime cache.
+- Isaac Sim 6.1.0 installed at `C:\isaacsim`; compatibility checker result: **PASSED**.
+- Pixi 0.80.0 and the current native Windows ROS 2 Jazzy workspace installed at `C:\IsaacSim-ros_workspaces\jazzy_ws`.
+- `rclpy`, `sensor_msgs_py`, FastAPI, Uvicorn, and OpenCV are available in the Pixi environment.
+- `rtabmap_ros` and `rtabmap` source are checked out in the external Pixi workspace, but CMake cannot link without Windows SDK libraries.
 
 Security cleanup:
 
@@ -38,32 +41,36 @@ Security cleanup:
 - Deterministic procedural aisle geometry: floor, two shelf rows, bays, levels, uprights, and seeded product proxies.
 - Straight and walking trajectories with deterministic bob, sway, yaw, pitch, and speed variation.
 - Quaternion and rigid-transform helpers, including camera optical-frame conversion.
-- Optional Isaac USD geometry adapter with delayed imports; runtime-specific sensor graph code remains isolated.
+- Optional Isaac USD geometry adapter with delayed imports plus the real Isaac 6.1 runner in `simulator/runtime/isaac_sim_runner.py`.
 - Dashboard state/cache, FastAPI endpoints, MJPEG route, LiDAR/map WebSocket routes, and minimal browser page.
 - ROS 2 topic contract and RTAB-Map LiDAR launch boundary with simulator truth kept separate from odometry.
 - ATE/RPE/distance metrics and run artifact serialization.
-- Windows-oriented scripts for dashboard, simulator preflight, mapping, and baseline orchestration.
+- Windows-oriented scripts for native Isaac runtime, Zenoh router, dashboard, mapping, and baseline orchestration.
 - Layered testing guide and implementation handoff.
 
 ## Checks
 
-- `python -m unittest discover -s tests -v` — 17 tests passing.
+- `python -m unittest discover -s tests -v` — 17 tests passing after the runtime additions.
 - deterministic preflight via `python -m simulator.runtime.sim_runner` — baseline, walking, and sensor-realism scenarios pass.
 - `python -m compileall -q simulator dashboard evaluation tests ros2_ws/src/grocery_sim_mapping` — passing.
 - staged `git diff --check` — passing before commit.
-- Isaac Sim sensor graph, ROS 2 message publication, FastAPI runtime, RTAB-Map, browser rendering, and GPU performance — not interactively verified on this host.
+- Isaac compatibility checker — passed.
+- Isaac headless runtime smoke — passed; actual aisle USD, camera ROS graph, native OmniLidar, clock graph, TF publisher, and ground-truth publisher executed.
+- Cross-process ROS via Zenoh — verified: camera image, camera info, LiDAR cloud, ground truth, `/clock`, and TF were discovered and received by Pixi ROS CLI processes.
+- Dashboard live integration — verified: `/api/health` passed and `/api/status` reported RGB and LiDAR connected with fresh samples and 29,498 LiDAR points.
+- RTAB-Map source build — attempted with Pixi clang-cl/Ninja; blocked at linker setup because `kernel32.lib`, `user32.lib`, `msvcrtd.lib`, and related Windows SDK libraries are absent.
 
 ## Version-sensitive runtime assumptions
 
-The live host has no Isaac/ROS installation to inspect. The runtime integration therefore avoids claiming a verified Isaac API version. The intended target must validate current RTX camera/LiDAR sensor graph creation, `omni:sensor:tickRate`, ROS 2 image/point-cloud writers, `/clock`, and TF publication before the first runtime session. The RTAB-Map launch is a boundary based on current ROS 2 naming and must be checked with the installed distribution.
+The runner follows the installed Isaac 6.1 examples: camera helpers and camera info use the current ROS bridge graph, LiDAR uses a schema-created native `OmniLidar` with the current tick-rate API and `RtxLidarROS2PublishPointCloud`, and `/clock` uses `ROS2PublishClock`. TF is published as a ROS `TFMessage` with the frozen contract frame IDs because Isaac's computed-tree helper emits `world` for the stage root.
 
 ## Known risks
 
-1. Windows 10 and RTX 4070 Ti may be outside the current supported Isaac Sim target, depending on the exact release.
-2. ROS 2 and RTAB-Map launch argument/executable names vary by distribution.
-3. The dashboard ROS bridge deliberately stops at the message-specific subscription boundary because `rclpy`, `cv_bridge`, and PointCloud2 packages are absent here.
-4. The browser page uses a pinned Three.js module for point display; live browser performance and offline CDN behavior remain to be verified.
+1. RTAB-Map native Windows compilation still needs an elevated Visual Studio Build Tools/Windows SDK install; the user-scoped installer found no applicable installer and the earlier elevated attempt was canceled.
+2. RTAB-Map source is present externally, but no `rtabmap_odom`/`rtabmap_slam` binaries are claimed until that toolchain completes.
+3. The dashboard uses raw ROS Image decoding with OpenCV and does not require `cv_bridge` at runtime.
+4. The browser page uses a pinned Three.js module for point display; ROS/backend integration is verified, while browser rendering remains a visual QA step.
 
 ## Git synchronization
 
-Implementation milestone committed as `9b123b677400541d1d849c4160ccff23624e449d`, handoff docs as `4deb9bb432ff4d055ca7cab8f0c73b37a6699346`, and stale credential-bearing handoff removal as `daabc6a880aa205a121c1b6ecb8858022f177fbe`; each was pushed to `origin/master` and remote SHA matched local SHA after verification.
+Earlier implementation milestones and handoff cleanup were pushed to `origin/master`. The current native Isaac/ROS runtime milestone is the verified working-tree update described above and is pushed after the final test pass; the exact SHA is recorded by the final handoff message.

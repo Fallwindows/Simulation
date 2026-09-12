@@ -9,4 +9,7 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rtabmap_odom</exec_depend>
   <exec_depend>rtabmap_slam</exec_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
 </package>

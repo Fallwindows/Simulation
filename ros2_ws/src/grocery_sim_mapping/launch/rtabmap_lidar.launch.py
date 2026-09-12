@@ -1,4 +1,9 @@
-"""RTAB-Map 3D LiDAR boundary; simulator truth is never wired as odometry."""
+"""RTAB-Map 3D LiDAR pipeline; simulator truth is never wired as odometry.
+
+The ICP odometry node consumes only ``/sim/lidar/points``.  RTAB-Map SLAM
+consumes that estimated odometry plus the ROS camera and publishes its own
+``cloud_map`` output on the dashboard contract ``/slam/map_cloud``.
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -42,6 +47,12 @@ def generate_launch_description():
                 "Grid/3D": True,
                 "Mem/IncrementalMemory": True,
             }],
-            remappings=[("scan_cloud", "/sim/lidar/points"), ("odom", "/slam/odom"), ("rgb/image", "/sim/camera/rgb/image_raw"), ("rgb/camera_info", "/sim/camera/rgb/camera_info"), ("mapData", "/slam/map_cloud")],
+            remappings=[
+                ("scan_cloud", "/sim/lidar/points"),
+                ("odom", "/slam/odom"),
+                ("rgb/image", "/sim/camera/rgb/image_raw"),
+                ("rgb/camera_info", "/sim/camera/rgb/camera_info"),
+                ("cloud_map", "/slam/map_cloud"),
+            ],
         ),
     ])
