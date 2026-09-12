@@ -92,3 +92,7 @@ The local repository is configured with the GitHub SSH remote and a dedicated wr
 - Remote verification: `git ls-remote origin refs/heads/master` returned `c310d60bfb2ad020bf3a84d28cedbc1a5dd97d1`.
 - Worktree was clean after the push.
 - A follow-up journal-only commit records this synchronization result.
+
+## Agent handoff documentation
+
+Added `AGENT_GITHUB_HANDOFF.md` with the remote URL, repository-scoped deploy-key arrangement, verification commands, normal push workflow, and security constraints for future agents.
