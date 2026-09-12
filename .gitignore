@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# ROS 2 / colcon build outputs
+build/
+install/
+log/
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Isaac Sim / Omniverse runtime outputs and caches
+.nvidia-omniverse/
+ovpkg_cache/
+isaac_sim_cache/
+*.kit
+
+# Dashboard and frontend dependencies/build outputs
+node_modules/
+dashboard/web/dist/
+dashboard/web/.vite/
+
+# Runtime data and experiment outputs
+runs/
+experiments/
+*.db
+*.db-shm
+*.db-wal
+*.bag
+*.mcap
+*.rosbag/
+*.pcd
+*.ply
+*.png
+*.jpg
+*.jpeg
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
