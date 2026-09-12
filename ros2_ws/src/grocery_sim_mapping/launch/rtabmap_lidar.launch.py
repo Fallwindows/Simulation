@@ -41,11 +41,18 @@ def generate_launch_description():
                 "odom_frame_id": "odom",
                 "map_frame_id": "map",
                 "subscribe_scan_cloud": True,
-                "subscribe_rgb": True,
+                # The camera remains available on the ROS contract, but a
+                # depth image is not part of the baseline RGB sensor.  Use
+                # RTAB-Map's native LiDAR-only 3D pipeline here; RGB can be
+                # enabled later with an RGB-D boundary.
+                "subscribe_rgb": False,
                 "subscribe_depth": False,
-                "approx_sync": True,
-                "Grid/3D": True,
-                "Mem/IncrementalMemory": True,
+                # RTAB-Map internal parameters must be strings.  Passing
+                # Python bools for slash-qualified keys makes the native
+                # Windows node abort while applying parameter overrides.
+                "Grid/3D": "true",
+                "Grid/Sensor": "0",
+                "Mem/IncrementalMemory": "true",
             }],
             remappings=[
                 ("scan_cloud", "/sim/lidar/points"),

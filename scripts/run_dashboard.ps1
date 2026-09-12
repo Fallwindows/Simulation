@@ -1,11 +1,17 @@
 param(
-  [string]$Python = "C:\Users\suyog\AppData\Local\pixi\bin\pixi.exe",
+  [string]$PixiPath = "",
+  [string]$RosWorkspace = "",
   [int]$Port = 8080
 )
 $ErrorActionPreference = "Stop"
-if ($Python -like "*pixi.exe") {
-  & $Python run --manifest-path "C:\IsaacSim-ros_workspaces\jazzy_ws\pixi.toml" python -m dashboard.backend.serve --host 127.0.0.1 --port $Port
-} else {
-  & $Python -m dashboard.backend.serve --host 127.0.0.1 --port $Port
+. (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")
+$pixi = Resolve-PixiExecutable $PixiPath
+$workspace = Resolve-RosWorkspace $RosWorkspace
+$repo = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
+Push-Location $repo
+try {
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m dashboard.backend.serve --host 127.0.0.1 --port $Port
+} finally {
+  Pop-Location
 }
 if ($LASTEXITCODE -ne 0) { throw "Dashboard exited with code $LASTEXITCODE" }

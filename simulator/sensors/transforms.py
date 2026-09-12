@@ -23,6 +23,32 @@ def quaternion_from_rpy_deg(roll_deg: float, pitch_deg: float, yaw_deg: float) -
     return quaternion_normalize((sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy, cr * cp * cy + sr * sp * sy))
 
 
+def rpy_deg_from_quaternion(q: Quaternion) -> tuple[float, float, float]:
+    """Convert an ``xyzw`` quaternion to XYZ roll/pitch/yaw degrees.
+
+    The conversion is the inverse of :func:`quaternion_from_rpy_deg` for the
+    non-singular orientations used by the sensor trajectories.  Keeping this
+    helper in the dependency-free transform module lets the Isaac runtime
+    apply the complete sampled pose to USD without importing Isaac in tests.
+    """
+    x, y, z, w = quaternion_normalize(q)
+
+    sin_roll = 2.0 * (w * x + y * z)
+    cos_roll = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sin_roll, cos_roll)
+
+    sin_pitch = 2.0 * (w * y - z * x)
+    if abs(sin_pitch) >= 1.0:
+        pitch = math.copysign(math.pi / 2.0, sin_pitch)
+    else:
+        pitch = math.asin(sin_pitch)
+
+    sin_yaw = 2.0 * (w * z + x * y)
+    cos_yaw = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(sin_yaw, cos_yaw)
+    return tuple(math.degrees(value) for value in (roll, pitch, yaw))  # type: ignore[return-value]
+
+
 def quaternion_multiply(a: Quaternion, b: Quaternion) -> Quaternion:
     ax, ay, az, aw = a
     bx, by, bz, bw = b

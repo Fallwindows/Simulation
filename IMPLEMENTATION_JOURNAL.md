@@ -3,7 +3,7 @@
 ## Phase 0 — live rediscovery
 
 **Date:** 2026-09-12
-**Status:** Isaac/ROS runtime verified; RTAB-Map native Windows build remains blocked by the missing Windows C++ SDK.
+**Status:** Isaac/ROS runtime and native RTAB-Map build verified; implementation is ready for the consolidated runtime test session.
 
 Observed live state:
 
@@ -15,7 +15,7 @@ Observed live state:
 - Isaac Sim 6.1.0 installed at `C:\isaacsim`; compatibility checker result: **PASSED**.
 - Pixi 0.80.0 and the current native Windows ROS 2 Jazzy workspace installed at `C:\IsaacSim-ros_workspaces\jazzy_ws`.
 - `rclpy`, `sensor_msgs_py`, FastAPI, Uvicorn, and OpenCV are available in the Pixi environment.
-- `rtabmap_ros` and `rtabmap` source are checked out in the external Pixi workspace, but CMake cannot link without Windows SDK libraries.
+- `rtabmap_ros` and `rtabmap` source are checked out in the external Pixi workspace and built with Visual Studio Build Tools 2022, MSVC v143, CMake/Ninja, PCL, and the Windows 11 SDK.
 
 Security cleanup:
 
@@ -46,11 +46,13 @@ Security cleanup:
 - ROS 2 topic contract and RTAB-Map LiDAR launch boundary with simulator truth kept separate from odometry.
 - ATE/RPE/distance metrics and run artifact serialization.
 - Windows-oriented scripts for native Isaac runtime, Zenoh router, dashboard, mapping, and baseline orchestration.
+- Walking USD runtime applies the complete sampled trajectory orientation; `run_sim.ps1` supports GUI by default and explicit `-Headless` mode; Pixi/workspace paths are resolved from PATH/environment or explicit parameters.
+- Browser LiDAR and accumulated-map viewers consume `/ws/lidar` and `/ws/map` through separate WebSocket/viewer instances.
 - Layered testing guide and implementation handoff.
 
 ## Checks
 
-- `python -m unittest discover -s tests -v` — 17 tests passing after the runtime additions.
+- `python -m unittest discover -s tests -v` — passing after the runtime, launcher, and dashboard additions.
 - deterministic preflight via `python -m simulator.runtime.sim_runner` — baseline, walking, and sensor-realism scenarios pass.
 - `python -m compileall -q simulator dashboard evaluation tests ros2_ws/src/grocery_sim_mapping` — passing.
 - staged `git diff --check` — passing before commit.
@@ -58,7 +60,10 @@ Security cleanup:
 - Isaac headless runtime smoke — passed; actual aisle USD, camera ROS graph, native OmniLidar, clock graph, TF publisher, and ground-truth publisher executed.
 - Cross-process ROS via Zenoh — verified: camera image, camera info, LiDAR cloud, ground truth, `/clock`, and TF were discovered and received by Pixi ROS CLI processes.
 - Dashboard live integration — verified: `/api/health` passed and `/api/status` reported RGB and LiDAR connected with fresh samples and 29,498 LiDAR points.
-- RTAB-Map source build — attempted with Pixi clang-cl/Ninja; blocked at linker setup because `kernel32.lib`, `user32.lib`, `msvcrtd.lib`, and related Windows SDK libraries are absent.
+- Visual Studio Build Tools verification — Build Tools 17.14.40, MSVC `14.44.35207`, CMake tools, and Windows SDK `10.0.22621.0` present.
+- RTAB-Map native build — `rtabmap`, `rtabmap_msgs`, `rtabmap_conversions`, `rtabmap_sync`, `rtabmap_util`, `rtabmap_odom`, and `rtabmap_slam` built successfully with Ninja/clang-cl; `rtabmap_odom` executables and `rtabmap_slam/rtabmap.exe` verified in the install tree.
+- ROS package verification — `ros2 pkg prefix rtabmap_odom` and `ros2 pkg prefix rtabmap_slam` resolve successfully; `ros2 pkg executables` lists `icp_odometry.exe`, `rgbd_odometry.exe`, `stereo_odometry.exe`, and `rtabmap.exe`.
+- RTAB-Map live launch — initial Windows parameter typing caused `rtabmap` to exit with `3221226505`; changing slash-qualified RTAB-Map internal parameters to strings and using the native LiDAR-only 3D path fixed startup. A real Isaac 180-frame run produced `/slam/odom` processing and 297 `/slam/map_cloud` points consumed by the dashboard.
 
 ## Version-sensitive runtime assumptions
 
@@ -66,10 +71,9 @@ The runner follows the installed Isaac 6.1 examples: camera helpers and camera i
 
 ## Known risks
 
-1. RTAB-Map native Windows compilation still needs an elevated Visual Studio Build Tools/Windows SDK install; the user-scoped installer found no applicable installer and the earlier elevated attempt was canceled.
-2. RTAB-Map source is present externally, but no `rtabmap_odom`/`rtabmap_slam` binaries are claimed until that toolchain completes.
-3. The dashboard uses raw ROS Image decoding with OpenCV and does not require `cv_bridge` at runtime.
-4. The browser page uses a pinned Three.js module for point display; ROS/backend integration is verified, while browser rendering remains a visual QA step.
+1. RTAB-Map optional integrations such as `grid_map`, AprilTag, and ArUco were not required for the LiDAR ICP/SLAM baseline.
+2. The dashboard uses raw ROS Image decoding with OpenCV and does not require `cv_bridge` at runtime.
+3. The browser page uses a pinned Three.js module for point display; ROS/backend integration is verified, while browser rendering and map quality remain visual/runtime QA steps.
 
 ## Git synchronization
 

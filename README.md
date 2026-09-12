@@ -8,7 +8,7 @@ The dependency-light core and the native Isaac runtime are implemented. Isaac Si
 
 The real runtime is `simulator/runtime/isaac_sim_runner.py`. It builds the USD aisle, publishes RGB and camera info through the Isaac ROS 2 bridge, publishes an RTX LiDAR PointCloud2 writer, publishes `/clock`, publishes the required TF chain, and publishes ground truth separately from SLAM. `scripts/run_dashboard.ps1` runs the ROS-fed localhost dashboard at `http://localhost:8080`.
 
-RTAB-Map ROS 2 source is checked out in the external Pixi workspace, but its native Windows build is currently blocked by the missing Windows SDK/MSVC libraries; the repository launch boundary and remappings are ready for the consolidated test once that toolchain is installed.
+RTAB-Map ROS 2 and its native `rtabmap` core are now built in the external Pixi workspace with Visual Studio Build Tools 2022, MSVC v143, CMake/Ninja, PCL, and the Windows 11 SDK. The installed `rtabmap_odom` and `rtabmap_slam` executables are verified; the consolidated runtime session remains the place to validate estimator/map quality.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ python -m unittest discover -s tests -v
 python -m simulator.runtime.sim_runner --scenario config/scenarios/baseline_straight.yaml --steps 10
 ```
 
-On a supported ROS 2 + Isaac Sim environment, use the PowerShell scripts in `scripts/`. The dashboard is intended to run at [http://localhost:8080](http://localhost:8080).
+On a supported ROS 2 + Isaac Sim environment, use the PowerShell scripts in `scripts/`. The dashboard is intended to run at [http://localhost:8080](http://localhost:8080). `run_sim.ps1` opens the Isaac viewport by default; add `-Headless` for non-interactive runs. Pixi is resolved from PATH, then the normal per-user Pixi installation, or an explicit `-PixiPath`.
 
 ## Configuration
 

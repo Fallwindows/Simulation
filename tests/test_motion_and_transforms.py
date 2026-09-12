@@ -5,7 +5,13 @@ from pathlib import Path
 from simulator.config.loader import load_scenario
 from simulator.motion.trajectory import StraightTrajectory, WalkingTrajectory
 from simulator.sensors.rig import assert_no_ground_truth_odometry_leakage, build_sensor_rig_description
-from simulator.sensors.transforms import Transform, camera_optical_quaternion, transform_point
+from simulator.sensors.transforms import (
+    Transform,
+    camera_optical_quaternion,
+    quaternion_from_rpy_deg,
+    rpy_deg_from_quaternion,
+    transform_point,
+)
 
 
 class MotionTests(unittest.TestCase):
@@ -29,6 +35,12 @@ class MotionTests(unittest.TestCase):
         result = transform_point(transform, (1.0, 0.0, 0.0))
         self.assertEqual(len(result), 3)
         self.assertTrue(all(math.isfinite(v) for v in result))
+
+    def test_rpy_round_trip_preserves_full_orientation(self):
+        original = (0.0, -7.5, 4.25)
+        recovered = rpy_deg_from_quaternion(quaternion_from_rpy_deg(*original))
+        for expected, actual in zip(original, recovered):
+            self.assertAlmostEqual(expected, actual, places=6)
 
     def test_sensor_rig_contract_keeps_truth_separate(self):
         rig = build_sensor_rig_description(self.scenario.camera, self.scenario.lidar)

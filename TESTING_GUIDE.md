@@ -1,6 +1,6 @@
 # One-Sitting Layer-by-Layer Testing Guide
 
-This guide is intentionally ordered from lowest-level runtime sanity to the full stack. On the current host, Layers 1–7 plus the dashboard ROS/backend portions of Layers 5 and 8 are verified with Isaac Sim 6.1 and native ROS 2 Jazzy Pixi. Browser visual QA and Layers 9–11 remain open; Layers 9–11 are gated on the native RTAB-Map Windows build.
+This guide is intentionally ordered from lowest-level runtime sanity to the full stack. On the current host, the Isaac/ROS runtime, dashboard backend, and native RTAB-Map binaries have passed non-interactive checks. Browser rendering, estimator behavior, map quality, and walking motion remain part of the consolidated user session.
 
 Before starting, open a terminal for each long-running process, keep logs visible, and record screenshots plus the exact command for every failed layer. Use simulation time everywhere.
 
@@ -8,7 +8,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Confirm the target can run the intended stack.
 **Prerequisites:** Isaac Sim, ROS 2, RTAB-Map binaries, NVIDIA driver.
-**Commands:** `C:\isaacsim\isaac-sim.compatibility_check.bat`; `C:\Users\suyog\AppData\Local\pixi\bin\pixi.exe run ros2 --help`; `C:\Users\suyog\AppData\Local\pixi\bin\pixi.exe run ros2 pkg prefix grocery_sim_mapping`.
+**Commands:** `C:\isaacsim\isaac-sim.compatibility_check.bat`; `pixi run ros2 --help`; `pixi run ros2 pkg prefix grocery_sim_mapping`; `pixi run ros2 pkg prefix rtabmap_odom`; `pixi run ros2 pkg prefix rtabmap_slam`.
 **What should open:** Nothing; commands should return tool/version information.
 **What success looks like:** Target OS/GPU and all required commands are present.
 **What failure looks like:** Missing command, unsupported runtime, or GPU initialization error.
@@ -19,8 +19,8 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Verify deterministic procedural geometry.
 **Prerequisites:** Layer 1; Isaac Sim session.
-**Commands:** `./scripts/run_sim.ps1 -Frames 1200 -Realtime -StartZenohRouter`; run `scripts/run_sim.ps1 -PreflightOnly` first if desired.
-**What should open:** The Isaac runtime log should show a built stage with a floor, two shelf rows, multiple bays/levels, and simple product proxies; the repository launcher runs headless for repeatable ROS testing.
+**Commands:** `./scripts/run_sim.ps1 -Frames 1200 -Realtime -StartZenohRouter`; add `-Headless` for a non-interactive run, or omit it to open the Isaac GUI; run `scripts/run_sim.ps1 -PreflightOnly` first if desired.
+**What should open:** The Isaac runtime log should show a built stage with a floor, two shelf rows, multiple bays/levels, and simple product proxies; the repository launcher opens the viewport by default and supports `-Headless` for repeatable ROS testing.
 **What success looks like:** Shelves are upright, aisle is navigable, lighting is usable, and repeated fixed-seed loads match.
 **What failure looks like:** Empty stage, overlapping shelves, missing products, or runtime import errors.
 **Evidence:** Scene screenshot and preflight JSON.
@@ -95,9 +95,9 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 ## 9. RTAB-Map odometry
 
 **Goal:** Verify estimator odometry is produced from LiDAR, not truth.
-**Prerequisites:** Layers 6–7; RTAB-Map package installed.
+**Prerequisites:** Layers 6–7; the native `rtabmap_odom` and `rtabmap_slam` packages verified in Layer 1.
 **Commands:** `./scripts/run_mapping.ps1`; `ros2 topic hz /slam/odom`; `ros2 topic echo --once /slam/odom`.
-**What should open:** RTAB-Map/ICP logs and odometry messages.
+**What should open:** RTAB-Map/ICP logs and odometry messages. The baseline launch uses the simulator's LiDAR cloud for ICP/SLAM; RGB remains available for the separate ROS/dashboard camera path because the baseline has no RGB-D stream.
 **What success looks like:** `/slam/odom` advances from LiDAR input and has the expected `odom` relationship.
 **What failure looks like:** Node fails to launch, no odometry, or launch remaps `/sim/ground_truth/pose` into odometry.
 **Evidence:** Launch log, odom message, and `ros2 node info`.
@@ -119,8 +119,8 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 **Goal:** Verify map cloud reaches the dashboard.
 **Prerequisites:** Layers 8–10.
 **Commands:** Keep dashboard running and reload the browser.
-**What should open:** Map updates in the diagnostic panel; `/api/status` map age remains low.
-**What success looks like:** Map transport is independent from LiDAR browser decimation.
+**What should open:** LiDAR and accumulated-map panels update independently; `/api/status` map age remains low.
+**What success looks like:** Map transport is independent from LiDAR browser decimation and the two panels remain independently resettable.
 **What failure looks like:** Live map topic exists but browser remains stale.
 **Evidence:** Screenshot, `/api/status`, and map topic rate.
 **Stop/cleanup:** Stop long-running processes.
@@ -142,7 +142,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 **Prerequisites:** Layers 1–12.
 **Commands:** Load `config/scenarios/walking_baseline.yaml`; repeat Layers 3–12.
 **What should open:** Rig follows the aisle with small vertical bob, lateral sway, and orientation oscillation.
-**What success looks like:** Motion is fixed-seed reproducible and sensors remain attached.
+**What success looks like:** Motion is fixed-seed reproducible, the actual USD `SensorRig` follows the full sampled pitch/yaw orientation, and sensors remain attached.
 **What failure looks like:** Excessive oscillation, aisle collisions, or non-deterministic replay.
 **Evidence:** Pose trace and metrics comparison.
 **Stop/cleanup:** Stop scenario and restore baseline config.

@@ -352,9 +352,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             timestamp_s = frame / 60.0
             sample = trajectory.sample(timestamp_s)
             rig_api.SetTranslate(Gf.Vec3d(*sample.position_m))
-            # The trajectory's quaternion is generated from RPY; the runtime
-            # contract uses yaw for the rig's authored USD transform.
-            rig_api.SetRotate(Gf.Vec3f(0.0, 0.0, scenario.trajectory.yaw_deg), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+            # Apply the complete sampled walking/trajectory orientation to the
+            # actual USD rig.  The TF and ground-truth messages use this same
+            # quaternion, so USD, ROS TF, and the pose topic remain aligned.
+            from simulator.sensors.transforms import rpy_deg_from_quaternion
+
+            sampled_rpy_deg = rpy_deg_from_quaternion(sample.orientation_xyzw)
+            rig_api.SetRotate(Gf.Vec3f(*sampled_rpy_deg), UsdGeom.XformCommonAPI.RotationOrderXYZ)
             _publish_ground_truth(node, gt_pub, trajectory, timestamp_s)
             _publish_tf(tf_pub, scenario, sample, timestamp_s)
             simulation_app.update()
@@ -379,6 +383,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 "ground_truth_pose": "/sim/ground_truth/pose",
             },
             "frames": ["sim_world", "sensor_rig", "camera_link", "camera_optical_frame", "lidar_link"],
+            "rig_orientation_source": "trajectory.sample.orientation_xyzw",
+            "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
             "ground_truth_odometry_leakage": False,
         }
         # Persist before SimulationApp teardown.  Isaac's shutdown sequence
