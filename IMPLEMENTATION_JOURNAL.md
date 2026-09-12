@@ -47,9 +47,10 @@ Security cleanup:
 
 ## Checks
 
-- `python -m unittest discover -s tests -v` — passing after documentation files were added.
-- deterministic scenario preflight via `python -m simulator.runtime.sim_runner` — pending final rerun after documentation-only changes.
-- `git diff --check` — required before commit/push.
+- `python -m unittest discover -s tests -v` — 17 tests passing.
+- deterministic preflight via `python -m simulator.runtime.sim_runner` — baseline, walking, and sensor-realism scenarios pass.
+- `python -m compileall -q simulator dashboard evaluation tests ros2_ws/src/grocery_sim_mapping` — passing.
+- staged `git diff --check` — passing before commit.
 - Isaac Sim sensor graph, ROS 2 message publication, FastAPI runtime, RTAB-Map, browser rendering, and GPU performance — not interactively verified on this host.
 
 ## Version-sensitive runtime assumptions
@@ -65,4 +66,4 @@ The live host has no Isaac/ROS installation to inspect. The runtime integration 
 
 ## Git synchronization
 
-The initial Gate 0 history already exists on `origin/master`. This implementation will be committed as a coherent milestone after the final checks and remote SHA verification.
+Implementation milestone committed as `9b123b677400541d1d849c4160ccff23624e449d` and pushed to `origin/master`; remote SHA matched local SHA after verification.
