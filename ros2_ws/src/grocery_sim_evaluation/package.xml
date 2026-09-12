@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>grocery_sim_evaluation</name>
+  <version>0.1.0</version>
+  <description>Offline trajectory evaluation helpers for simulation runs.</description>
+  <maintainer email="maintainer@example.invalid">Simulation Maintainer</maintainer>
+  <license>MIT</license>
+</package>

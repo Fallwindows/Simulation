@@ -1,0 +1,14 @@
+{
+  "name": "baseline_aisle",
+  "length_m": 24.0,
+  "width_m": 6.0,
+  "shelf_height_m": 2.2,
+  "shelf_depth_m": 0.55,
+  "bay_width_m": 1.2,
+  "shelf_levels": 4,
+  "product_density": 0.72,
+  "seed": 1,
+  "floor_z_m": 0.0,
+  "shelf_rows_y_m": [-1.65, 1.65],
+  "lighting_lux": 450.0
+}

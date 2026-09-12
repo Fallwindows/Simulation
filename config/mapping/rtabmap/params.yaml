@@ -1,0 +1,17 @@
+{
+  "use_sim_time": true,
+  "frame_id": "lidar_link",
+  "odom_frame_id": "odom",
+  "map_frame_id": "map",
+  "subscribe_scan_cloud": true,
+  "subscribe_rgb": true,
+  "subscribe_depth": false,
+  "subscribe_odom_info": true,
+  "approx_sync": true,
+  "queue_size": 30,
+  "Reg/Strategy": 1,
+  "RGBD/ProximityBySpace": true,
+  "Grid/3D": true,
+  "Grid/RangeMax": 60.0,
+  "Optimizer/Strategy": 2
+}

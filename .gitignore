@@ -29,12 +29,14 @@ dashboard/web/.vite/
 # Runtime data and experiment outputs
 runs/
 experiments/
+*.log
 *.db
 *.db-shm
 *.db-wal
 *.bag
 *.mcap
 *.rosbag/
+dashboard/web/.cache/
 *.pcd
 *.ply
 *.png

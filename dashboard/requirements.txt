@@ -1,0 +1,3 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+# Runtime deployment also needs the ROS 2 distribution's rclpy/cv_bridge packages.

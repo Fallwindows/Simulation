@@ -1,0 +1,30 @@
+{
+  "frames": {
+    "sim_world": "sim_world",
+    "sensor_rig": "sensor_rig",
+    "camera_link": "camera_link",
+    "camera_optical": "camera_optical_frame",
+    "lidar_link": "lidar_link",
+    "map": "map",
+    "odom": "odom"
+  },
+  "topics": {
+    "clock": "/clock",
+    "rgb_image": "/sim/camera/rgb/image_raw",
+    "rgb_camera_info": "/sim/camera/rgb/camera_info",
+    "lidar_points": "/sim/lidar/points",
+    "ground_truth_pose": "/sim/ground_truth/pose",
+    "estimated_odom": "/slam/odom",
+    "map_points": "/slam/map_cloud"
+  },
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "browser_point_budget": 50000
+  },
+  "units": "SI",
+  "ownership": {
+    "sim_world_to_rig": "simulator_ground_truth",
+    "map_to_odom": "slam_only"
+  }
+}

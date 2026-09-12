@@ -1,0 +1,8 @@
+{
+  "name": "baseline_straight",
+  "environment": "../environments/baseline_aisle.yaml",
+  "sensors": "../sensors/baseline_rgb_lidar.yaml",
+  "trajectory": "../trajectories/straight.yaml",
+  "mapping": "../mapping/rtabmap/params.yaml",
+  "seed": 1
+}

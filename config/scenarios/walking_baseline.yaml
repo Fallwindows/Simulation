@@ -1,0 +1,8 @@
+{
+  "name": "walking_baseline",
+  "environment": "../environments/baseline_aisle.yaml",
+  "sensors": "../sensors/baseline_rgb_lidar.yaml",
+  "trajectory": "../trajectories/walking.yaml",
+  "mapping": "../mapping/rtabmap/params.yaml",
+  "seed": 1
+}

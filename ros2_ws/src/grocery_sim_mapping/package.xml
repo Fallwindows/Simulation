@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>grocery_sim_mapping</name>
+  <version>0.1.0</version>
+  <description>RTAB-Map launch boundary for the grocery aisle simulator.</description>
+  <maintainer email="maintainer@example.invalid">Simulation Maintainer</maintainer>
+  <license>MIT</license>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rtabmap_odom</exec_depend>
+  <exec_depend>rtabmap_slam</exec_depend>
+</package>

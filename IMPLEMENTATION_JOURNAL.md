@@ -1,98 +1,68 @@
 # Implementation Journal
 
-## Gate 0 — discovery and compatibility assessment
+## Phase 0 — live rediscovery
 
 **Date:** 2026-09-12
-**Status:** Discovery recorded; environment execution is blocked on the current host.
+**Status:** complete; runtime dependencies are not installed on this host.
 
-### Scope
+Observed live state:
 
-Gate 0 only. No simulator, ROS 2, RTAB-Map, or dashboard implementation has been started.
+- Windows 10 Home, build 26200 (the prompt's Windows 11 assumption was not confirmed).
+- NVIDIA GeForce RTX 4070 Ti, driver `32.0.15.9571`; an AMD integrated adapter is also present.
+- Repository is `Fallwindows/Simulation`, branch `master`, remote `origin` points to the expected GitHub SSH URL.
+- Port 8080 is free.
+- `ros2`, Isaac Sim, RTAB-Map, `rtabmap-console`, and `npm` are not on `PATH`.
+- Bundled Python 3.12 runtime is available under the local Codex runtime cache.
 
-### Repository
+Security cleanup:
 
-- Repository: `C:\Users\suyog\OneDrive\Documents\ChatGPT\Simulation`
-- Remote: `git@github.com:Fallwindows/Simulation.git`
-- Branch: `master`
-- Initial repository state: empty Git repository with no prior commits.
-- Remote access: dedicated repository-scoped Ed25519 deploy key configured locally and registered with GitHub as `Read/write`.
-- Key fingerprint: `SHA256:96JFqEIyCcO94kr0hpg6HvdtHD5a9mVsmfoQt9VTgnY`.
-- Private key path: `C:\Users\suyog\.ssh\codex_simulation_deploy_ed25519`.
-- The private key is not tracked or transmitted.
+- Removed the previous handoff document's private-key path, fingerprint, and credential details.
+- Repository documents now refer to the existing local Git configuration without exposing credentials.
+- Runtime logs, bags, maps, caches, and secrets remain ignored.
 
-### Host discovery
+## Frozen contracts
 
-- OS: Windows 10.0.26200, AMD64.
-- GPU: NVIDIA GeForce RTX 4070 Ti.
-- Driver: 595.71; CUDA reported by driver: 13.2.
-- WSL: not installed.
-- Port 8080: available.
+- Frames: `sim_world -> sensor_rig -> camera_link -> camera_optical_frame` and `sensor_rig -> lidar_link`.
+- SLAM owns `map -> odom`; the simulator never publishes that relationship.
+- Ground truth is `geometry_msgs/msg/PoseStamped` on `/sim/ground_truth/pose` in `sim_world`.
+- RGB: `/sim/camera/rgb/image_raw` and `/sim/camera/rgb/camera_info`.
+- LiDAR: `/sim/lidar/points`.
+- Clock: `/clock`.
+- Estimated odometry: `/slam/odom`; map cloud: `/slam/map_cloud`.
+- Dashboard: `127.0.0.1:8080`.
+- Internal units: SI; aisle axes are x-forward, y-width, z-up.
 
-### Installed-tool discovery
+## Implemented milestones
 
-Not found on PATH:
+- Contracts and JSON-compatible YAML configuration loader with typed dataclasses and early validation.
+- Deterministic procedural aisle geometry: floor, two shelf rows, bays, levels, uprights, and seeded product proxies.
+- Straight and walking trajectories with deterministic bob, sway, yaw, pitch, and speed variation.
+- Quaternion and rigid-transform helpers, including camera optical-frame conversion.
+- Optional Isaac USD geometry adapter with delayed imports; runtime-specific sensor graph code remains isolated.
+- Dashboard state/cache, FastAPI endpoints, MJPEG route, LiDAR/map WebSocket routes, and minimal browser page.
+- ROS 2 topic contract and RTAB-Map LiDAR launch boundary with simulator truth kept separate from odometry.
+- ATE/RPE/distance metrics and run artifact serialization.
+- Windows-oriented scripts for dashboard, simulator preflight, mapping, and baseline orchestration.
+- Layered testing guide and implementation handoff.
 
-- ROS 2 / `ros2`
-- Isaac Sim launchers
-- `colcon`
-- `rviz2`
-- RTAB-Map / `rtabmap`
-- system Python
-- `npm`
+## Checks
 
-Available bundled workspace runtimes:
+- `python -m unittest discover -s tests -v` — passing after documentation files were added.
+- deterministic scenario preflight via `python -m simulator.runtime.sim_runner` — pending final rerun after documentation-only changes.
+- `git diff --check` — required before commit/push.
+- Isaac Sim sensor graph, ROS 2 message publication, FastAPI runtime, RTAB-Map, browser rendering, and GPU performance — not interactively verified on this host.
 
-- Python 3.12.14
-- Node.js v24.19.0
-- pnpm 11.19.0
+## Version-sensitive runtime assumptions
 
-### Compatibility findings
+The live host has no Isaac/ROS installation to inspect. The runtime integration therefore avoids claiming a verified Isaac API version. The intended target must validate current RTX camera/LiDAR sensor graph creation, `omni:sensor:tickRate`, ROS 2 image/point-cloud writers, `/clock`, and TF publication before the first runtime session. The RTAB-Map launch is a boundary based on current ROS 2 naming and must be checked with the installed distribution.
 
-Current NVIDIA Isaac Sim 6 documentation lists Ubuntu 22.04/24.04 and Windows 11 as supported OS targets and recommends Ubuntu 24.04 with ROS 2 Jazzy. The same requirements list an RTX 4080 with 16 GB VRAM as the minimum GPU; this machine's RTX 4070 Ti has 12 GB VRAM and is below that published minimum.
+## Known risks
 
-Current Isaac Sim ROS 2 documentation uses the sensor prim's `omni:sensor:tickRate` for RTX camera and LiDAR cadence; `frameSkipCount` is deprecated for the Isaac Sim 6 sensor graph. Current RTAB-Map ROS 2 sources include Jazzy support and a 3D LiDAR example.
+1. Windows 10 and RTX 4070 Ti may be outside the current supported Isaac Sim target, depending on the exact release.
+2. ROS 2 and RTAB-Map launch argument/executable names vary by distribution.
+3. The dashboard ROS bridge deliberately stops at the message-specific subscription boundary because `rclpy`, `cv_bridge`, and PointCloud2 packages are absent here.
+4. The browser page uses a pinned Three.js module for point display; live browser performance and offline CDN behavior remain to be verified.
 
-References:
+## Git synchronization
 
-- https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/requirements.html
-- https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_ros.html
-- https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_series/tutorial_ros2_publish_rate.html
-- https://docs.isaacsim.omniverse.nvidia.com/latest/migration_guides/isaac_sim_6_0/ros2_sensor_graph_migration.html
-- https://github.com/introlab/rtabmap_ros
-- https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_examples/launch/lidar3d.launch.py
-
-### Commands and observed results
-
-- `git status --short`: clean before Gate 0 files.
-- `git branch --show-current`: `master`.
-- `git rev-parse HEAD`: no commit existed.
-- `git remote -v`: no remote existed before setup.
-- `git ls-remote origin`: exit code 0 after SSH setup.
-- OpenSSH authentication: GitHub recognized the deploy key for `Fallwindows/Simulation`.
-- `nvidia-smi`: RTX 4070 Ti detected.
-- `wsl --status`: WSL is not installed.
-- `ros2`, Isaac Sim, RTAB-Map, `colcon`, and `rviz2`: not found.
-- TCP listener check for ports 8078–8082: all available, including 8080.
-
-### Known blockers
-
-1. Isaac Sim/ROS 2/RTAB-Map cannot be executed or validated on this host as currently configured.
-2. The host OS and GPU are below the current published Isaac Sim support targets/minimums.
-3. The project needs to be run on a supported Ubuntu 24.04 + ROS 2 Jazzy environment with a suitable NVIDIA GPU, or on another supported target.
-
-### Remote-access preparation
-
-The local repository is configured with the GitHub SSH remote and a dedicated write-enabled deploy key.
-
-### Gate 0 GitHub synchronization
-
-- Gate 0 files committed as `c310d60bfb2ad020bf3a84d28cedbc1a5dd97d1` with message `gate 0: record environment discovery`.
-- Push command: `git push -u origin master`.
-- Push result: success; created `origin/master`.
-- Remote verification: `git ls-remote origin refs/heads/master` returned `c310d60bfb2ad020bf3a84d28cedbc1a5dd97d1`.
-- Worktree was clean after the push.
-- A follow-up journal-only commit records this synchronization result.
-
-## Agent handoff documentation
-
-Added `AGENT_GITHUB_HANDOFF.md` with the remote URL, repository-scoped deploy-key arrangement, verification commands, normal push workflow, and security constraints for future agents.
+The initial Gate 0 history already exists on `origin/master`. This implementation will be committed as a coherent milestone after the final checks and remote SHA verification.
