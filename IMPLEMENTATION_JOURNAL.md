@@ -66,4 +66,4 @@ The live host has no Isaac/ROS installation to inspect. The runtime integration 
 
 ## Git synchronization
 
-Implementation milestone committed as `9b123b677400541d1d849c4160ccff23624e449d` and pushed to `origin/master`; remote SHA matched local SHA after verification.
+Implementation milestone committed as `9b123b677400541d1d849c4160ccff23624e449d`, handoff docs as `4deb9bb432ff4d055ca7cab8f0c73b37a6699346`, and stale credential-bearing handoff removal as `daabc6a880aa205a121c1b6ecb8858022f177fbe`; each was pushed to `origin/master` and remote SHA matched local SHA after verification.
