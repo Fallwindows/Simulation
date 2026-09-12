@@ -6,9 +6,9 @@ This repository is a layered simulation harness for a grocery-store aisle sensor
 
 The dependency-light core and the native Isaac runtime are implemented. Isaac Sim 6.1.0 is installed at `C:\isaacsim`; the compatibility checker passed on this Windows 11 Home 25H2 host with an RTX 4070 Ti, and the native ROS 2 Jazzy Pixi workspace is installed at `C:\IsaacSim-ros_workspaces\jazzy_ws`.
 
-The real runtime is `simulator/runtime/isaac_sim_runner.py`. It builds the USD aisle, publishes RGB and camera info through the Isaac ROS 2 bridge, publishes an RTX LiDAR PointCloud2 writer, publishes `/clock`, publishes the required TF chain, and publishes ground truth separately from SLAM. `scripts/run_dashboard.ps1` runs the ROS-fed localhost dashboard at `http://localhost:8080`.
+The real runtime is `simulator/runtime/isaac_sim_runner.py`. It builds the USD aisle, publishes RGB and camera info through the Isaac ROS 2 bridge, publishes an RTX LiDAR PointCloud2 writer, publishes `/clock`, publishes dynamic and static TF, and publishes ground truth separately from SLAM. `scripts/run_baseline.ps1` is the consolidated launcher for the Zenoh router, dashboard, native RTAB-Map, evaluation collector, and Isaac runtime; `scripts/run_dashboard.ps1` remains available for isolated dashboard work.
 
-RTAB-Map ROS 2 and its native `rtabmap` core are now built in the external Pixi workspace with Visual Studio Build Tools 2022, MSVC v143, CMake/Ninja, PCL, and the Windows 11 SDK. The installed `rtabmap_odom` and `rtabmap_slam` executables are verified; the consolidated runtime session remains the place to validate estimator/map quality.
+RTAB-Map ROS 2 and its native `rtabmap` core are now built in the external Pixi workspace with Visual Studio Build Tools 2022, MSVC v143, CMake/Ninja, PCL, and the Windows 11 SDK. The installed `rtabmap_odom` and `rtabmap_slam` executables are verified. Each consolidated run gets an isolated `runs/<run-id>/` database, logs, CSVs, and metrics artifact; map quality and walking behavior remain the user's consolidated visual test layer.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ python -m unittest discover -s tests -v
 python -m simulator.runtime.sim_runner --scenario config/scenarios/baseline_straight.yaml --steps 10
 ```
 
-On a supported ROS 2 + Isaac Sim environment, use the PowerShell scripts in `scripts/`. The dashboard is intended to run at [http://localhost:8080](http://localhost:8080). `run_sim.ps1` opens the Isaac viewport by default; add `-Headless` for non-interactive runs. Pixi is resolved from PATH, then the normal per-user Pixi installation, or an explicit `-PixiPath`.
+On a supported ROS 2 + Isaac Sim environment, use the PowerShell scripts in `scripts/`. The dashboard is intended to run at [http://localhost:8080](http://localhost:8080). `run_baseline.ps1` runs the full non-interactive stack by default; pass `-Gui` to show Isaac's viewport. `run_sim.ps1` opens the Isaac viewport by default; add `-Headless` for non-interactive runs. Pixi is resolved from PATH, then the normal per-user Pixi installation, or an explicit `-PixiPath`.
 
 ## Configuration
 

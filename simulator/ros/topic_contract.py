@@ -14,6 +14,7 @@ TOPICS = {
     "clock": "/clock",
     "rgb_image": "/sim/camera/rgb/image_raw",
     "rgb_camera_info": "/sim/camera/rgb/camera_info",
+    "lidar_ideal_points": "/sim/lidar/points_ideal",
     "lidar_points": "/sim/lidar/points",
     "ground_truth_pose": "/sim/ground_truth/pose",
     "estimated_odom": "/slam/odom",

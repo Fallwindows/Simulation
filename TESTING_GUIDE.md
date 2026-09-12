@@ -74,7 +74,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Verify transform ownership and truth isolation.
 **Prerequisites:** Layers 4 and 6; simulator and Zenoh router running.
-**Commands:** `ros2 topic echo --once /sim/ground_truth/pose`; `ros2 run tf2_ros tf2_echo sim_world sensor_rig`; `ros2 run tf2_tools view_frames`.
+**Commands:** `ros2 topic echo --once /sim/ground_truth/pose`; `ros2 topic list` (confirm `/tf` and `/tf_static`); `ros2 run tf2_ros tf2_echo sim_world sensor_rig`; `ros2 run tf2_tools view_frames`.
 **What should open:** Ground-truth pose plus a TF graph for sensor frames.
 **What success looks like:** `sim_world -> sensor_rig -> camera_link/camera_optical_frame/lidar_link` is coherent; no simulator `map -> odom`; ground truth is not `/slam/odom`.
 **What failure looks like:** Missing static TF, optical axes flipped, or truth wired into SLAM odometry.
@@ -129,7 +129,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Produce defensible trajectory metrics.
 **Prerequisites:** A run with truth and estimated odometry.
-**Commands:** Export synchronized CSVs and call `evaluation.metrics.compute_metrics`; write `runs/<run_id>/` with `evaluation.run_io.write_run`.
+**Commands:** The consolidated launcher runs `evaluation.ros_collector` and writes `runs/<run_id>/`; for an isolated report, export synchronized CSVs and call `evaluation.metrics.compute_metrics` followed by `evaluation.run_io.write_run`.
 **What should open:** No GUI; JSON/CSV artifacts.
 **What success looks like:** ATE RMSE/median, max error, documented RPE interval, distance, duration, and tracking-loss count are present.
 **What failure looks like:** Missing timestamps, invented map-completeness percentage, or truth/estimate misalignment.
@@ -173,7 +173,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Exercise the complete stack after isolated layers pass.
 **Prerequisites:** All prior layers.
-**Commands:** `./scripts/run_baseline.ps1`, plus the supported-host Isaac/ROS launch procedure.
+**Commands:** `./scripts/run_baseline.ps1`; pass `-Gui` only when the consolidated session should show the Isaac viewport.
 **What should open:** Dashboard, simulator, ROS graph, RTAB-Map, and accumulating map.
 **What success looks like:** One coherent run produces RGB, LiDAR, TF, odom, map, dashboard state, and evaluation artifacts.
 **What failure looks like:** A failure whose layer cannot be isolated from the start; return to the first failed layer.

@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the grocery aisle Isaac Sim sensor runtime")
     parser.add_argument("--scenario", default=str(REPO_ROOT / "config/scenarios/baseline_straight.yaml"))
-    parser.add_argument("--frames", type=int, default=600, help="Simulation frames; 60 frames is one simulated second")
+    parser.add_argument("--frames", type=int, default=0, help="Simulation frames; 0 derives the count from the trajectory duration")
     parser.add_argument("--headless", action="store_true", help="Run without the Isaac Sim viewport")
     parser.add_argument("--realtime", action="store_true", help="Pace the simulation at 60 Hz for external ROS/dashboard consumers")
     parser.add_argument("--renderer", default="RaytracedLighting")
@@ -154,6 +154,7 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
     import usdrt.Sdf
 
     keys = og.Controller.Keys
+    step = max(1, round(60.0 / float(fps)))
     graph_path = "/GroceryCameraGraph"
     graph, _, _, _ = og.Controller.edit(
         {
@@ -182,31 +183,18 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
                 ("Rgb.inputs:frameId", "camera_optical_frame"),
                 ("Rgb.inputs:topicName", "/sim/camera/rgb/image_raw"),
                 ("Rgb.inputs:type", "rgb"),
+                ("Rgb.inputs:frameSkipCount", step - 1),
                 ("CameraInfo.inputs:frameId", "camera_optical_frame"),
                 ("CameraInfo.inputs:topicName", "/sim/camera/rgb/camera_info"),
+                ("CameraInfo.inputs:frameSkipCount", step - 1),
             ],
         },
     )
     og.Controller.evaluate_sync(graph)
-
-    # The camera helper is driven by the render pipeline.  A simulation gate
-    # is still present in the generated graph; set it to the configured rate
-    # when possible, while allowing non-integer FPS values to use every frame.
-    try:
-        import omni.syntheticdata._syntheticdata as sd
-
-        render_product = og.Controller.attribute(f"{graph_path}/CreateRenderProduct.outputs:renderProductPath").get()
-        rv_rgb = sd.SyntheticData.convert_sensor_type_to_rendervar(sd.SensorType.Rgb.name)
-        gate_path = sd.SyntheticData._get_node_path(rv_rgb + "IsaacSimulationGate", render_product)
-        step = max(1, round(60.0 / float(fps)))
-        og.Controller.attribute(gate_path + ".inputs:step").set(step)
-    except Exception:
-        # Sensor publication is valid without a gate override; the bridge's
-        # default is once per simulation frame.
-        pass
+    return {"requested_fps": float(fps), "frame_skip_count": step - 1, "effective_fps": 60.0 / step, "mode": "ros2_camera_helper_frameSkipCount"}
 
 
-def _create_lidar(lidar_path: str, translation: tuple[float, float, float]):
+def _create_lidar(lidar_path: str, translation: tuple[float, float, float], topic: str):
     from isaacsim.sensors.experimental.rtx import Lidar, LidarSensor
     from pxr import Sdf
 
@@ -233,16 +221,15 @@ def _create_lidar(lidar_path: str, translation: tuple[float, float, float]):
     sensor = LidarSensor(lidar, annotators=[])
     sensor.attach_writer(
         "RtxLidarROS2PublishPointCloud",
-        topicName="/sim/lidar/points",
+        topicName=topic,
         frameId="lidar_link",
     )
     return lidar, sensor
 
 
-def _publish_ground_truth(node, publisher, trajectory, timestamp_s: float):
+def _publish_ground_truth(publisher, sample, timestamp_s: float):
     from geometry_msgs.msg import PoseStamped
 
-    sample = trajectory.sample(timestamp_s)
     message = PoseStamped()
     message.header.stamp = _sim_time_message(timestamp_s)
     message.header.frame_id = "sim_world"
@@ -251,39 +238,39 @@ def _publish_ground_truth(node, publisher, trajectory, timestamp_s: float):
     publisher.publish(message)
 
 
-def _publish_tf(publisher, scenario, sample, timestamp_s: float) -> None:
+def _publish_tf(publisher, sample, timestamp_s: float) -> None:
     from geometry_msgs.msg import TransformStamped
     from tf2_msgs.msg import TFMessage
 
+    stamp = _sim_time_message(timestamp_s)
+    message = TransformStamped()
+    message.header.stamp = stamp
+    message.header.frame_id = "sim_world"
+    message.child_frame_id = "sensor_rig"
+    message.transform.translation.x, message.transform.translation.y, message.transform.translation.z = sample.position_m
+    message.transform.rotation.x, message.transform.rotation.y, message.transform.rotation.z, message.transform.rotation.w = sample.orientation_xyzw
+    publisher.publish(TFMessage(transforms=[message]))
+
+
+def _publish_static_tf(broadcaster, scenario) -> None:
+    from geometry_msgs.msg import TransformStamped
+
     from simulator.sensors.transforms import camera_optical_quaternion, quaternion_from_rpy_deg
 
-    stamp = _sim_time_message(timestamp_s)
     transforms = []
 
     def add(parent: str, child: str, translation, rotation) -> None:
         message = TransformStamped()
-        message.header.stamp = stamp
         message.header.frame_id = parent
         message.child_frame_id = child
         message.transform.translation.x, message.transform.translation.y, message.transform.translation.z = translation
         message.transform.rotation.x, message.transform.rotation.y, message.transform.rotation.z, message.transform.rotation.w = rotation
         transforms.append(message)
 
-    add("sim_world", "sensor_rig", sample.position_m, sample.orientation_xyzw)
-    add(
-        "sensor_rig",
-        "camera_link",
-        scenario.camera.pose_in_rig.position_m,
-        quaternion_from_rpy_deg(*scenario.camera.pose_in_rig.rpy_deg),
-    )
+    add("sensor_rig", "camera_link", scenario.camera.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.camera.pose_in_rig.rpy_deg))
     add("camera_link", "camera_optical_frame", (0.0, 0.0, 0.0), camera_optical_quaternion())
-    add(
-        "sensor_rig",
-        "lidar_link",
-        scenario.lidar.pose_in_rig.position_m,
-        quaternion_from_rpy_deg(*scenario.lidar.pose_in_rig.rpy_deg),
-    )
-    publisher.publish(TFMessage(transforms=transforms))
+    add("sensor_rig", "lidar_link", scenario.lidar.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.lidar.pose_in_rig.rpy_deg))
+    broadcaster.sendTransform(transforms)
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
@@ -291,12 +278,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
     from simulator.config.loader import load_scenario
     from simulator.motion.trajectory import StraightTrajectory, WalkingTrajectory
+    from simulator.ros.topic_contract import FRAMES, TOPICS
+    from simulator.sensors.noise import NoiseConfig
 
-    if args.frames < 1:
-        raise ValueError("--frames must be positive")
+    if args.frames < 0:
+        raise ValueError("--frames must be non-negative")
     scenario = load_scenario(args.scenario)
     trajectory_cls = WalkingTrajectory if scenario.trajectory.name.lower() == "walking" else StraightTrajectory
     trajectory = trajectory_cls(scenario.trajectory)
+    frames = args.frames if args.frames > 0 else max(1, math.ceil(scenario.trajectory.duration_s * 60.0))
+    noise_config = NoiseConfig.from_mapping(scenario.sensor_overrides.get("noise"))
 
     print("[grocery-runtime] starting SimulationApp", flush=True)
     simulation_app = SimulationApp({"renderer": args.renderer, "headless": bool(args.headless)})
@@ -320,12 +311,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         print("[grocery-runtime] building sensor rig USD", flush=True)
         _, camera_path, lidar_path = _build_sensor_rig(stage, scenario)
         print("[grocery-runtime] creating camera ROS graph", flush=True)
-        _create_camera_graph(camera_path, scenario.camera.width_px, scenario.camera.height_px, scenario.camera.fps)
+        camera_cadence = _create_camera_graph(camera_path, scenario.camera.width_px, scenario.camera.height_px, scenario.camera.fps)
 
         # Sensor API objects must be created after the bridge extension is
         # loaded and before the simulation starts.
         print("[grocery-runtime] creating RTX LiDAR ROS writer", flush=True)
-        _, _lidar_sensor = _create_lidar(lidar_path, scenario.lidar.pose_in_rig.position_m)
+        lidar_topic = TOPICS["lidar_ideal_points"] if noise_config.enabled else TOPICS["lidar_points"]
+        _, _lidar_sensor = _create_lidar(lidar_path, scenario.lidar.pose_in_rig.position_m, lidar_topic)
         print("[grocery-runtime] creating clock and TF graph", flush=True)
         _create_clock_graph()
         print("[grocery-runtime] initializing simulation", flush=True)
@@ -335,11 +327,27 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         import rclpy
         from geometry_msgs.msg import PoseStamped
         from tf2_msgs.msg import TFMessage
+        from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
         rclpy.init(args=None)
         node = rclpy.create_node("grocery_sim_ground_truth")
-        gt_pub = node.create_publisher(PoseStamped, "/sim/ground_truth/pose", 10)
+        gt_pub = node.create_publisher(PoseStamped, TOPICS["ground_truth_pose"], 10)
         tf_pub = node.create_publisher(TFMessage, "/tf", 10)
+        static_tf = StaticTransformBroadcaster(node)
+        _publish_static_tf(static_tf, scenario)
+        lidar_relay = None
+        if noise_config.enabled:
+            from simulator.ros.lidar_noise_relay import LidarNoiseRelay
+
+            lidar_relay = LidarNoiseRelay(node, noise_config, scenario.seed)
+        rgb_stamps: list[float] = []
+
+        def _on_rgb(message) -> None:
+            rgb_stamps.append(float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0)
+
+        from sensor_msgs.msg import Image
+
+        node.create_subscription(Image, TOPICS["rgb_image"], _on_rgb, 10)
         app_utils.play()
         print("[grocery-runtime] simulation running", flush=True)
 
@@ -347,9 +355,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
         rig_prim = stage.GetPrimAtPath("/World/SensorRig")
         rig_api = UsdGeom.XformCommonAPI(rig_prim)
-        for frame in range(args.frames):
+        from omni.timeline import get_timeline_interface
+
+        timeline = get_timeline_interface()
+        last_timestamp_s = 0.0
+        for frame in range(frames):
             wall_start = time.perf_counter()
-            timestamp_s = frame / 60.0
+            timestamp_s = float(timeline.get_current_time())
+            if frame and timestamp_s <= last_timestamp_s:
+                timestamp_s = frame / 60.0
+            last_timestamp_s = timestamp_s
             sample = trajectory.sample(timestamp_s)
             rig_api.SetTranslate(Gf.Vec3d(*sample.position_m))
             # Apply the complete sampled walking/trajectory orientation to the
@@ -359,8 +374,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
             sampled_rpy_deg = rpy_deg_from_quaternion(sample.orientation_xyzw)
             rig_api.SetRotate(Gf.Vec3f(*sampled_rpy_deg), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-            _publish_ground_truth(node, gt_pub, trajectory, timestamp_s)
-            _publish_tf(tf_pub, scenario, sample, timestamp_s)
+            _publish_ground_truth(gt_pub, sample, timestamp_s)
+            _publish_tf(tf_pub, sample, timestamp_s)
             simulation_app.update()
             rclpy.spin_once(node, timeout_sec=0.0)
             if args.realtime:
@@ -372,17 +387,30 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "runtime": "isaac_sim",
             "isaac_version": "6.1.0",
             "scenario": scenario.name,
-            "frames_simulated": args.frames,
+            "frames_simulated": frames,
             "primitive_count": primitive_count,
             "product_count": len(layout.products),
             "topics": {
                 "clock": "/clock",
                 "rgb": "/sim/camera/rgb/image_raw",
                 "camera_info": "/sim/camera/rgb/camera_info",
-                "lidar": "/sim/lidar/points",
-                "ground_truth_pose": "/sim/ground_truth/pose",
+                "lidar_ideal": TOPICS["lidar_ideal_points"],
+                "lidar": TOPICS["lidar_points"],
+                "ground_truth_pose": TOPICS["ground_truth_pose"],
             },
-            "frames": ["sim_world", "sensor_rig", "camera_link", "camera_optical_frame", "lidar_link"],
+            "frames": list(FRAMES.values()),
+            "camera_cadence": camera_cadence,
+            "observed_rgb_frames": len(rgb_stamps),
+            "observed_rgb_hz": (len(rgb_stamps) - 1) / (rgb_stamps[-1] - rgb_stamps[0]) if len(rgb_stamps) > 1 and rgb_stamps[-1] > rgb_stamps[0] else None,
+            "clock_source": "Isaac timeline current_time",
+            "static_tf_topic": "/tf_static",
+            "lidar_noise": {
+                "enabled": noise_config.enabled,
+                "relay": "simulator.ros.lidar_noise_relay" if lidar_relay is not None else None,
+                "received_clouds": None if lidar_relay is None else lidar_relay.received_clouds,
+                "published_clouds": None if lidar_relay is None else lidar_relay.published_clouds,
+                "last_point_count": None if lidar_relay is None else lidar_relay.last_point_count,
+            },
             "rig_orientation_source": "trajectory.sample.orientation_xyzw",
             "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
             "ground_truth_odometry_leakage": False,

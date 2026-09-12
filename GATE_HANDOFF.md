@@ -26,7 +26,8 @@
 - RTX camera graph, native OmniLidar creation, and ROS 2 writers.
 - `/clock`, TF, RGB, LiDAR, and ground-truth messages across the live native ROS/Zenoh graph.
 - Browser backend `/api/health` plus live RGB/LiDAR cache status.
-- Native `rtabmap_odom` and `rtabmap_slam` launch with the simulator stream; `/icp_odometry` and `/rtabmap` stayed alive and the dashboard received 297 accumulated map points on `/slam/map_cloud`.
+- Native `rtabmap_odom` and `rtabmap_slam` launch with the simulator stream; `/icp_odometry` and `/rtabmap` stayed alive and the dashboard received 3,613 accumulated map points on `/slam/map_cloud` in the consolidated smoke.
+- The consolidated launcher produced an isolated RTAB-Map database, ground-truth/estimate CSVs, and serialized metrics under `runs/20260912-130123/`.
 
 ## Not yet interactively verified
 
@@ -39,7 +40,8 @@
 - deterministic scenario preflight through `simulator.runtime.sim_runner`
 - Python bytecode compilation for project modules
 - Visual Studio Build Tools/MSVC/CMake/Windows SDK verification and native RTAB-Map package/executable checks
-- Real Isaac baseline and walking headless runtime smokes
+- Real Isaac baseline, walking, and sensor-realism headless runtime smokes
+- Full dashboard + Zenoh + native RTAB-Map + evaluation-collector smoke with `/tf_static`, RGB, LiDAR, odometry, map, and metrics artifacts
 - Live dashboard + Zenoh + RTAB-Map smoke with RGB, LiDAR, odometry, and map caches
 - `git diff --check`
 

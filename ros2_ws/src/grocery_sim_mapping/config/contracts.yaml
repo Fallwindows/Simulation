@@ -18,11 +18,7 @@
     "estimated_odom": "/slam/odom",
     "map_points": "/slam/map_cloud"
   },
-  "dashboard": {
-    "host": "127.0.0.1",
-    "port": 8080,
-    "browser_point_budget": 50000
-  },
+  "dashboard": {"host": "127.0.0.1", "port": 8080, "browser_point_budget": 50000},
   "units": "SI",
   "ownership": {
     "sim_world_to_rig": "simulator_ground_truth",

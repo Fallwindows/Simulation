@@ -1,8 +1,9 @@
-"""ROS 2 publishers for synthetic sensor outputs.
+"""Alternate non-Isaac ROS helper for tests and small adapters.
 
 All ROS imports are delayed to construction so config/math tests run on a
-machine without ROS. The Isaac runtime calls these methods with rendered
-sensor data; ground truth is published on its own PoseStamped topic.
+machine without ROS. The live Isaac path is
+``simulator.runtime.isaac_sim_runner``; it uses Isaac's native RGB and RTX
+LiDAR writers rather than this helper.
 """
 
 from __future__ import annotations

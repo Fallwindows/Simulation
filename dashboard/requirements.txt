@@ -1,3 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
-# Runtime deployment also needs the ROS 2 distribution's rclpy/cv_bridge packages.
+# Runtime deployment also needs ROS 2 rclpy and sensor_msgs_py. RGB encoding
+# uses the existing NumPy/OpenCV runtime from the Pixi environment; cv_bridge
+# is not required.

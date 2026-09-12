@@ -17,10 +17,11 @@ from dashboard.backend.state import DashboardState
 try:
     from fastapi import FastAPI, WebSocket
     from fastapi.responses import FileResponse, Response, StreamingResponse
+    from fastapi.staticfiles import StaticFiles
 except ImportError:  # pragma: no cover - exercised only on a minimal host
     FastAPI = None  # type: ignore[assignment]
     WebSocket = object  # type: ignore[assignment,misc]
-    FileResponse = Response = StreamingResponse = None  # type: ignore[assignment]
+    FileResponse = Response = StreamingResponse = StaticFiles = None  # type: ignore[assignment]
 
 
 WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
@@ -39,10 +40,15 @@ def create_app(state: DashboardState | None = None):
         raise RuntimeError("FastAPI is required for the dashboard; install dashboard requirements")
     state = state or DashboardState()
     app = FastAPI(title="Grocery Aisle Simulation Dashboard")
+    app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 
     @app.get("/")
     def index():
         return FileResponse(WEB_ROOT / "index.html")
+
+    @app.get("/app.js")
+    def javascript():
+        return FileResponse(WEB_ROOT / "app.js", media_type="text/javascript")
 
     @app.get("/api/health")
     def health():

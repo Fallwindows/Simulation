@@ -33,6 +33,25 @@ class MetricTests(unittest.TestCase):
         estimate = [(0.0, (0.1, 0.0, 0.0)), (1.0, (1.1, 0.0, 0.0))]
         self.assertAlmostEqual(compute_metrics(gt, estimate).ate_rmse_m, 0.1)
 
+    def test_initial_translation_alignment_is_explicit(self):
+        gt = [(0.0, (0.0, 0.0, 0.0)), (1.0, (1.0, 0.0, 0.0))]
+        estimate = [(0.0, (0.1, 0.0, 0.0)), (1.0, (1.1, 0.0, 0.0))]
+        metrics = compute_metrics(gt, estimate, alignment="initial_translation")
+        self.assertAlmostEqual(metrics.ate_rmse_m, 0.0)
+        self.assertEqual(metrics.alignment_policy, "initial_translation")
+
+    def test_rpe_detects_wrong_direction(self):
+        gt = [(0.0, (0.0, 0.0, 0.0)), (1.0, (1.0, 0.0, 0.0)), (2.0, (2.0, 0.0, 0.0))]
+        estimate = [(0.0, (0.0, 0.0, 0.0)), (1.0, (-1.0, 0.0, 0.0)), (2.0, (-2.0, 0.0, 0.0))]
+        self.assertAlmostEqual(compute_metrics(gt, estimate, rpe_interval_s=1.0).rpe_rmse_m, 2.0)
+
+    def test_matching_gap_is_bounded_and_loss_is_contiguous(self):
+        gt = [(0.0, (0.0, 0.0, 0.0)), (1.0, (1.0, 0.0, 0.0)), (2.0, (2.0, 0.0, 0.0)), (3.0, (3.0, 0.0, 0.0))]
+        estimate = [(0.0, (0.0, 0.0, 0.0)), (3.0, (3.0, 0.0, 0.0))]
+        metrics = compute_metrics(gt, estimate, max_time_gap_s=0.1)
+        self.assertEqual(metrics.sample_count, 2)
+        self.assertEqual(metrics.tracking_loss_count, 1)
+
     def test_ideal_noise_mode_is_a_noop(self):
         points = [(1.0, 2.0, 3.0)]
         ideal = NoiseConfig()

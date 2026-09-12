@@ -30,6 +30,10 @@ class DashboardState:
             setattr(self, f"{kind}_points", list(points))
             self._updated[kind] = receive_time if receive_time is not None else time.time()
 
+    def update_metrics(self, metrics: dict[str, Any]) -> None:
+        with self._lock:
+            self.metrics = dict(metrics)
+
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
         with self._lock:
