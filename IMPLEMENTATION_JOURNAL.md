@@ -82,4 +82,13 @@ References:
 
 ### Remote-access preparation
 
-The local repository is configured with the GitHub SSH remote and a dedicated write-enabled deploy key. The next validation step is a real commit/push of this Gate 0 journal and `.gitignore`, followed by remote commit verification.
+The local repository is configured with the GitHub SSH remote and a dedicated write-enabled deploy key.
+
+### Gate 0 GitHub synchronization
+
+- Gate 0 files committed as `c310d60bfb2ad020bf3a84d28cedbc1a5dd97d1` with message `gate 0: record environment discovery`.
+- Push command: `git push -u origin master`.
+- Push result: success; created `origin/master`.
+- Remote verification: `git ls-remote origin refs/heads/master` returned `c310d60bfb2ad020bf3a84d28cedbc1a5dd97d1`.
+- Worktree was clean after the push.
+- A follow-up journal-only commit records this synchronization result.
