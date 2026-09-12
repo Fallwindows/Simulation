@@ -1,6 +1,6 @@
 # One-Sitting Layer-by-Layer Testing Guide
 
-This guide is intentionally ordered from lowest-level runtime sanity to the full stack. On the current host, the Isaac/ROS runtime, dashboard backend, and native RTAB-Map binaries have passed non-interactive checks. Browser rendering, estimator behavior, map quality, and walking motion remain part of the consolidated user session.
+This guide is intentionally ordered from lowest-level runtime sanity to the full stack. On the current host, the Isaac/ROS runtime, dashboard backend, native RTAB-Map binaries, and a complete non-interactive baseline have passed. Browser rendering, estimator behavior, map quality, and walking motion remain part of the consolidated user session.
 
 Before starting, open a terminal for each long-running process, keep logs visible, and record screenshots plus the exact command for every failed layer. Use simulation time everywhere.
 
@@ -19,7 +19,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Verify deterministic procedural geometry.
 **Prerequisites:** Layer 1; Isaac Sim session.
-**Commands:** `./scripts/run_sim.ps1 -Frames 1200 -Realtime -StartZenohRouter`; add `-Headless` for a non-interactive run, or omit it to open the Isaac GUI; run `scripts/run_sim.ps1 -PreflightOnly` first if desired.
+**Commands:** `./scripts/run_sim.ps1 -Frames 1200 -Realtime -StartZenohRouter -Gui`; use `-Headless` instead for a non-interactive run; run `scripts/run_sim.ps1 -PreflightOnly` first if desired.
 **What should open:** The Isaac runtime log should show a built stage with a floor, two shelf rows, multiple bays/levels, and simple product proxies; the repository launcher opens the viewport by default and supports `-Headless` for repeatable ROS testing.
 **What success looks like:** Shelves are upright, aisle is navigable, lighting is usable, and repeated fixed-seed loads match.
 **What failure looks like:** Empty stage, overlapping shelves, missing products, or runtime import errors.
@@ -74,9 +74,9 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Verify transform ownership and truth isolation.
 **Prerequisites:** Layers 4 and 6; simulator and Zenoh router running.
-**Commands:** `ros2 topic echo --once /sim/ground_truth/pose`; `ros2 topic list` (confirm `/tf` and `/tf_static`); `ros2 run tf2_ros tf2_echo sim_world sensor_rig`; `ros2 run tf2_tools view_frames`.
+**Commands:** `ros2 topic echo --once /sim/ground_truth/pose`; `ros2 topic list` (confirm `/tf` and `/tf_static`); `ros2 run tf2_ros tf2_echo sim_world truth_sensor_rig`; `ros2 run tf2_ros tf2_echo map sensor_rig`; `ros2 run tf2_tools view_frames`.
 **What should open:** Ground-truth pose plus a TF graph for sensor frames.
-**What success looks like:** `sim_world -> sensor_rig -> camera_link/camera_optical_frame/lidar_link` is coherent; no simulator `map -> odom`; ground truth is not `/slam/odom`.
+**What success looks like:** `sim_world -> truth_sensor_rig` is a separate truth branch; the estimator tree is `map -> odom -> sensor_rig -> camera_link/camera_optical_frame/lidar_link`; no simulator `map -> odom`; ground truth is not `/slam/odom`.
 **What failure looks like:** Missing static TF, optical axes flipped, or truth wired into SLAM odometry.
 **Evidence:** TF graph, one pose message, and topic remapping output.
 **Stop/cleanup:** Remove generated TF graph image only if it is outside tracked files.
@@ -97,7 +97,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 **Goal:** Verify estimator odometry is produced from LiDAR, not truth.
 **Prerequisites:** Layers 6–7; the native `rtabmap_odom` and `rtabmap_slam` packages verified in Layer 1.
 **Commands:** `./scripts/run_mapping.ps1`; `ros2 topic hz /slam/odom`; `ros2 topic echo --once /slam/odom`.
-**What should open:** RTAB-Map/ICP logs and odometry messages. The baseline launch uses the simulator's LiDAR cloud for ICP/SLAM; RGB remains available for the separate ROS/dashboard camera path because the baseline has no RGB-D stream.
+**What should open:** RTAB-Map/ICP logs and odometry messages. The baseline explicitly uses LiDAR only (`subscribe_scan_cloud=true`, `subscribe_rgb=false`, `subscribe_depth=false`, `subscribe_odom_info=true`, `Reg/Strategy=1`); RGB remains available for the separate ROS/dashboard camera path.
 **What success looks like:** `/slam/odom` advances from LiDAR input and has the expected `odom` relationship.
 **What failure looks like:** Node fails to launch, no odometry, or launch remaps `/sim/ground_truth/pose` into odometry.
 **Evidence:** Launch log, odom message, and `ros2 node info`.
@@ -131,7 +131,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 **Prerequisites:** A run with truth and estimated odometry.
 **Commands:** The consolidated launcher runs `evaluation.ros_collector` and writes `runs/<run_id>/`; for an isolated report, export synchronized CSVs and call `evaluation.metrics.compute_metrics` followed by `evaluation.run_io.write_run`.
 **What should open:** No GUI; JSON/CSV artifacts.
-**What success looks like:** ATE RMSE/median, max error, documented RPE interval, distance, duration, and tracking-loss count are present.
+**What success looks like:** ATE RMSE/median, max error, documented RPE interval, distance, duration, tracking-loss count, orientation RMSE, and `alignment_policy: initial_se3` are present. CSVs contain `qx,qy,qz,qw`; the Isaac status records clock-to-sensor timestamp offsets.
 **What failure looks like:** Missing timestamps, invented map-completeness percentage, or truth/estimate misalignment.
 **Evidence:** `metrics.json` and metadata.
 **Stop/cleanup:** Keep run artifacts local; they are ignored by Git.
@@ -173,7 +173,7 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 
 **Goal:** Exercise the complete stack after isolated layers pass.
 **Prerequisites:** All prior layers.
-**Commands:** `./scripts/run_baseline.ps1`; pass `-Gui` only when the consolidated session should show the Isaac viewport.
+**Commands:** `./scripts/run_baseline.ps1` (realtime by default); pass `-Gui` to show the Isaac viewport or `-Fast` for an accelerated run.
 **What should open:** Dashboard, simulator, ROS graph, RTAB-Map, and accumulating map.
 **What success looks like:** One coherent run produces RGB, LiDAR, TF, odom, map, dashboard state, and evaluation artifacts.
 **What failure looks like:** A failure whose layer cannot be isolated from the start; return to the first failed layer.

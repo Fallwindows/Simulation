@@ -96,3 +96,14 @@ def camera_optical_quaternion() -> Quaternion:
     # Columns of this matrix are optical basis vectors expressed in link axes.
     # The equivalent quaternion is (0.5, -0.5, 0.5, -0.5), up to sign.
     return (0.5, -0.5, 0.5, -0.5)
+
+
+def camera_usd_quaternion() -> Quaternion:
+    """Return the USD camera-local basis expressed in ``camera_link``.
+
+    Isaac cameras look along local ``-Z`` and use local ``+Y`` as up.  The
+    camera-link convention is ``+X`` forward, ``+Y`` left, ``+Z`` up, so the
+    basis is USD forward ``-Z`` -> link ``+X``; USD up ``+Y`` -> link ``+Z``;
+    USD right ``+X`` -> link ``-Y``.
+    """
+    return (0.5, -0.5, -0.5, 0.5)

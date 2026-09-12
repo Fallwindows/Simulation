@@ -121,6 +121,13 @@ def _positive(value: Any, name: str) -> float:
     return result
 
 
+def _finite(value: Any, name: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite")
+    return result
+
+
 def _pose(data: dict[str, Any], name: str) -> PoseConfig:
     return PoseConfig(_tuple3(data.get("position_m", [0.0, 0.0, 0.0]), f"{name}.position_m"), _tuple3(data.get("rpy_deg", [0.0, 0.0, 0.0]), f"{name}.rpy_deg"))
 
@@ -158,17 +165,23 @@ def _camera(data: dict[str, Any]) -> CameraConfig:
     near_m, far_m = _positive(data["near_m"], "camera.near_m"), _positive(data["far_m"], "camera.far_m")
     if near_m >= far_m:
         raise ValueError("camera.near_m must be less than camera.far_m")
-    return CameraConfig(width, height, _positive(data["fps"], "camera.fps"), _positive(data["horizontal_fov_deg"], "camera.horizontal_fov_deg"), near_m, far_m, _pose(data.get("pose_in_rig", {}), "camera.pose_in_rig"))
+    fov = _positive(data["horizontal_fov_deg"], "camera.horizontal_fov_deg")
+    if fov >= 180.0:
+        raise ValueError("camera.horizontal_fov_deg must be less than 180")
+    return CameraConfig(width, height, _positive(data["fps"], "camera.fps"), fov, near_m, far_m, _pose(data.get("pose_in_rig", {}), "camera.pose_in_rig"))
 
 
 def _lidar(data: dict[str, Any]) -> LidarConfig:
-    fov = tuple(float(v) for v in data.get("vertical_fov_deg", [-25.0, 15.0]))
+    fov = tuple(_finite(v, "lidar.vertical_fov_deg") for v in data.get("vertical_fov_deg", [-25.0, 15.0]))
     if len(fov) != 2 or fov[0] >= fov[1]:
         raise ValueError("lidar.vertical_fov_deg must be an increasing pair")
     horizontal, vertical = int(data["horizontal_samples"]), int(data["vertical_samples"])
     if horizontal < 1 or vertical < 1:
         raise ValueError("lidar sample counts must be positive")
-    return LidarConfig(str(data["preset"]), _positive(data["hz"], "lidar.hz"), _positive(data["min_range_m"], "lidar.min_range_m"), _positive(data["max_range_m"], "lidar.max_range_m"), fov, horizontal, vertical, _pose(data.get("pose_in_rig", {}), "lidar.pose_in_rig"))
+    minimum, maximum = _positive(data["min_range_m"], "lidar.min_range_m"), _positive(data["max_range_m"], "lidar.max_range_m")
+    if minimum >= maximum:
+        raise ValueError("lidar.min_range_m must be less than lidar.max_range_m")
+    return LidarConfig(str(data["preset"]), _positive(data["hz"], "lidar.hz"), minimum, maximum, fov, horizontal, vertical, _pose(data.get("pose_in_rig", {}), "lidar.pose_in_rig"))
 
 
 def _trajectory(data: dict[str, Any]) -> TrajectoryConfig:
@@ -178,7 +191,11 @@ def _trajectory(data: dict[str, Any]) -> TrajectoryConfig:
     variation = float(data.get("speed_variation_fraction", 0.0))
     if not 0.0 <= variation < 1.0:
         raise ValueError("trajectory.speed_variation_fraction must be in [0, 1)")
-    return TrajectoryConfig(str(data["name"]), duration, speed, _tuple3(data["start_position_m"], "trajectory.start_position_m"), float(data.get("yaw_deg", 0.0)), sample_hz, float(data.get("bob_amplitude_m", 0.0)), float(data.get("bob_hz", 0.0)), float(data.get("sway_amplitude_m", 0.0)), float(data.get("sway_hz", 0.0)), float(data.get("yaw_amplitude_deg", 0.0)), float(data.get("pitch_amplitude_deg", 0.0)), variation)
+    oscillations = {
+        key: _finite(data.get(key, 0.0), f"trajectory.{key}")
+        for key in ("bob_amplitude_m", "bob_hz", "sway_amplitude_m", "sway_hz", "yaw_amplitude_deg", "pitch_amplitude_deg")
+    }
+    return TrajectoryConfig(str(data["name"]), duration, speed, _tuple3(data["start_position_m"], "trajectory.start_position_m"), _finite(data.get("yaw_deg", 0.0), "trajectory.yaw_deg"), sample_hz, oscillations["bob_amplitude_m"], oscillations["bob_hz"], oscillations["sway_amplitude_m"], oscillations["sway_hz"], oscillations["yaw_amplitude_deg"], oscillations["pitch_amplitude_deg"], variation)
 
 
 def load_contracts(path: str | Path) -> dict[str, Any]:

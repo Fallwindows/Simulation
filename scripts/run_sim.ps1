@@ -5,11 +5,14 @@ param(
   [string]$RosWorkspace = "",
   [int]$Frames = 0,
   [switch]$Realtime,
+  [string]$StatusPath = "",
   [switch]$PreflightOnly,
   [switch]$StartZenohRouter,
+  [switch]$Gui,
   [switch]$Headless
 )
 $ErrorActionPreference = "Stop"
+if ($Gui -and $Headless) { throw "Choose either -Gui or -Headless, not both." }
 $pathHelper = Join-Path $PSScriptRoot "resolve_runtime_paths.ps1"
 . $pathHelper
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
@@ -46,7 +49,7 @@ if ($StartZenohRouter) {
 }
 
 $runtime = Join-Path $repo "simulator\runtime\isaac_sim_runner.py"
-$status = Join-Path $repo "runs\isaac_runtime_status.json"
+$status = if ($StatusPath) { $StatusPath } else { Join-Path $repo "runs\isaac_runtime_status.json" }
 $arguments = @($runtime, "--scenario", $scenarioPath, "--status-path", $status)
 if ($Frames -gt 0) { $arguments += @("--frames", $Frames) }
 if ($Headless) { $arguments += "--headless" }

@@ -1,8 +1,9 @@
 """RTAB-Map 3D LiDAR pipeline with explicit TF ownership.
 
-The simulator publishes ``sim_world -> sensor_rig`` and the static sensor
-extrinsics.  ICP owns ``odom -> sensor_rig`` and RTAB-Map owns ``map -> odom``;
-ground truth is never remapped to an estimator topic.
+The simulator publishes only the optional visualization branch
+``sim_world -> truth_sensor_rig``.  ICP owns ``odom -> sensor_rig`` and
+RTAB-Map owns ``map -> odom``; ground truth is never part of the estimator
+tree or remapped to an estimator topic.
 """
 
 from __future__ import annotations
@@ -12,14 +13,13 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def _load_json(name: str) -> dict:
-    package_share = Path(get_package_share_directory("grocery_sim_mapping"))
-    return json.loads((package_share / "config" / name).read_text(encoding="utf-8"))
+def _load_json(path: str | Path) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def _rtabmap_value(key: str, value):
@@ -31,34 +31,33 @@ def _rtabmap_value(key: str, value):
 
 
 def generate_launch_description():
-    contract = _load_json("contracts.yaml")
-    mapping = _load_json("params.yaml")
-    topics = contract["topics"]
-    frames = contract["frames"]
-    use_sim_time = LaunchConfiguration("use_sim_time")
-    database_path = LaunchConfiguration("database_path")
+    def build_nodes(context):
+        package_share = Path(get_package_share_directory("grocery_sim_mapping"))
+        contract = _load_json(package_share / "config" / "contracts.yaml")
+        mapping_path = LaunchConfiguration("mapping_params_path").perform(context)
+        mapping = _load_json(mapping_path if mapping_path else package_share / "config" / "params.yaml")
+        topics = contract["topics"]
+        frames = contract["frames"]
+        use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
+        database_path = LaunchConfiguration("database_path").perform(context)
 
-    common = {
-        "use_sim_time": use_sim_time,
-        "frame_id": frames["sensor_rig"],
-        "odom_frame_id": frames["odom"],
-    }
-    odom_params = dict(common)
-    slam_params = dict(common)
-    slam_params["map_frame_id"] = frames["map"]
-    for key, value in mapping.items():
-        if key not in {"frame_id", "odom_frame_id", "map_frame_id", "use_sim_time"}:
-            target = odom_params if key in {"subscribe_scan_cloud", "subscribe_odom_info", "approx_sync", "queue_size", "Reg/Strategy"} else slam_params
-            target[key] = _rtabmap_value(key, value)
-    odom_params.update({"publish_tf": True, "scan_cloud_max_points": 50000})
-    for key in ("subscribe_scan_cloud", "subscribe_odom_info", "approx_sync", "queue_size"):
-        if key in mapping:
-            slam_params[key] = mapping[key]
-    slam_params["database_path"] = database_path
+        common = {
+            "use_sim_time": use_sim_time,
+            "frame_id": frames["sensor_rig"],
+            "odom_frame_id": frames["odom"],
+        }
+        odom_params = dict(common)
+        slam_params = dict(common)
+        slam_params["map_frame_id"] = frames["map"]
+        for key, value in mapping.items():
+            if key not in {"frame_id", "odom_frame_id", "map_frame_id", "use_sim_time"}:
+                formatted = _rtabmap_value(key, value)
+                odom_params[key] = formatted
+                slam_params[key] = formatted
+        odom_params.update({"publish_tf": True, "scan_cloud_max_points": 50000})
+        slam_params.update({"publish_tf": True, "database_path": database_path})
 
-    return LaunchDescription([
-        DeclareLaunchArgument("use_sim_time", default_value="true"),
-        DeclareLaunchArgument("database_path", default_value=""),
+        return [
         Node(
             package="rtabmap_odom",
             executable="icp_odometry",
@@ -81,4 +80,11 @@ def generate_launch_description():
                 ("cloud_map", topics["map_points"]),
             ],
         ),
+        ]
+
+    return LaunchDescription([
+        DeclareLaunchArgument("use_sim_time", default_value="true"),
+        DeclareLaunchArgument("database_path", default_value=""),
+        DeclareLaunchArgument("mapping_params_path", default_value=""),
+        OpaqueFunction(function=build_nodes),
     ])

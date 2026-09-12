@@ -41,6 +41,37 @@ def _sim_time_message(seconds: float):
     return Time(sec=whole, nanosec=int((seconds - whole) * 1_000_000_000))
 
 
+def lidar_runtime_spec(lidar_config) -> dict[str, object]:
+    """Map supported scenario LiDAR fields to the Isaac 6.1 sensor boundary."""
+    from simulator.sensors.transforms import quaternion_from_rpy_deg
+
+    return {
+        "tick_rate_hz": float(lidar_config.hz),
+        "near_range_m": float(lidar_config.min_range_m),
+        "far_range_m": float(lidar_config.max_range_m),
+        "translation_m": list(lidar_config.pose_in_rig.position_m),
+        "orientation_xyzw": list(quaternion_from_rpy_deg(*lidar_config.pose_in_rig.rpy_deg)),
+        "unsupported_for_schema_created_sensor": {
+            "preset": lidar_config.preset,
+            "vertical_fov_deg": list(lidar_config.vertical_fov_deg),
+            "horizontal_samples": int(lidar_config.horizontal_samples),
+            "vertical_samples": int(lidar_config.vertical_samples),
+            "reason": "Isaac Sim 6.1 schema-created Lidar exposes tick/range/pose here; scan pattern fields require a model/config asset.",
+        },
+    }
+
+
+def _timestamp_summary(reference: list[float], samples: list[float]) -> dict[str, float | int | None]:
+    if not reference or not samples:
+        return {"sample_count": len(samples), "mean_offset_s": None, "max_abs_offset_s": None}
+    offsets = [min((value - ref for ref in reference), key=abs) for value in samples]
+    return {
+        "sample_count": len(samples),
+        "mean_offset_s": sum(offsets) / len(offsets),
+        "max_abs_offset_s": max(abs(value) for value in offsets),
+    }
+
+
 def _set_name_override(prim, name: str) -> None:
     from pxr import Sdf
 
@@ -87,6 +118,7 @@ def _build_world(stage, scenario):
 
 def _build_sensor_rig(stage, scenario):
     from pxr import Gf, Sdf, UsdGeom
+    from simulator.sensors.transforms import camera_usd_quaternion, rpy_deg_from_quaternion
 
     rig_path = "/World/SensorRig"
     camera_link_path = "/World/SensorRig/camera_link"
@@ -111,7 +143,7 @@ def _build_sensor_rig(stage, scenario):
     # axis point down the aisle (+X), with image up aligned to world +Z.
     camera = UsdGeom.Camera.Define(stage, camera_path)
     camera_api = UsdGeom.XformCommonAPI(camera.GetPrim())
-    camera_api.SetRotate(Gf.Vec3f(-90.0, -90.0, 0.0), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    camera_api.SetRotate(Gf.Vec3f(*rpy_deg_from_quaternion(camera_usd_quaternion())), UsdGeom.XformCommonAPI.RotationOrderXYZ)
     camera.GetHorizontalApertureAttr().Set(20.955)
     camera.GetVerticalApertureAttr().Set(20.955 * scenario.camera.height_px / scenario.camera.width_px)
     focal_length_mm = 20.955 / (2.0 * math.tan(math.radians(scenario.camera.horizontal_fov_deg) / 2.0))
@@ -194,22 +226,24 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
     return {"requested_fps": float(fps), "frame_skip_count": step - 1, "effective_fps": 60.0 / step, "mode": "ros2_camera_helper_frameSkipCount"}
 
 
-def _create_lidar(lidar_path: str, translation: tuple[float, float, float], topic: str):
+def _create_lidar(lidar_path: str, lidar_config, topic: str):
     from isaacsim.sensors.experimental.rtx import Lidar, LidarSensor
     from pxr import Sdf
 
+    spec = lidar_runtime_spec(lidar_config)
     # Create the current native OmniLidar prim locally.  The downloadable
     # Example_Rotary asset is optional and may not be present on a workstation;
-    # the schema-created sensor is still a real RTX LiDAR with explicit scan
-    # bounds and a 10 Hz tick rate.
+    # the schema-created sensor is still a real RTX LiDAR with scenario-derived
+    # scan bounds, cadence, and pose.
     lidar = Lidar.create(
         path=lidar_path,
-        tick_rate=10.0,
-        translations=[list(translation)],
+        tick_rate=spec["tick_rate_hz"],
+        translations=[spec["translation_m"]],
+        orientations=[spec["orientation_xyzw"]],
         attributes={
-            "omni:sensor:Core:scanRateBaseHz": 10.0,
-            "omni:sensor:Core:nearRangeM": 0.2,
-            "omni:sensor:Core:farRangeM": 60.0,
+            "omni:sensor:Core:scanRateBaseHz": spec["tick_rate_hz"],
+            "omni:sensor:Core:nearRangeM": spec["near_range_m"],
+            "omni:sensor:Core:farRangeM": spec["far_range_m"],
             "omni:sensor:Core:patternFiringRateHz": 20000,
         },
     )
@@ -229,10 +263,11 @@ def _create_lidar(lidar_path: str, translation: tuple[float, float, float], topi
 
 def _publish_ground_truth(publisher, sample, timestamp_s: float):
     from geometry_msgs.msg import PoseStamped
+    from simulator.ros.topic_contract import GROUND_TRUTH_FRAME
 
     message = PoseStamped()
     message.header.stamp = _sim_time_message(timestamp_s)
-    message.header.frame_id = "sim_world"
+    message.header.frame_id = GROUND_TRUTH_FRAME
     message.pose.position.x, message.pose.position.y, message.pose.position.z = sample.position_m
     message.pose.orientation.x, message.pose.orientation.y, message.pose.orientation.z, message.pose.orientation.w = sample.orientation_xyzw
     publisher.publish(message)
@@ -241,12 +276,13 @@ def _publish_ground_truth(publisher, sample, timestamp_s: float):
 def _publish_tf(publisher, sample, timestamp_s: float) -> None:
     from geometry_msgs.msg import TransformStamped
     from tf2_msgs.msg import TFMessage
+    from simulator.ros.topic_contract import FRAMES
 
     stamp = _sim_time_message(timestamp_s)
     message = TransformStamped()
     message.header.stamp = stamp
-    message.header.frame_id = "sim_world"
-    message.child_frame_id = "sensor_rig"
+    message.header.frame_id = FRAMES["sim_world"]
+    message.child_frame_id = FRAMES["truth_sensor_rig"]
     message.transform.translation.x, message.transform.translation.y, message.transform.translation.z = sample.position_m
     message.transform.rotation.x, message.transform.rotation.y, message.transform.rotation.z, message.transform.rotation.w = sample.orientation_xyzw
     publisher.publish(TFMessage(transforms=[message]))
@@ -255,6 +291,7 @@ def _publish_tf(publisher, sample, timestamp_s: float) -> None:
 def _publish_static_tf(broadcaster, scenario) -> None:
     from geometry_msgs.msg import TransformStamped
 
+    from simulator.ros.topic_contract import FRAMES
     from simulator.sensors.transforms import camera_optical_quaternion, quaternion_from_rpy_deg
 
     transforms = []
@@ -267,9 +304,9 @@ def _publish_static_tf(broadcaster, scenario) -> None:
         message.transform.rotation.x, message.transform.rotation.y, message.transform.rotation.z, message.transform.rotation.w = rotation
         transforms.append(message)
 
-    add("sensor_rig", "camera_link", scenario.camera.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.camera.pose_in_rig.rpy_deg))
-    add("camera_link", "camera_optical_frame", (0.0, 0.0, 0.0), camera_optical_quaternion())
-    add("sensor_rig", "lidar_link", scenario.lidar.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.lidar.pose_in_rig.rpy_deg))
+    add(FRAMES["sensor_rig"], FRAMES["camera_link"], scenario.camera.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.camera.pose_in_rig.rpy_deg))
+    add(FRAMES["camera_link"], FRAMES["camera_optical"], (0.0, 0.0, 0.0), camera_optical_quaternion())
+    add(FRAMES["sensor_rig"], FRAMES["lidar_link"], scenario.lidar.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.lidar.pose_in_rig.rpy_deg))
     broadcaster.sendTransform(transforms)
 
 
@@ -317,7 +354,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         # loaded and before the simulation starts.
         print("[grocery-runtime] creating RTX LiDAR ROS writer", flush=True)
         lidar_topic = TOPICS["lidar_ideal_points"] if noise_config.enabled else TOPICS["lidar_points"]
-        _, _lidar_sensor = _create_lidar(lidar_path, scenario.lidar.pose_in_rig.position_m, lidar_topic)
+        lidar_spec = lidar_runtime_spec(scenario.lidar)
+        _, _lidar_sensor = _create_lidar(lidar_path, scenario.lidar, lidar_topic)
         print("[grocery-runtime] creating clock and TF graph", flush=True)
         _create_clock_graph()
         print("[grocery-runtime] initializing simulation", flush=True)
@@ -341,13 +379,29 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
             lidar_relay = LidarNoiseRelay(node, noise_config, scenario.seed)
         rgb_stamps: list[float] = []
+        clock_stamps: list[float] = []
+        ground_truth_stamps: list[float] = []
+        lidar_stamps: list[float] = []
 
         def _on_rgb(message) -> None:
             rgb_stamps.append(float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0)
 
-        from sensor_msgs.msg import Image
+        def _on_clock(message) -> None:
+            clock_stamps.append(float(message.clock.sec) + float(message.clock.nanosec) / 1_000_000_000.0)
+
+        def _on_ground_truth(message) -> None:
+            ground_truth_stamps.append(float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0)
+
+        def _on_lidar(message) -> None:
+            lidar_stamps.append(float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0)
+
+        from rosgraph_msgs.msg import Clock
+        from sensor_msgs.msg import Image, PointCloud2
 
         node.create_subscription(Image, TOPICS["rgb_image"], _on_rgb, 10)
+        node.create_subscription(Clock, TOPICS["clock"], _on_clock, 10)
+        node.create_subscription(PoseStamped, TOPICS["ground_truth_pose"], _on_ground_truth, 10)
+        node.create_subscription(PointCloud2, TOPICS["lidar_points"], _on_lidar, 10)
         app_utils.play()
         print("[grocery-runtime] simulation running", flush=True)
 
@@ -391,9 +445,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "primitive_count": primitive_count,
             "product_count": len(layout.products),
             "topics": {
-                "clock": "/clock",
-                "rgb": "/sim/camera/rgb/image_raw",
-                "camera_info": "/sim/camera/rgb/camera_info",
+                "clock": TOPICS["clock"],
+                "rgb": TOPICS["rgb_image"],
+                "camera_info": TOPICS["rgb_camera_info"],
                 "lidar_ideal": TOPICS["lidar_ideal_points"],
                 "lidar": TOPICS["lidar_points"],
                 "ground_truth_pose": TOPICS["ground_truth_pose"],
@@ -404,6 +458,14 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "observed_rgb_hz": (len(rgb_stamps) - 1) / (rgb_stamps[-1] - rgb_stamps[0]) if len(rgb_stamps) > 1 and rgb_stamps[-1] > rgb_stamps[0] else None,
             "clock_source": "Isaac timeline current_time",
             "static_tf_topic": "/tf_static",
+            "truth_tf_child_frame": FRAMES["truth_sensor_rig"],
+            "lidar_config": lidar_spec,
+            "timestamp_alignment": {
+                "reference": TOPICS["clock"],
+                "ground_truth": _timestamp_summary(clock_stamps, ground_truth_stamps),
+                "rgb": _timestamp_summary(clock_stamps, rgb_stamps),
+                "lidar": _timestamp_summary(clock_stamps, lidar_stamps),
+            },
             "lidar_noise": {
                 "enabled": noise_config.enabled,
                 "relay": "simulator.ros.lidar_noise_relay" if lidar_relay is not None else None,

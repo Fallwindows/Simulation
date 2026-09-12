@@ -1,5 +1,30 @@
+warning: in the working copy of 'rtabmap_conversions/CMakeLists.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_odom/CMakeLists.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_odom/include/rtabmap_odom/OdometryROS.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_odom/src/OdometryROS.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_slam/CMakeLists.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_slam/src/CoreWrapper.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_sync/CMakeLists.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_sync/include/rtabmap_sync/CommonDataSubscriber.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_util/CMakeLists.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_util/include/rtabmap_util/db_player.hpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rtabmap_util/src/nodelets/db_player.cpp', LF will be replaced by CRLF the next time Git touches it
+diff --git a/rtabmap_conversions/CMakeLists.txt b/rtabmap_conversions/CMakeLists.txt
+index 7300b3ea..fbfe8fc8 100644
+--- a/rtabmap_conversions/CMakeLists.txt
++++ b/rtabmap_conversions/CMakeLists.txt
+@@ -84,6 +84,9 @@ ENDIF()
+ ###########
+ 
+ add_library(rtabmap_conversions SHARED src/MsgConversion.cpp)
++if(WIN32)
++  set_target_properties(rtabmap_conversions PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
++endif()
+ target_include_directories(rtabmap_conversions
+   PUBLIC
+     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 diff --git a/rtabmap_odom/CMakeLists.txt b/rtabmap_odom/CMakeLists.txt
-index 7b10ad25..4c43a0d4 100644
+index 7b10ad25..54a12e5a 100644
 --- a/rtabmap_odom/CMakeLists.txt
 +++ b/rtabmap_odom/CMakeLists.txt
 @@ -1,6 +1,10 @@
@@ -13,12 +38,13 @@ index 7b10ad25..4c43a0d4 100644
  if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
    add_compile_options(-Wall -Wextra -Wpedantic)
  endif()
-@@ -103,6 +107,12 @@ target_include_directories(rtabmap_odom
+@@ -103,6 +107,13 @@ target_include_directories(rtabmap_odom
  )
  add_library(rtabmap_odom_plugins SHARED ${rtabmap_odom_plugins_lib_src})
  
 +if(WIN32)
 +  set_target_properties(rtabmap_odom PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
++  set_target_properties(rtabmap_odom_plugins PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 +  target_compile_definitions(rtabmap_odom PRIVATE RTABMAP_ODOM_BUILDING_DLL)
 +  target_compile_definitions(rtabmap_odom_plugins PRIVATE RTABMAP_ODOM_BUILDING_DLL)
 +endif()
@@ -26,6 +52,27 @@ index 7b10ad25..4c43a0d4 100644
  if("$ENV{ROS_DISTRO}" STRLESS "lyrical")
     ament_target_dependencies(rtabmap_odom ${AmentLibraries})
  else()
+diff --git a/rtabmap_odom/include/rtabmap_odom/OdometryROS.h b/rtabmap_odom/include/rtabmap_odom/OdometryROS.h
+index ca0df5bc..d68b1faa 100644
+--- a/rtabmap_odom/include/rtabmap_odom/OdometryROS.h
++++ b/rtabmap_odom/include/rtabmap_odom/OdometryROS.h
+@@ -53,6 +53,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "rtabmap_util/ULogToRosout.h"
+ #include "rtabmap_sync/SyncDiagnostic.h"
++#include "rtabmap_odom/visibility.h"
+ 
+ namespace rtabmap {
+ class Odometry;
+@@ -60,7 +61,7 @@ class Odometry;
+ 
+ namespace rtabmap_odom {
+ 
+-class OdometryROS : public rclcpp::Node, public UThread
++class RTABMAP_ODOM_PUBLIC OdometryROS : public rclcpp::Node, public UThread
+ {
+ 
+ public:
 diff --git a/rtabmap_odom/src/OdometryROS.cpp b/rtabmap_odom/src/OdometryROS.cpp
 index 5a270c75..91b4ddb1 100644
 --- a/rtabmap_odom/src/OdometryROS.cpp
@@ -42,7 +89,7 @@ index 5a270c75..91b4ddb1 100644
  
  using namespace rtabmap;
 diff --git a/rtabmap_slam/CMakeLists.txt b/rtabmap_slam/CMakeLists.txt
-index 6107b23a..cb9882d1 100644
+index 6107b23a..ee21d6c8 100644
 --- a/rtabmap_slam/CMakeLists.txt
 +++ b/rtabmap_slam/CMakeLists.txt
 @@ -1,6 +1,10 @@
@@ -56,11 +103,12 @@ index 6107b23a..cb9882d1 100644
  if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
    add_compile_options(-Wall -Wextra -Wpedantic)
  endif()
-@@ -195,6 +199,9 @@ ENDIF(nav2_msgs_FOUND)
+@@ -195,6 +199,10 @@ ENDIF(nav2_msgs_FOUND)
  add_library(rtabmap_slam_plugins SHARED
     ${rtabmap_slam_plugins_lib_src}
  )
 +if(WIN32)
++  set_target_properties(rtabmap_slam_plugins PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 +  target_compile_definitions(rtabmap_slam_plugins PRIVATE RTABMAP_SLAM_BUILDING_DLL)
 +endif()
  target_include_directories(rtabmap_slam_plugins
@@ -113,7 +161,7 @@ index 8fb31a6d..b7eeee59 100644
  	virtual ~CommonDataSubscriber();
  
 diff --git a/rtabmap_util/CMakeLists.txt b/rtabmap_util/CMakeLists.txt
-index 9c287b4a..c080abd0 100644
+index 9c287b4a..532bcea2 100644
 --- a/rtabmap_util/CMakeLists.txt
 +++ b/rtabmap_util/CMakeLists.txt
 @@ -1,6 +1,12 @@
@@ -129,7 +177,21 @@ index 9c287b4a..c080abd0 100644
  if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
    add_compile_options(-Wall -Wextra -Wpedantic)
  endif()
-@@ -149,6 +155,13 @@ add_library(rtabmap_util SHARED
+@@ -30,6 +36,13 @@ find_package(rtabmap_sync REQUIRED)
+ 
+ find_package(RTABMap COMPONENTS gui REQUIRED)
+ 
++if(WIN32 AND PCL_LIBRARY_DIRS)
++  # PCL's imported target set intentionally covers only the requested
++  # components, while RTAB-Map's exported target may carry additional
++  # component names.  Keep MSVC able to resolve those transitive libraries.
++  link_directories(${PCL_LIBRARY_DIRS})
++endif()
++
+ # Optional components
+ find_package(octomap_msgs)
+ find_package(grid_map_ros)
+@@ -149,6 +162,14 @@ add_library(rtabmap_util SHARED
  add_library(rtabmap_util_plugins SHARED
     ${rtabmap_util_plugins_src}
  )
@@ -138,6 +200,7 @@ index 9c287b4a..c080abd0 100644
 +  # not annotate its public symbols on Windows.  Generate its import library;
 +  # keep the large plugin DLL on its explicit component exports.
 +  set_target_properties(rtabmap_util PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
++  set_target_properties(rtabmap_util_plugins PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 +  target_compile_definitions(rtabmap_util_plugins PRIVATE RTABMAP_UTIL_BUILDING_DLL)
 +endif()
  target_include_directories(rtabmap_util
@@ -170,4 +233,3 @@ index cacd6796..e906d61c 100644
          odometryPub_->publish(odomMsg);
      }
  
-

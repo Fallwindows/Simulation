@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 
-from evaluation.metrics import compute_metrics
+from evaluation.metrics import PoseSample, compute_metrics, safe_quaternion
 from evaluation.run_io import write_run
 from simulator.ros.topic_contract import TOPICS
 
@@ -17,7 +17,7 @@ def _stamp(message) -> float:
 
 
 class CollectorNode:
-    def __init__(self, run_dir: Path, scenario: str, duration_s: float):
+    def __init__(self, run_dir: Path, scenario: str, duration_s: float, startup_timeout_s: float):
         import rclpy
         from geometry_msgs.msg import PoseStamped
         from nav_msgs.msg import Odometry
@@ -28,20 +28,39 @@ class CollectorNode:
         self.run_dir = run_dir
         self.scenario = scenario
         self.duration_s = duration_s
+        self.startup_timeout_s = startup_timeout_s
         self.started = time.monotonic()
-        self.ground_truth: list[tuple[float, tuple[float, float, float]]] = []
-        self.estimate: list[tuple[float, tuple[float, float, float]]] = []
+        self.capture_started: float | None = None
+        self.ground_truth: list[PoseSample] = []
+        self.estimate: list[PoseSample] = []
         self.node.create_subscription(PoseStamped, TOPICS["ground_truth_pose"], self._on_ground_truth, 50)
         self.node.create_subscription(Odometry, TOPICS["estimated_odom"], self._on_odom, 50)
 
     def _on_ground_truth(self, message) -> None:
-        self.ground_truth.append((_stamp(message), (float(message.pose.position.x), float(message.pose.position.y), float(message.pose.position.z))))
+        self.ground_truth.append(PoseSample(
+            _stamp(message),
+            (float(message.pose.position.x), float(message.pose.position.y), float(message.pose.position.z)),
+            safe_quaternion((message.pose.orientation.x, message.pose.orientation.y, message.pose.orientation.z, message.pose.orientation.w)),
+        ))
 
     def _on_odom(self, message) -> None:
-        self.estimate.append((_stamp(message), (float(message.pose.pose.position.x), float(message.pose.pose.position.y), float(message.pose.pose.position.z))))
+        self.estimate.append(PoseSample(
+            _stamp(message),
+            (float(message.pose.pose.position.x), float(message.pose.pose.position.y), float(message.pose.pose.position.z)),
+            safe_quaternion((message.pose.pose.orientation.x, message.pose.pose.orientation.y, message.pose.pose.orientation.z, message.pose.pose.orientation.w)),
+        ))
 
     def spin_until_done(self) -> None:
-        while self.rclpy.ok() and time.monotonic() - self.started < self.duration_s:
+        startup_deadline = self.started + self.startup_timeout_s
+        while self.rclpy.ok():
+            now = time.monotonic()
+            if self.capture_started is None:
+                if self.ground_truth or self.estimate:
+                    self.capture_started = now
+                elif now >= startup_deadline:
+                    break
+            elif now - self.capture_started >= self.duration_s:
+                break
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def write(self) -> None:
@@ -50,10 +69,14 @@ class CollectorNode:
             "topics": {"ground_truth": TOPICS["ground_truth_pose"], "estimate": TOPICS["estimated_odom"]},
             "sample_counts": {"ground_truth": len(self.ground_truth), "estimate": len(self.estimate)},
             "collector_duration_s": self.duration_s,
+            "collector_startup_timeout_s": self.startup_timeout_s,
+            "capture_started": self.capture_started is not None,
+            "alignment_policy": "initial_se3",
+            "csv_schema": ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw"],
         }
         self.run_dir.mkdir(parents=True, exist_ok=True)
         if self.ground_truth and self.estimate:
-            metrics = compute_metrics(self.ground_truth, self.estimate, max_time_gap_s=0.2)
+            metrics = compute_metrics(self.ground_truth, self.estimate, max_time_gap_s=0.2, alignment="initial_se3")
             write_run(self.run_dir, metadata, metrics.as_dict(), self.ground_truth, self.estimate)
         else:
             (self.run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
@@ -65,11 +88,17 @@ def main() -> None:
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--scenario", default="baseline_straight")
     parser.add_argument("--duration-seconds", type=float, default=10.0)
+    parser.add_argument("--startup-timeout-seconds", type=float, default=90.0)
     args = parser.parse_args()
     import rclpy
 
     rclpy.init()
-    collector = CollectorNode(Path(args.run_dir), args.scenario, args.duration_seconds)
+    collector = CollectorNode(
+        Path(args.run_dir),
+        args.scenario,
+        args.duration_seconds,
+        args.startup_timeout_seconds,
+    )
     try:
         collector.spin_until_done()
         collector.write()

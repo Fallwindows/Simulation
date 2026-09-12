@@ -1,7 +1,9 @@
+import time
 import unittest
 
+from dashboard.backend.ros_bridge import RosDashboardBridge
 from dashboard.backend.state import DashboardState
-from evaluation.metrics import compute_metrics
+from evaluation.metrics import PoseSample, compute_metrics
 from simulator.sensors.noise import NoiseConfig, apply_lidar_noise, jitter_timestamp
 
 
@@ -19,6 +21,29 @@ class DashboardTests(unittest.TestCase):
         snapshot = state.snapshot()
         self.assertTrue(snapshot["status"]["map_connected"])
         self.assertEqual(snapshot["status"]["map_point_count"], 1)
+
+    def test_tracking_becomes_stale_or_lost_when_odom_stops(self):
+        bridge = object.__new__(RosDashboardBridge)
+        bridge._ground_truth = [PoseSample(0.0, (0.0, 0.0, 0.0)), PoseSample(0.8, (1.0, 0.0, 0.0))]
+        bridge._estimate = [PoseSample(0.0, (0.0, 0.0, 0.0))]
+        bridge._alignment = None
+        self.assertEqual(bridge._tracking_payload()["tracking_state"], "stale")
+        bridge._ground_truth.append(PoseSample(3.0, (2.0, 0.0, 0.0)))
+        self.assertEqual(bridge._tracking_payload()["tracking_state"], "lost")
+
+    def test_live_metric_recompute_is_throttled(self):
+        state = DashboardState()
+        bridge = object.__new__(RosDashboardBridge)
+        bridge.state = state
+        bridge._ground_truth = [PoseSample(0.0, (0.0, 0.0, 0.0)), PoseSample(1.0, (1.0, 0.0, 0.0))]
+        bridge._estimate = [PoseSample(0.0, (0.0, 0.0, 0.0)), PoseSample(1.0, (1.0, 0.0, 0.0))]
+        bridge._alignment = None
+        bridge._last_metrics_refresh = time.monotonic()
+        bridge._refresh_live_metrics()
+        self.assertNotIn("ate_rmse_m", state.snapshot()["metrics"])
+        bridge._last_metrics_refresh = 0.0
+        bridge._refresh_live_metrics()
+        self.assertAlmostEqual(state.snapshot()["metrics"]["ate_rmse_m"], 0.0)
 
 
 class MetricTests(unittest.TestCase):
@@ -39,6 +64,22 @@ class MetricTests(unittest.TestCase):
         metrics = compute_metrics(gt, estimate, alignment="initial_translation")
         self.assertAlmostEqual(metrics.ate_rmse_m, 0.0)
         self.assertEqual(metrics.alignment_policy, "initial_translation")
+
+    def test_initial_se3_alignment_handles_translation_and_rotation(self):
+        qz90 = (0.0, 0.0, 0.7071067811865476, 0.7071067811865476)
+        gt = [PoseSample(0.0, (0.0, 0.0, 0.0)), PoseSample(1.0, (1.0, 0.0, 0.0))]
+        estimate = [PoseSample(0.0, (5.0, -2.0, 0.0), qz90), PoseSample(1.0, (5.0, -1.0, 0.0), qz90)]
+        metrics = compute_metrics(gt, estimate, max_time_gap_s=0.1, alignment="initial_se3")
+        self.assertAlmostEqual(metrics.ate_rmse_m, 0.0, places=6)
+        self.assertAlmostEqual(metrics.rpe_rmse_m or 0.0, 0.0, places=6)
+        self.assertAlmostEqual(metrics.orientation_rmse_deg or 0.0, 0.0, places=6)
+
+    def test_zero_estimate_quaternion_is_safe(self):
+        ground_truth = [PoseSample(0.0, (1.0, 2.0, 0.0), (0.0, 0.0, 0.0, 1.0))]
+        estimate = [PoseSample(0.0, (1.0, 2.0, 0.0), (0.0, 0.0, 0.0, 0.0))]
+        metrics = compute_metrics(ground_truth, estimate, alignment="initial_se3")
+        self.assertEqual(metrics.sample_count, 1)
+        self.assertAlmostEqual(metrics.orientation_rmse_deg or 0.0, 0.0, places=6)
 
     def test_rpe_detects_wrong_direction(self):
         gt = [(0.0, (0.0, 0.0, 0.0)), (1.0, (1.0, 0.0, 0.0)), (2.0, (2.0, 0.0, 0.0))]

@@ -4,7 +4,7 @@
   "odom_frame_id": "odom",
   "map_frame_id": "map",
   "subscribe_scan_cloud": true,
-  "subscribe_rgb": true,
+  "subscribe_rgb": false,
   "subscribe_depth": false,
   "subscribe_odom_info": true,
   "approx_sync": true,

@@ -1,6 +1,7 @@
 {
   "frames": {
     "sim_world": "sim_world",
+    "truth_sensor_rig": "truth_sensor_rig",
     "sensor_rig": "sensor_rig",
     "camera_link": "camera_link",
     "camera_optical": "camera_optical_frame",
@@ -25,7 +26,7 @@
   },
   "units": "SI",
   "ownership": {
-    "sim_world_to_rig": "simulator_ground_truth",
+    "sim_world_to_truth_sensor_rig": "simulator_ground_truth_visualization_only",
     "rig_to_sensors": "simulator_static_tf",
     "odom_to_sensor_rig": "rtabmap_icp_odometry",
     "map_to_odom": "slam_only"

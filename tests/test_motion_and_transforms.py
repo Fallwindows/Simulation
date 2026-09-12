@@ -5,11 +5,14 @@ from pathlib import Path
 from simulator.config.loader import load_scenario
 from simulator.motion.trajectory import StraightTrajectory, WalkingTrajectory
 from simulator.sensors.rig import assert_no_ground_truth_odometry_leakage, build_sensor_rig_description
+from simulator.runtime.isaac_sim_runner import lidar_runtime_spec
 from simulator.sensors.transforms import (
     Transform,
     camera_optical_quaternion,
+    camera_usd_quaternion,
     quaternion_from_rpy_deg,
     rpy_deg_from_quaternion,
+    rotate_vector,
     transform_point,
 )
 
@@ -42,8 +45,27 @@ class MotionTests(unittest.TestCase):
         for expected, actual in zip(original, recovered):
             self.assertAlmostEqual(expected, actual, places=6)
 
+    def test_camera_usd_basis_and_ros_optical_basis(self):
+        usd = camera_usd_quaternion()
+        self.assertEqual(rotate_vector(usd, (0.0, 0.0, -1.0)), (1.0, 0.0, 0.0))
+        self.assertEqual(rotate_vector(usd, (0.0, 1.0, 0.0)), (0.0, 0.0, 1.0))
+        self.assertEqual(rotate_vector(usd, (1.0, 0.0, 0.0)), (0.0, -1.0, 0.0))
+        optical = camera_optical_quaternion()
+        self.assertEqual(rotate_vector(optical, (1.0, 0.0, 0.0)), (0.0, -1.0, 0.0))
+        self.assertEqual(rotate_vector(optical, (0.0, 1.0, 0.0)), (0.0, 0.0, -1.0))
+        self.assertEqual(rotate_vector(optical, (0.0, 0.0, 1.0)), (1.0, 0.0, 0.0))
+
     def test_sensor_rig_contract_keeps_truth_separate(self):
         rig = build_sensor_rig_description(self.scenario.camera, self.scenario.lidar)
         assert_no_ground_truth_odometry_leakage(rig)
         self.assertEqual(rig.frames["camera_optical"], "camera_optical_frame")
         self.assertGreater(rig.camera_intrinsics.fx_px, 0.0)
+
+    def test_lidar_config_reaches_isaac_sensor_boundary(self):
+        spec = lidar_runtime_spec(self.scenario.lidar)
+        self.assertEqual(spec["tick_rate_hz"], self.scenario.lidar.hz)
+        self.assertEqual(spec["near_range_m"], self.scenario.lidar.min_range_m)
+        self.assertEqual(spec["far_range_m"], self.scenario.lidar.max_range_m)
+        self.assertEqual(spec["translation_m"], list(self.scenario.lidar.pose_in_rig.position_m))
+        self.assertEqual(len(spec["orientation_xyzw"]), 4)
+        self.assertIn("unsupported_for_schema_created_sensor", spec)

@@ -5,7 +5,7 @@
 - Repository: `Fallwindows/Simulation`
 - Branch: `master`
 - Base commit: repository history before the native runtime milestone.
-- Current verified commit: see `git log -1` and `origin/master` after this handoff update.
+- Current verified commit: recorded below after the final push.
 
 ## Implemented
 
@@ -26,13 +26,13 @@
 - RTX camera graph, native OmniLidar creation, and ROS 2 writers.
 - `/clock`, TF, RGB, LiDAR, and ground-truth messages across the live native ROS/Zenoh graph.
 - Browser backend `/api/health` plus live RGB/LiDAR cache status.
-- Native `rtabmap_odom` and `rtabmap_slam` launch with the simulator stream; `/icp_odometry` and `/rtabmap` stayed alive and the dashboard received 3,613 accumulated map points on `/slam/map_cloud` in the consolidated smoke.
-- The consolidated launcher produced an isolated RTAB-Map database, ground-truth/estimate CSVs, and serialized metrics under `runs/20260912-130123/`.
+- Native `rtabmap_odom` and `rtabmap_slam` launch with the LiDAR-only simulator stream; the consolidated launcher requires a live `/slam/map_cloud` sample before accepting the run.
+- The final consolidated smoke produced an isolated RTAB-Map database, ground-truth/estimate CSVs with quaternion fields, `initial_se3` metrics, and a unique Isaac status artifact under `runs/20260912-155756059/`.
+- TF ownership is split cleanly: `sim_world -> truth_sensor_rig` is visualization-only, while the estimator tree is `map -> odom -> sensor_rig -> camera_link/lidar_link`.
 
-## Not yet interactively verified
+## Remaining manual verification
 
-- The consolidated user session still needs to observe RTAB-Map ICP odometry, 3D map accumulation, and the browser's two point-cloud panels end to end.
-- GUI rendering and walking motion need visual confirmation; the walking runtime now applies the full sampled orientation to the actual USD `SensorRig`.
+- The consolidated user session should visually observe GUI rendering, walking motion, RTAB-Map ICP odometry, 3D map accumulation, and the browser's two independent point-cloud panels end to end.
 
 ## Automated/development checks
 
@@ -44,6 +44,7 @@
 - Full dashboard + Zenoh + native RTAB-Map + evaluation-collector smoke with `/tf_static`, RGB, LiDAR, odometry, map, and metrics artifacts
 - Live dashboard + Zenoh + RTAB-Map smoke with RGB, LiDAR, odometry, and map caches
 - `git diff --check`
+- Final live smoke: Isaac 6.1 headless runtime, RGB/LiDAR/clock/TF, Zenoh, dashboard health/status, native RTAB-Map, map publication, collector artifacts, quaternion CSVs, timestamp-offset status, and cleanup.
 
 ## Expected localhost outputs
 
@@ -57,13 +58,14 @@
 
 ## Important architecture
 
-The simulator publishes sensor observations and ground truth. Ground truth is never remapped to `/slam/odom`. RTAB-Map/ICP owns estimator odometry and `map -> odom` once its native binaries are installed. The dashboard consumes ROS-visible caches, not Isaac internals.
+The simulator publishes sensor observations and ground truth. Ground truth is never remapped to `/slam/odom` or inserted into the estimator TF tree. RTAB-Map/ICP owns estimator odometry and `map -> odom`; the dashboard consumes ROS-visible caches, not Isaac internals. Live metrics use bounded nearest-time matches with an explicit initial SE(3) alignment and orientation RMSE.
 
 ## Known risks
 
 - The live machine is Windows 11 Home v25H2 build 26200 with Isaac Sim 6.1, native ROS 2 Jazzy, and native RTAB-Map binaries installed.
 - Optional RTAB-Map integrations such as `grid_map`, AprilTag, and ArUco were not required for the LiDAR ICP/SLAM baseline and remain outside this build.
 - The browser point viewer uses a pinned Three.js module URL; both `/ws/lidar` and `/ws/map` have independent viewers, while browser rendering remains a visual QA step.
+- The collector waits for its first live truth/estimate sample before starting the scenario-derived capture window, with a bounded 90-second startup deadline.
 
 ## Files to review first
 

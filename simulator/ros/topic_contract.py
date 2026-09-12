@@ -1,25 +1,16 @@
-"""Public simulator topic/frame contract kept independent of consumers."""
+"""Public simulator topic/frame contract loaded from the canonical JSON YAML."""
 
-FRAMES = {
-    "sim_world": "sim_world",
-    "sensor_rig": "sensor_rig",
-    "camera_link": "camera_link",
-    "camera_optical": "camera_optical_frame",
-    "lidar_link": "lidar_link",
-    "map": "map",
-    "odom": "odom",
-}
+from __future__ import annotations
 
-TOPICS = {
-    "clock": "/clock",
-    "rgb_image": "/sim/camera/rgb/image_raw",
-    "rgb_camera_info": "/sim/camera/rgb/camera_info",
-    "lidar_ideal_points": "/sim/lidar/points_ideal",
-    "lidar_points": "/sim/lidar/points",
-    "ground_truth_pose": "/sim/ground_truth/pose",
-    "estimated_odom": "/slam/odom",
-    "map_points": "/slam/map_cloud",
-}
+import json
+from pathlib import Path
+
+
+CANONICAL_CONTRACT_PATH = Path(__file__).resolve().parents[2] / "config" / "contracts.yaml"
+CONTRACT = json.loads(CANONICAL_CONTRACT_PATH.read_text(encoding="utf-8"))
+FRAMES = dict(CONTRACT["frames"])
+TOPICS = dict(CONTRACT["topics"])
 
 GROUND_TRUTH_MESSAGE = "geometry_msgs/msg/PoseStamped"
 GROUND_TRUTH_FRAME = FRAMES["sim_world"]
+TRUTH_TF_CHILD_FRAME = FRAMES["truth_sensor_rig"]

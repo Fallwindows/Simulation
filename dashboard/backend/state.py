@@ -34,6 +34,10 @@ class DashboardState:
         with self._lock:
             self.metrics = dict(metrics)
 
+    def merge_metrics(self, metrics: dict[str, Any]) -> None:
+        with self._lock:
+            self.metrics.update(metrics)
+
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
         with self._lock:

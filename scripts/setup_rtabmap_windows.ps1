@@ -27,8 +27,11 @@ git -C $rtabmapRos checkout $rosCommit
 
 $patch = Join-Path $repo "patches\rtabmap_ros_windows.patch"
 $alreadyPatched = (Select-String -Path (Join-Path $rtabmapRos "rtabmap_odom\CMakeLists.txt") -Pattern "RTABMAP_ODOM_BUILDING_DLL" -Quiet) -and
+  (Select-String -Path (Join-Path $rtabmapRos "rtabmap_odom\CMakeLists.txt") -Pattern "WINDOWS_EXPORT_ALL_SYMBOLS ON" -Quiet) -and
+  (Select-String -Path (Join-Path $rtabmapRos "rtabmap_conversions\CMakeLists.txt") -Pattern "WINDOWS_EXPORT_ALL_SYMBOLS ON" -Quiet) -and
   (Select-String -Path (Join-Path $rtabmapRos "rtabmap_slam\CMakeLists.txt") -Pattern "RTABMAP_SLAM_BUILDING_DLL" -Quiet) -and
-  (Select-String -Path (Join-Path $rtabmapRos "rtabmap_util\CMakeLists.txt") -Pattern "RTABMAP_UTIL_BUILDING_DLL" -Quiet)
+  (Select-String -Path (Join-Path $rtabmapRos "rtabmap_util\CMakeLists.txt") -Pattern "RTABMAP_UTIL_BUILDING_DLL" -Quiet) -and
+  (Select-String -Path (Join-Path $rtabmapRos "rtabmap_util\CMakeLists.txt") -Pattern "link_directories\(\$\{PCL_LIBRARY_DIRS\}\)" -Quiet)
 if ($alreadyPatched) {
   Write-Host "Windows RTAB-Map patch already applied"
 } else {
@@ -42,12 +45,25 @@ if (-not $vsInstall) { throw "MSVC v143 Desktop C++ workload is not installed" }
 $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" -Directory | Select-Object -Last 1
 if (-not $sdk) { throw "Windows 11 SDK was not found" }
 
+$requiredDependencies = @("pcl_conversions", "image_geometry", "sensor_msgs", "tf2_ros")
+foreach ($packageName in $requiredDependencies) {
+  $prefix = & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") ros2 pkg prefix $packageName 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($prefix -join ""))) {
+    throw "Required ROS 2 dependency '$packageName' is not available in $workspace. Install it through the pinned Pixi manifest before building."
+  }
+}
+
 if ($Build) {
   $manifest = Join-Path $workspace "pixi.toml"
-  $buildArgs = @("run", "--manifest-path", $manifest, "colcon", "build", "--merge-install", "--cmake-clean-cache", "--cmake-args", "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTING=OFF", "-DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON", "--packages-up-to", "rtabmap_odom", "rtabmap_slam")
+  $buildArgs = @("run", "--manifest-path", $manifest, "colcon", "build", "--merge-install", "--cmake-clean-cache", "--packages-up-to", "rtabmap_odom", "rtabmap_slam", "grocery_sim_mapping", "--cmake-args", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTING=OFF", "-DCMAKE_EXE_LINKER_FLAGS=/machine:x64", "-DCMAKE_MODULE_LINKER_FLAGS=/machine:x64", "-DCMAKE_SHARED_LINKER_FLAGS=/machine:x64")
   $vsDevCmd = Join-Path $vsInstall "Common7\Tools\VsDevCmd.bat"
   $command = "call `"$vsDevCmd`" -arch=x64 && `"$pixi`" " + (($buildArgs | ForEach-Object { '"' + $_.Replace('"', '""') + '"' }) -join ' ')
-  cmd.exe /d /s /c $command
+  Push-Location $workspace
+  try {
+    cmd.exe /d /s /c $command
+  } finally {
+    Pop-Location
+  }
   if ($LASTEXITCODE -ne 0) { throw "RTAB-Map ROS 2 build failed with code $LASTEXITCODE" }
 }
 
@@ -58,3 +74,10 @@ if (-not (Test-Path $odomExe) -or -not (Test-Path $slamExe)) {
 }
 Write-Host "rtabmap_odom: $odomExe"
 Write-Host "rtabmap_slam: $slamExe"
+foreach ($packageName in @("rtabmap_odom", "rtabmap_slam", "grocery_sim_mapping")) {
+  $prefix = & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") ros2 pkg prefix $packageName 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($prefix -join ""))) {
+    throw "Installed package verification failed for $packageName"
+  }
+  Write-Host "$packageName prefix: $($prefix -join '')"
+}

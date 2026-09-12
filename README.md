@@ -26,7 +26,7 @@ Isaac runtime adapter -> ROS 2 topics -> dashboard ROS bridge
                          RTAB-Map odometry/SLAM -> evaluation
 ```
 
-Coordinate convention: `x` follows the aisle, `y` is aisle width, and `z` is up. All internal distances are SI units. The simulator owns `sim_world -> sensor_rig`; SLAM owns `map -> odom`.
+Coordinate convention: `x` follows the aisle, `y` is aisle width, and `z` is up. All internal distances are SI units. Ground-truth visualization is the separate `sim_world -> truth_sensor_rig` branch; the estimator tree is `map -> odom -> sensor_rig -> camera_link/lidar_link`, with RTAB-Map owning `map -> odom` and ICP odometry owning `odom -> sensor_rig`.
 
 ## Quick checks
 
@@ -37,7 +37,9 @@ python -m unittest discover -s tests -v
 python -m simulator.runtime.sim_runner --scenario config/scenarios/baseline_straight.yaml --steps 10
 ```
 
-On a supported ROS 2 + Isaac Sim environment, use the PowerShell scripts in `scripts/`. The dashboard is intended to run at [http://localhost:8080](http://localhost:8080). `run_baseline.ps1` runs the full non-interactive stack by default; pass `-Gui` to show Isaac's viewport. `run_sim.ps1` opens the Isaac viewport by default; add `-Headless` for non-interactive runs. Pixi is resolved from PATH, then the normal per-user Pixi installation, or an explicit `-PixiPath`.
+On a supported ROS 2 + Isaac Sim environment, use the PowerShell scripts in `scripts/`. The dashboard is intended to run at [http://localhost:8080](http://localhost:8080). `run_baseline.ps1` runs the full stack in realtime by default; pass `-Gui` to show Isaac's viewport or `-Fast` for accelerated simulation. `run_sim.ps1` accepts explicit mutually exclusive `-Gui` and `-Headless` switches and defaults to the GUI path. Pixi is resolved from PATH, then the normal per-user Pixi installation, or an explicit `-PixiPath`.
+
+The baseline mapping contract is LiDAR-only (`subscribe_scan_cloud=true`, `subscribe_rgb=false`, `subscribe_depth=false`, `subscribe_odom_info=true`, `Reg/Strategy=1`). RGB remains a real ROS camera stream for dashboard and manual sensor validation.
 
 ## Configuration
 

@@ -25,7 +25,7 @@ Security cleanup:
 
 ## Frozen contracts
 
-- Frames: `sim_world -> sensor_rig -> camera_link -> camera_optical_frame` and `sensor_rig -> lidar_link`.
+- Frames: truth visualization `sim_world -> truth_sensor_rig`; estimator tree `map -> odom -> sensor_rig -> camera_link -> camera_optical_frame` and `sensor_rig -> lidar_link`.
 - SLAM owns `map -> odom`; the simulator never publishes that relationship.
 - Ground truth is `geometry_msgs/msg/PoseStamped` on `/sim/ground_truth/pose` in `sim_world`.
 - RGB: `/sim/camera/rgb/image_raw` and `/sim/camera/rgb/camera_info`.
@@ -61,9 +61,9 @@ Security cleanup:
 - Cross-process ROS via Zenoh — verified: camera image, camera info, LiDAR cloud, ground truth, `/clock`, and TF were discovered and received by Pixi ROS CLI processes.
 - Dashboard live integration — verified: `/api/health` passed and `/api/status` reported RGB and LiDAR connected with fresh samples and 29,498 LiDAR points.
 - Visual Studio Build Tools verification — Build Tools 17.14.40, MSVC `14.44.35207`, CMake tools, and Windows SDK `10.0.22621.0` present.
-- RTAB-Map native build — `rtabmap`, `rtabmap_msgs`, `rtabmap_conversions`, `rtabmap_sync`, `rtabmap_util`, `rtabmap_odom`, and `rtabmap_slam` built successfully with Ninja/clang-cl; `rtabmap_odom` executables and `rtabmap_slam/rtabmap.exe` verified in the install tree.
+- RTAB-Map native build — `rtabmap`, `rtabmap_msgs`, `rtabmap_conversions`, `rtabmap_sync`, `rtabmap_util`, `rtabmap_odom`, and `rtabmap_slam` built successfully with Ninja/MSVC; `rtabmap_odom` executables and `rtabmap_slam/rtabmap.exe` verified in the install tree and as live ROS processes.
 - ROS package verification — `ros2 pkg prefix rtabmap_odom` and `ros2 pkg prefix rtabmap_slam` resolve successfully; `ros2 pkg executables` lists `icp_odometry.exe`, `rgbd_odometry.exe`, `stereo_odometry.exe`, and `rtabmap.exe`.
-- RTAB-Map live launch — initial Windows parameter typing caused `rtabmap` to exit with `3221226505`; changing slash-qualified RTAB-Map internal parameters to strings and using the native LiDAR-only 3D path fixed startup. A real Isaac 180-frame run produced `/slam/odom` processing and 297 `/slam/map_cloud` points consumed by the dashboard.
+- RTAB-Map live launch — initial Windows parameter typing caused `rtabmap` to exit with `3221226505`; changing slash-qualified RTAB-Map internal parameters to strings and using the native LiDAR-only 3D path fixed startup. A real Isaac run produced `/slam/odom` processing and nonzero `/slam/map_cloud` data accepted by the consolidated launcher.
 
 ## Version-sensitive runtime assumptions
 
@@ -78,3 +78,19 @@ The runner follows the installed Isaac 6.1 examples: camera helpers and camera i
 ## Git synchronization
 
 Earlier implementation milestones and handoff cleanup were pushed to `origin/master`. The current native Isaac/ROS runtime milestone is the verified working-tree update described above and is pushed after the final test pass; the exact SHA is recorded by the final handoff message.
+
+## Final correctness and integration pass
+
+**Date:** 2026-09-12
+
+- Separated truth TF from estimator TF: the simulator publishes `sim_world -> truth_sensor_rig`; RTAB-Map owns `map -> odom -> sensor_rig` and static sensor children.
+- Made the mapping baseline explicitly LiDAR-only and passed scenario-selected mapping parameters into the packaged launch. Root and packaged contracts/configs are equality-tested.
+- Corrected the USD camera basis to the ROS-compatible optical convention and added basis regression coverage. The walking runtime applies the complete sampled quaternion to the actual USD `SensorRig`.
+- Added initial SE(3) evaluation alignment, orientation RMSE, quaternion CSV fields, bounded tracking freshness states, one-second live metric throttling, and Isaac clock/sensor timestamp-offset status.
+- Added run-isolated status/artifact validation, scenario-derived collector duration, realtime-by-default launch behavior with `-Fast`, explicit `run_sim.ps1 -Gui/-Headless`, and RMW/ROS-domain defaults for the dashboard.
+- Added separate orbit/autofit map/LiDAR viewers using independent `/ws/map` and `/ws/lidar` streams.
+- Final live baseline `runs/20260912-155756059/`: 1,230 Isaac frames, RGB/LiDAR/clock/ground-truth samples, native RTAB-Map database, nonzero map stream, quaternion CSVs, `initial_se3` metrics, and no runtime errors in the preserved logs beyond the Windows ROS log-symlink warning.
+- Live dashboard probe during `runs/20260912-142156510/`: `/api/health` passed; RGB, LiDAR, and map caches were connected with 23,924 LiDAR points and 3,561 accumulated map points; `/api/metrics` reported `tracking_state=tracking` and `initial_se3` alignment.
+- Live walking smoke `runs/final_walking_runtime_smoke.json`: 120 frames completed and the final rig quaternion was non-identity, confirming full sampled orientation reached USD runtime state. Live sensor-realism smoke `runs/final_sensor_realism_runtime_smoke.json`: 21 noisy clouds received and published with timestamp offsets recorded. The GUI smoke `runs/final_gui_runtime_smoke.json` completed 120 frames without `--no-window`.
+- The collector now waits for the first live sample before measuring its scenario-derived capture window, preventing Isaac startup time from consuming the evaluation interval.
+- Final automated suite: 39 tests passing; Python compileall and PowerShell parse checks passing; native RTAB package prefixes and executables verified.

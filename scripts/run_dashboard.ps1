@@ -8,6 +8,8 @@ $ErrorActionPreference = "Stop"
 $pixi = Resolve-PixiExecutable $PixiPath
 $workspace = Resolve-RosWorkspace $RosWorkspace
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
+$env:RMW_IMPLEMENTATION = if ($env:RMW_IMPLEMENTATION) { $env:RMW_IMPLEMENTATION } else { "rmw_zenoh_cpp" }
+$env:ROS_DOMAIN_ID = if ($env:ROS_DOMAIN_ID) { $env:ROS_DOMAIN_ID } else { "0" }
 Push-Location $repo
 try {
   & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m dashboard.backend.serve --host 127.0.0.1 --port $Port
