@@ -20,6 +20,8 @@ $scenarioPath = if ([IO.Path]::IsPathRooted($Scenario)) { $Scenario } else { Joi
 if (-not (Test-Path -LiteralPath $scenarioPath)) { throw "Scenario file not found: $scenarioPath" }
 $pixiWorkspace = Resolve-RosWorkspace $RosWorkspace
 $pixi = Resolve-PixiExecutable $PixiPath
+$env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"
+$env:ROS_DOMAIN_ID = "0"
 if ($PreflightOnly) {
   Push-Location $repo
   try {
@@ -29,8 +31,6 @@ if ($PreflightOnly) {
   }
   exit $LASTEXITCODE
 }
-$env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"
-$env:ROS_DOMAIN_ID = "0"
 $zenohRouter = $null
 
 function Stop-ProcessTree([int]$RootPid) {

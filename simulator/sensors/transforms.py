@@ -10,6 +10,18 @@ Quaternion = tuple[float, float, float, float]
 Vector3 = tuple[float, float, float]
 
 
+def quaternion_xyzw_to_wxyz(q: Quaternion) -> Quaternion:
+    """Convert the ROS/geometry ``xyzw`` order to Isaac's ``wxyz`` order."""
+    x, y, z, w = q
+    return (w, x, y, z)
+
+
+def quaternion_wxyz_to_xyzw(q: Quaternion) -> Quaternion:
+    """Convert Isaac's ``wxyz`` order to the ROS/geometry ``xyzw`` order."""
+    w, x, y, z = q
+    return (x, y, z, w)
+
+
 def quaternion_normalize(q: Quaternion) -> Quaternion:
     norm = math.sqrt(sum(v * v for v in q))
     if norm == 0:

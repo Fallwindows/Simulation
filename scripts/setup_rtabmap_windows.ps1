@@ -11,6 +11,9 @@ $workspace = Resolve-RosWorkspace $RosWorkspace
 $src = Join-Path $workspace "src"
 $rtabmap = Join-Path $src "rtabmap"
 $rtabmapRos = Join-Path $src "rtabmap_ros"
+$repoPackage = Join-Path $repo "ros2_ws\src\grocery_sim_mapping"
+$workspacePackage = Join-Path $src "grocery_sim_mapping"
+$manifest = Join-Path $workspace "pixi.toml"
 $coreCommit = "2fbbe19d707e6b9fada74bc6b74c284117197a1c"
 $rosCommit = "61edb4ee85e35f4cc967fa6b502b58d8e3bc6e4f"
 
@@ -20,6 +23,34 @@ if (-not (Test-Path (Join-Path $rtabmap ".git"))) {
 if (-not (Test-Path (Join-Path $rtabmapRos ".git"))) {
   git clone https://github.com/introlab/rtabmap_ros.git $rtabmapRos
 }
+
+if (-not (Test-Path (Join-Path $repoPackage "package.xml"))) {
+  throw "Repository ROS package is missing: $repoPackage"
+}
+if (Test-Path -LiteralPath $workspacePackage) {
+  $resolvedRepoPackage = (Resolve-Path -LiteralPath $repoPackage).Path
+  $resolvedWorkspacePackage = (Resolve-Path -LiteralPath $workspacePackage).Path
+  $workspaceItem = Get-Item -LiteralPath $workspacePackage
+  $workspaceTarget = if ($workspaceItem.LinkType) { [string]$workspaceItem.Target } else { "" }
+  if ($resolvedRepoPackage -eq $resolvedWorkspacePackage -or $workspaceTarget -eq $resolvedRepoPackage) {
+    Write-Host "Workspace grocery_sim_mapping already resolves to the repository package"
+  } else {
+    Get-ChildItem -LiteralPath $repoPackage -Force | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination $workspacePackage -Recurse -Force
+    }
+  }
+} else {
+  New-Item -ItemType Directory -Force -Path $workspacePackage | Out-Null
+  Get-ChildItem -LiteralPath $repoPackage -Force | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $workspacePackage -Recurse -Force
+  }
+}
+$sourceSha = (& git -C $repo rev-parse HEAD 2>$null | Select-Object -First 1).ToString().Trim()
+Set-Content -LiteralPath (Join-Path $workspacePackage ".simulation_source_sha") -Value $sourceSha -Encoding ASCII
+Write-Host "Synchronized grocery_sim_mapping from repo commit $sourceSha"
+
+& $pixi install --manifest-path $manifest
+if ($LASTEXITCODE -ne 0) { throw "Pixi dependency installation failed with code $LASTEXITCODE" }
 git -C $rtabmap fetch --all --tags
 git -C $rtabmap checkout $coreCommit
 git -C $rtabmapRos fetch --all --tags
@@ -54,7 +85,6 @@ foreach ($packageName in $requiredDependencies) {
 }
 
 if ($Build) {
-  $manifest = Join-Path $workspace "pixi.toml"
   $buildArgs = @("run", "--manifest-path", $manifest, "colcon", "build", "--merge-install", "--cmake-clean-cache", "--packages-up-to", "rtabmap_odom", "rtabmap_slam", "grocery_sim_mapping", "--cmake-args", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTING=OFF", "-DCMAKE_EXE_LINKER_FLAGS=/machine:x64", "-DCMAKE_MODULE_LINKER_FLAGS=/machine:x64", "-DCMAKE_SHARED_LINKER_FLAGS=/machine:x64")
   $vsDevCmd = Join-Path $vsInstall "Common7\Tools\VsDevCmd.bat"
   $command = "call `"$vsDevCmd`" -arch=x64 && `"$pixi`" " + (($buildArgs | ForEach-Object { '"' + $_.Replace('"', '""') + '"' }) -join ' ')

@@ -22,6 +22,10 @@ class CollectorNode:
         from geometry_msgs.msg import PoseStamped
         from nav_msgs.msg import Odometry
         from rclpy.node import Node
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+        from rosgraph_msgs.msg import Clock
+        from sensor_msgs.msg import Image, PointCloud2
+        from tf2_msgs.msg import TFMessage
 
         self.rclpy = rclpy
         self.node = Node("grocery_sim_evaluation_collector")
@@ -31,35 +35,111 @@ class CollectorNode:
         self.startup_timeout_s = startup_timeout_s
         self.started = time.monotonic()
         self.capture_started: float | None = None
+        self.capture_started_sim_time_s: float | None = None
+        self.latest_sim_time_s: float | None = None
+        self.sim_time_target_s: float | None = None
+        self.sim_time_complete = False
+        self.completion_reason = "not_started"
+        self.post_target_grace_s = 15.0
+        self.post_target_grace_deadline: float | None = None
+        self.wall_guard_timeout_s = max(30.0, self.duration_s * 2.0)
         self.ground_truth: list[PoseSample] = []
         self.estimate: list[PoseSample] = []
+        self.invalid_quaternion_counts = {"ground_truth": 0, "estimate": 0}
+        self.topic_observations = {
+            "ground_truth": {"topic": TOPICS["ground_truth_pose"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "estimate": {"topic": TOPICS["estimated_odom"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "clock": {"topic": TOPICS["clock"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "rgb": {"topic": TOPICS["rgb_image"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "lidar": {"topic": TOPICS["lidar_points"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "map": {"topic": TOPICS["map_points"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "tf": {"topic": "/tf", "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "tf_static": {"topic": "/tf_static", "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+        }
         self.node.create_subscription(PoseStamped, TOPICS["ground_truth_pose"], self._on_ground_truth, 50)
         self.node.create_subscription(Odometry, TOPICS["estimated_odom"], self._on_odom, 50)
+        self.node.create_subscription(Clock, TOPICS["clock"], self._on_clock, 50)
+        self.node.create_subscription(Image, TOPICS["rgb_image"], lambda message: self._observe("rgb", message), 10)
+        self.node.create_subscription(PointCloud2, TOPICS["lidar_points"], lambda message: self._observe("lidar", message), 10)
+        self.node.create_subscription(PointCloud2, TOPICS["map_points"], lambda message: self._observe("map", message), 10)
+        self.node.create_subscription(TFMessage, "/tf", lambda message: self._observe("tf", message), 50)
+        static_qos = QoSProfile(depth=1)
+        static_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        static_qos.reliability = ReliabilityPolicy.RELIABLE
+        self.node.create_subscription(TFMessage, "/tf_static", lambda message: self._observe("tf_static", message), static_qos)
+
+    @staticmethod
+    def _message_stamp(message) -> float | None:
+        if hasattr(message, "clock"):
+            return float(message.clock.sec) + float(message.clock.nanosec) / 1_000_000_000.0
+        if hasattr(message, "header"):
+            return float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0
+        if hasattr(message, "transforms") and message.transforms:
+            stamp = message.transforms[0].header.stamp
+            return float(stamp.sec) + float(stamp.nanosec) / 1_000_000_000.0
+        return None
+
+    def _observe(self, name: str, message) -> None:
+        observation = self.topic_observations[name]
+        observation["count"] += 1
+        stamp = self._message_stamp(message)
+        if stamp is not None:
+            if observation["first_stamp_s"] is None:
+                observation["first_stamp_s"] = stamp
+            observation["last_stamp_s"] = stamp
+
+    def _on_clock(self, message) -> None:
+        self._observe("clock", message)
+        self.latest_sim_time_s = self._message_stamp(message)
 
     def _on_ground_truth(self, message) -> None:
+        self._observe("ground_truth", message)
+        orientation = safe_quaternion((message.pose.orientation.x, message.pose.orientation.y, message.pose.orientation.z, message.pose.orientation.w))
+        if orientation is None:
+            self.invalid_quaternion_counts["ground_truth"] += 1
+            return
         self.ground_truth.append(PoseSample(
             _stamp(message),
             (float(message.pose.position.x), float(message.pose.position.y), float(message.pose.position.z)),
-            safe_quaternion((message.pose.orientation.x, message.pose.orientation.y, message.pose.orientation.z, message.pose.orientation.w)),
+            orientation,
         ))
+        if self.capture_started_sim_time_s is None:
+            self.capture_started_sim_time_s = _stamp(message)
 
     def _on_odom(self, message) -> None:
+        self._observe("estimate", message)
+        orientation = safe_quaternion((message.pose.pose.orientation.x, message.pose.pose.orientation.y, message.pose.pose.orientation.z, message.pose.pose.orientation.w))
+        if orientation is None:
+            self.invalid_quaternion_counts["estimate"] += 1
+            return
         self.estimate.append(PoseSample(
             _stamp(message),
             (float(message.pose.pose.position.x), float(message.pose.pose.position.y), float(message.pose.pose.position.z)),
-            safe_quaternion((message.pose.pose.orientation.x, message.pose.pose.orientation.y, message.pose.pose.orientation.z, message.pose.pose.orientation.w)),
+            orientation,
         ))
+        if self.capture_started_sim_time_s is None:
+            self.capture_started_sim_time_s = _stamp(message)
 
     def spin_until_done(self) -> None:
         startup_deadline = self.started + self.startup_timeout_s
         while self.rclpy.ok():
             now = time.monotonic()
             if self.capture_started is None:
-                if self.ground_truth or self.estimate:
+                if self.capture_started_sim_time_s is not None:
                     self.capture_started = now
+                    self.sim_time_target_s = self.capture_started_sim_time_s + self.duration_s
+                    self.completion_reason = "capturing_sim_time"
                 elif now >= startup_deadline:
+                    self.completion_reason = "startup_timeout"
                     break
-            elif now - self.capture_started >= self.duration_s:
+            elif self.sim_time_complete and self.post_target_grace_deadline is not None and now >= self.post_target_grace_deadline:
+                break
+            elif not self.sim_time_complete and self.latest_sim_time_s is not None and self.sim_time_target_s is not None and self.latest_sim_time_s >= self.sim_time_target_s - 1e-3:
+                self.sim_time_complete = True
+                self.completion_reason = "simulation_time_reached"
+                self.post_target_grace_deadline = now + self.post_target_grace_s
+            elif self.capture_started is not None and now - self.capture_started >= self.wall_guard_timeout_s:
+                self.completion_reason = "simulation_time_stalled_wall_guard"
                 break
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
@@ -68,10 +148,21 @@ class CollectorNode:
             "scenario": self.scenario,
             "topics": {"ground_truth": TOPICS["ground_truth_pose"], "estimate": TOPICS["estimated_odom"]},
             "sample_counts": {"ground_truth": len(self.ground_truth), "estimate": len(self.estimate)},
+            "invalid_quaternion_counts": dict(self.invalid_quaternion_counts),
+            "topic_observations": self.topic_observations,
+            "required_live_topics": [name for name in self.topic_observations],
             "collector_duration_s": self.duration_s,
             "collector_startup_timeout_s": self.startup_timeout_s,
             "capture_started": self.capture_started is not None,
+            "simulation_time_complete": self.sim_time_complete,
+            "simulation_time_start_s": self.capture_started_sim_time_s,
+            "simulation_time_end_s": self.latest_sim_time_s,
+            "simulation_time_target_s": self.sim_time_target_s,
+            "completion_reason": self.completion_reason,
+            "wall_guard_timeout_s": self.wall_guard_timeout_s,
+            "post_target_grace_s": self.post_target_grace_s,
             "alignment_policy": "initial_se3",
+            "sampling_policy": "interpolate_ground_truth_at_estimator_timestamps",
             "csv_schema": ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw"],
         }
         self.run_dir.mkdir(parents=True, exist_ok=True)

@@ -19,6 +19,10 @@ def write_run(run_dir: str | Path, metadata: dict[str, Any], metrics: dict[str, 
         with (target / name).open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(("timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw"))
-            writer.writerows((sample.timestamp_s, *sample.position_m, *sample.orientation_xyzw) for sample in (as_pose_sample(item) for item in samples))
+            writer.writerows(
+                (sample.timestamp_s, *sample.position_m, *sample.orientation_xyzw)
+                for item in samples
+                if (sample := as_pose_sample(item)) is not None
+            )
     (target / "notes.txt").write_text(notes, encoding="utf-8")
     return target

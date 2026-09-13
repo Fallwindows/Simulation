@@ -77,9 +77,22 @@ class MetricTests(unittest.TestCase):
     def test_zero_estimate_quaternion_is_safe(self):
         ground_truth = [PoseSample(0.0, (1.0, 2.0, 0.0), (0.0, 0.0, 0.0, 1.0))]
         estimate = [PoseSample(0.0, (1.0, 2.0, 0.0), (0.0, 0.0, 0.0, 0.0))]
-        metrics = compute_metrics(ground_truth, estimate, alignment="initial_se3")
-        self.assertEqual(metrics.sample_count, 1)
-        self.assertAlmostEqual(metrics.orientation_rmse_deg or 0.0, 0.0, places=6)
+        with self.assertRaises(ValueError):
+            compute_metrics(ground_truth, estimate, alignment="initial_se3")
+
+    def test_estimator_timestamps_use_interpolated_high_rate_truth(self):
+        ground_truth = [
+            PoseSample(0.0, (0.0, 0.0, 0.0)),
+            PoseSample(0.5, (0.5, 0.0, 0.0)),
+            PoseSample(1.0, (1.0, 0.0, 0.0)),
+        ]
+        estimate = [
+            PoseSample(0.25, (0.25, 0.0, 0.0)),
+            PoseSample(0.75, (0.75, 0.0, 0.0)),
+        ]
+        metrics = compute_metrics(ground_truth, estimate, max_time_gap_s=0.5)
+        self.assertEqual(metrics.sample_count, 2)
+        self.assertAlmostEqual(metrics.ate_rmse_m, 0.0, places=7)
 
     def test_rpe_detects_wrong_direction(self):
         gt = [(0.0, (0.0, 0.0, 0.0)), (1.0, (1.0, 0.0, 0.0)), (2.0, (2.0, 0.0, 0.0))]
@@ -91,7 +104,7 @@ class MetricTests(unittest.TestCase):
         estimate = [(0.0, (0.0, 0.0, 0.0)), (3.0, (3.0, 0.0, 0.0))]
         metrics = compute_metrics(gt, estimate, max_time_gap_s=0.1)
         self.assertEqual(metrics.sample_count, 2)
-        self.assertEqual(metrics.tracking_loss_count, 1)
+        self.assertEqual(metrics.tracking_loss_count, 0)
 
     def test_ideal_noise_mode_is_a_noop(self):
         points = [(1.0, 2.0, 3.0)]

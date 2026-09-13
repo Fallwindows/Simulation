@@ -135,19 +135,25 @@ class RosDashboardBridge:
         self.state.update_metrics(metrics)
 
     def _on_ground_truth(self, message) -> None:
+        orientation = safe_quaternion((message.pose.orientation.x, message.pose.orientation.y, message.pose.orientation.z, message.pose.orientation.w))
+        if orientation is None:
+            return
         self._ground_truth.append(PoseSample(
             self._stamp(message),
             (float(message.pose.position.x), float(message.pose.position.y), float(message.pose.position.z)),
-            safe_quaternion((message.pose.orientation.x, message.pose.orientation.y, message.pose.orientation.z, message.pose.orientation.w)),
+            orientation,
         ))
         self._ground_truth = self._ground_truth[-10000:]
         self._refresh_live_metrics()
 
     def _on_odom(self, message) -> None:
+        orientation = safe_quaternion((message.pose.pose.orientation.x, message.pose.pose.orientation.y, message.pose.pose.orientation.z, message.pose.pose.orientation.w))
+        if orientation is None:
+            return
         self._estimate.append(PoseSample(
             self._stamp(message),
             (float(message.pose.pose.position.x), float(message.pose.pose.position.y), float(message.pose.pose.position.z)),
-            safe_quaternion((message.pose.pose.orientation.x, message.pose.pose.orientation.y, message.pose.pose.orientation.z, message.pose.pose.orientation.w)),
+            orientation,
         ))
         self._estimate = self._estimate[-10000:]
         self._refresh_live_metrics()

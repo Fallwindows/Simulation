@@ -8,6 +8,7 @@ translation only. Scale and full-trajectory fitting are never performed.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -73,22 +74,25 @@ class TrajectoryMetrics:
         }
 
 
-def as_pose_sample(sample: PoseSample | LegacySample | PoseTuple) -> PoseSample:
+def as_pose_sample(sample: PoseSample | LegacySample | PoseTuple) -> PoseSample | None:
     if isinstance(sample, PoseSample):
-        return PoseSample(sample.timestamp_s, sample.position_m, safe_quaternion(sample.orientation_xyzw))
+        orientation = safe_quaternion(sample.orientation_xyzw)
+        return None if orientation is None else PoseSample(sample.timestamp_s, sample.position_m, orientation)
     timestamp, position, *rest = sample
     orientation = safe_quaternion(rest[0]) if rest else (0.0, 0.0, 0.0, 1.0)
+    if orientation is None:
+        return None
     return PoseSample(float(timestamp), tuple(float(v) for v in position), orientation)  # type: ignore[arg-type]
 
 
-def safe_quaternion(values) -> Quaternion:
-    """Normalize a ROS quaternion, treating an invalid zero value as identity."""
+def safe_quaternion(values) -> Quaternion | None:
+    """Normalize a ROS quaternion, returning ``None`` for invalid samples."""
     orientation = tuple(float(value) for value in values)
     if len(orientation) != 4:
         raise ValueError("orientation must contain four quaternion values")
     norm = math.sqrt(sum(value * value for value in orientation))
     if not math.isfinite(norm) or norm <= 1e-12:
-        return (0.0, 0.0, 0.0, 1.0)
+        return None
     return tuple(value / norm for value in orientation)  # type: ignore[return-value]
 
 
@@ -134,10 +138,63 @@ def nearest_pose(sample: PoseSample, candidates: Sequence[PoseSample], max_gap_s
     return match
 
 
+def _valid_pose_samples(samples: Sequence[PoseSample | LegacySample | PoseTuple]) -> list[PoseSample]:
+    return sorted(
+        (sample for item in samples if (sample := as_pose_sample(item)) is not None),
+        key=lambda item: item.timestamp_s,
+    )
+
+
+def _slerp(a: Quaternion, b: Quaternion, fraction: float) -> Quaternion:
+    """Spherical interpolation for normalized ``xyzw`` quaternions."""
+    first = _normalize(a)
+    second = _normalize(b)
+    dot = sum(x * y for x, y in zip(first, second))
+    if dot < 0.0:
+        second = tuple(-value for value in second)  # type: ignore[assignment]
+        dot = -dot
+    if dot > 0.9995:
+        return _normalize(tuple(x + fraction * (y - x) for x, y in zip(first, second)))  # type: ignore[arg-type]
+    theta = math.acos(max(-1.0, min(1.0, dot)))
+    sine = math.sin(theta)
+    first_weight = math.sin((1.0 - fraction) * theta) / sine
+    second_weight = math.sin(fraction * theta) / sine
+    return _normalize(tuple(first_weight * x + second_weight * y for x, y in zip(first, second)))  # type: ignore[arg-type]
+
+
+def interpolate_pose(samples: Sequence[PoseSample], timestamp_s: float, max_gap_s: float) -> PoseSample | None:
+    """Interpolate high-rate truth at an estimator timestamp.
+
+    The gap bound applies to the bracketing truth interval and to endpoint
+    extrapolation.  No nearest-sample substitution is performed.
+    """
+    if not samples:
+        return None
+    ordered = samples if all(samples[i - 1].timestamp_s <= samples[i].timestamp_s for i in range(1, len(samples))) else sorted(samples, key=lambda item: item.timestamp_s)
+    timestamps = [sample.timestamp_s for sample in ordered]
+    index = bisect_left(timestamps, timestamp_s)
+    if index < len(ordered) and timestamps[index] == timestamp_s:
+        return ordered[index]
+    if index == 0:
+        return ordered[0] if ordered[0].timestamp_s - timestamp_s <= max_gap_s else None
+    if index == len(ordered):
+        return ordered[-1] if timestamp_s - ordered[-1].timestamp_s <= max_gap_s else None
+
+    before, after = ordered[index - 1], ordered[index]
+    span = after.timestamp_s - before.timestamp_s
+    if span <= 0.0 or span > max_gap_s:
+        return None
+    fraction = (timestamp_s - before.timestamp_s) / span
+    position = tuple(before.position_m[i] + fraction * (after.position_m[i] - before.position_m[i]) for i in range(3))
+    orientation = _slerp(before.orientation_xyzw, after.orientation_xyzw, fraction)
+    return PoseSample(timestamp_s, position, orientation)  # type: ignore[arg-type]
+
+
 def initial_se3_alignment(ground_truth: Sequence[PoseSample], estimate: Sequence[PoseSample], max_gap_s: float) -> PoseAlignment:
-    for gt in sorted(ground_truth, key=lambda item: item.timestamp_s):
-        est = nearest_pose(gt, estimate, max_gap_s)
-        if est is not None:
+    ordered_gt = sorted(ground_truth, key=lambda item: item.timestamp_s)
+    for est in sorted(estimate, key=lambda item: item.timestamp_s):
+        gt = interpolate_pose(ordered_gt, est.timestamp_s, max_gap_s)
+        if gt is not None:
             rotation = _normalize(_multiply(gt.orientation_xyzw, _conjugate(est.orientation_xyzw)))
             translation = _subtract(gt.position_m, _rotate(rotation, est.position_m))
             return PoseAlignment(rotation, translation, "initial_se3")
@@ -145,9 +202,10 @@ def initial_se3_alignment(ground_truth: Sequence[PoseSample], estimate: Sequence
 
 
 def initial_translation_alignment(ground_truth: Sequence[PoseSample], estimate: Sequence[PoseSample], max_gap_s: float) -> PoseAlignment:
-    for gt in sorted(ground_truth, key=lambda item: item.timestamp_s):
-        est = nearest_pose(gt, estimate, max_gap_s)
-        if est is not None:
+    ordered_gt = sorted(ground_truth, key=lambda item: item.timestamp_s)
+    for est in sorted(estimate, key=lambda item: item.timestamp_s):
+        gt = interpolate_pose(ordered_gt, est.timestamp_s, max_gap_s)
+        if gt is not None:
             return PoseAlignment((0.0, 0.0, 0.0, 1.0), _subtract(gt.position_m, est.position_m), "initial_translation")
     raise ValueError("no initial pose pair within max_time_gap_s")
 
@@ -175,19 +233,21 @@ def compute_metrics(
     max_time_gap_s: float = 0.1,
     alignment: str = "none",
 ) -> TrajectoryMetrics:
-    """Compute bounded nearest-time translational ATE/RPE and orientation error."""
+    """Evaluate each odometry timestamp against interpolated high-rate truth."""
     if not ground_truth or not estimate:
         raise ValueError("ground_truth and estimate must be non-empty")
     if max_time_gap_s < 0:
         raise ValueError("max_time_gap_s must be non-negative")
 
-    ordered_gt = sorted((as_pose_sample(item) for item in ground_truth), key=lambda item: item.timestamp_s)
-    ordered_est = sorted((as_pose_sample(item) for item in estimate), key=lambda item: item.timestamp_s)
+    ordered_gt = _valid_pose_samples(ground_truth)
+    ordered_est = _valid_pose_samples(estimate)
+    if not ordered_gt or not ordered_est:
+        raise ValueError("no valid ground-truth and estimate samples remain after quaternion validation")
     alignment_transform = _alignment(ordered_gt, ordered_est, alignment, max_time_gap_s)
-    matches = [nearest_pose(sample, ordered_est, max_time_gap_s) for sample in ordered_gt]
-    valid = [(gt, est) for gt, est in zip(ordered_gt, matches) if est is not None]
+    matches = [interpolate_pose(ordered_gt, sample.timestamp_s, max_time_gap_s) for sample in ordered_est]
+    valid = [(gt, est) for est, gt in zip(ordered_est, matches) if gt is not None]
     if not valid:
-        raise ValueError("no ground-truth samples have an estimate within max_time_gap_s")
+        raise ValueError("no interpolated ground-truth samples are available at estimator timestamps")
 
     aligned_estimate = [alignment_transform.apply(est) if alignment_transform else est for _, est in valid]
     errors = [_distance(gt.position_m, est.position_m) for (gt, _), est in zip(valid, aligned_estimate)]
@@ -197,20 +257,19 @@ def compute_metrics(
 
     rpe_errors: list[float] = []
     if rpe_interval_s is not None and rpe_interval_s > 0:
-        for gt_now, est_now in valid:
-            gt_future = next((item for item in ordered_gt if item.timestamp_s >= gt_now.timestamp_s + rpe_interval_s), None)
-            if gt_future is None:
+        for index, (gt_now, est_now) in enumerate(valid):
+            target_timestamp = est_now.timestamp_s + rpe_interval_s
+            future = next(((future_index, pair) for future_index, pair in enumerate(valid[index + 1:], start=index + 1) if pair[1].timestamp_s >= target_timestamp), None)
+            if future is None:
                 continue
-            est_future = nearest_pose(gt_future, ordered_est, max_time_gap_s)
-            if est_future is None:
-                continue
+            _, (gt_future, est_future) = future
             est_now_aligned = alignment_transform.apply(est_now) if alignment_transform else est_now
             est_future_aligned = alignment_transform.apply(est_future) if alignment_transform else est_future
             rpe_errors.append(_distance(_subtract(gt_future.position_m, gt_now.position_m), _subtract(est_future_aligned.position_m, est_now_aligned.position_m)))
 
     orientation_errors = [_orientation_error_deg(gt, est) for (gt, _), est in zip(valid, aligned_estimate)]
-    distance = sum(_distance(ordered_gt[i - 1].position_m, ordered_gt[i].position_m) for i in range(1, len(ordered_gt)))
-    duration = max(0.0, ordered_gt[-1].timestamp_s - ordered_gt[0].timestamp_s)
+    distance = sum(_distance(valid[i - 1][0].position_m, valid[i][0].position_m) for i in range(1, len(valid)))
+    duration = max(0.0, valid[-1][0].timestamp_s - valid[0][0].timestamp_s)
     return TrajectoryMetrics(
         ate_rmse_m=math.sqrt(sum(error * error for error in errors) / len(errors)),
         ate_median_m=median,

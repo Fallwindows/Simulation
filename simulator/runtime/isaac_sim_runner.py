@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -42,22 +43,28 @@ def _sim_time_message(seconds: float):
 
 
 def lidar_runtime_spec(lidar_config) -> dict[str, object]:
-    """Map supported scenario LiDAR fields to the Isaac 6.1 sensor boundary."""
-    from simulator.sensors.transforms import quaternion_from_rpy_deg
+    """Map the ROS sensor contract to the Isaac 6.1 LiDAR boundary.
 
+    Scenario poses are expressed relative to ``sensor_rig`` in ROS ``xyzw``
+    order.  Isaac's native RTX LiDAR API takes a local mount pose in ``wxyz``
+    order.  Keeping both representations in the returned spec makes the
+    boundary and its frame semantics inspectable in run artifacts.
+    """
+    from simulator.sensors.transforms import quaternion_from_rpy_deg, quaternion_xyzw_to_wxyz
+
+    orientation_xyzw = quaternion_from_rpy_deg(*lidar_config.pose_in_rig.rpy_deg)
     return {
         "tick_rate_hz": float(lidar_config.hz),
         "near_range_m": float(lidar_config.min_range_m),
         "far_range_m": float(lidar_config.max_range_m),
         "translation_m": list(lidar_config.pose_in_rig.position_m),
-        "orientation_xyzw": list(quaternion_from_rpy_deg(*lidar_config.pose_in_rig.rpy_deg)),
-        "unsupported_for_schema_created_sensor": {
-            "preset": lidar_config.preset,
-            "vertical_fov_deg": list(lidar_config.vertical_fov_deg),
-            "horizontal_samples": int(lidar_config.horizontal_samples),
-            "vertical_samples": int(lidar_config.vertical_samples),
-            "reason": "Isaac Sim 6.1 schema-created Lidar exposes tick/range/pose here; scan pattern fields require a model/config asset.",
-        },
+        "orientation_xyzw_ros": list(orientation_xyzw),
+        "orientation_wxyz_isaac": list(quaternion_xyzw_to_wxyz(orientation_xyzw)),
+        "mount_frame": "sensor_rig",
+        "mount_semantics": "rig_relative",
+        "world_pose_semantics": "sensor_rig_world_pose_composed_with_local_mount",
+        "sensor_asset": "Example_Rotary",
+        "scan_pattern_source": "Isaac Sim 6.1 Example_Rotary asset",
     }
 
 
@@ -69,6 +76,17 @@ def _timestamp_summary(reference: list[float], samples: list[float]) -> dict[str
         "sample_count": len(samples),
         "mean_offset_s": sum(offsets) / len(offsets),
         "max_abs_offset_s": max(abs(value) for value in offsets),
+    }
+
+
+def _point_count_summary(samples: list[int]) -> dict[str, float | int | None]:
+    if not samples:
+        return {"sample_count": 0, "min_points": None, "max_points": None, "mean_points": None}
+    return {
+        "sample_count": len(samples),
+        "min_points": min(samples),
+        "max_points": max(samples),
+        "mean_points": sum(samples) / len(samples),
     }
 
 
@@ -237,9 +255,11 @@ def _create_lidar(lidar_path: str, lidar_config, topic: str):
     # scan bounds, cadence, and pose.
     lidar = Lidar.create(
         path=lidar_path,
+        config="Example_Rotary",
+        accumulate_outputs=True,
         tick_rate=spec["tick_rate_hz"],
         translations=[spec["translation_m"]],
-        orientations=[spec["orientation_xyzw"]],
+        orientations=[spec["orientation_wxyz_isaac"]],
         attributes={
             "omni:sensor:Core:scanRateBaseHz": spec["tick_rate_hz"],
             "omni:sensor:Core:nearRangeM": spec["near_range_m"],
@@ -329,6 +349,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     print("[grocery-runtime] starting SimulationApp", flush=True)
     simulation_app = SimulationApp({"renderer": args.renderer, "headless": bool(args.headless)})
     node = None
+    executor = None
+    executor_thread = None
     runtime_ok = False
     try:
         import isaacsim.core.experimental.utils.app as app_utils
@@ -365,10 +387,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         import rclpy
         from geometry_msgs.msg import PoseStamped
         from tf2_msgs.msg import TFMessage
+        from rclpy.executors import MultiThreadedExecutor
         from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
         rclpy.init(args=None)
         node = rclpy.create_node("grocery_sim_ground_truth")
+        executor = MultiThreadedExecutor(num_threads=2)
+        executor.add_node(node)
         gt_pub = node.create_publisher(PoseStamped, TOPICS["ground_truth_pose"], 10)
         tf_pub = node.create_publisher(TFMessage, "/tf", 10)
         static_tf = StaticTransformBroadcaster(node)
@@ -382,6 +407,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         clock_stamps: list[float] = []
         ground_truth_stamps: list[float] = []
         lidar_stamps: list[float] = []
+        lidar_point_counts: list[int] = []
 
         def _on_rgb(message) -> None:
             rgb_stamps.append(float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0)
@@ -394,6 +420,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
         def _on_lidar(message) -> None:
             lidar_stamps.append(float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0)
+            lidar_point_counts.append(int(getattr(message, "width", 0)) * int(getattr(message, "height", 0)))
 
         from rosgraph_msgs.msg import Clock
         from sensor_msgs.msg import Image, PointCloud2
@@ -402,6 +429,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         node.create_subscription(Clock, TOPICS["clock"], _on_clock, 10)
         node.create_subscription(PoseStamped, TOPICS["ground_truth_pose"], _on_ground_truth, 10)
         node.create_subscription(PointCloud2, TOPICS["lidar_points"], _on_lidar, 10)
+        executor_thread = threading.Thread(target=executor.spin, name="grocery_sim_ros_executor", daemon=True)
+        executor_thread.start()
         app_utils.play()
         print("[grocery-runtime] simulation running", flush=True)
 
@@ -412,26 +441,35 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         from omni.timeline import get_timeline_interface
 
         timeline = get_timeline_interface()
-        last_timestamp_s = 0.0
+        last_timestamp_s: float | None = None
+        render_phase_offsets_s: list[float] = []
+        simulation_dt_s = 1.0 / 60.0
         for frame in range(frames):
             wall_start = time.perf_counter()
-            timestamp_s = float(timeline.get_current_time())
-            if frame and timestamp_s <= last_timestamp_s:
-                timestamp_s = frame / 60.0
-            last_timestamp_s = timestamp_s
-            sample = trajectory.sample(timestamp_s)
-            rig_api.SetTranslate(Gf.Vec3d(*sample.position_m))
+            timeline_before_s = float(timeline.get_current_time())
+            # Sensor rendering and the simulation clock advance on update().
+            # Command the rig for the measured next simulation tick, then
+            # publish truth using the post-update timeline stamp.  This keeps
+            # truth, TF, and the rendered sensor pose on one measured phase.
+            commanded_timestamp_s = timeline_before_s + simulation_dt_s
+            commanded_sample = trajectory.sample(commanded_timestamp_s)
+            rig_api.SetTranslate(Gf.Vec3d(*commanded_sample.position_m))
             # Apply the complete sampled walking/trajectory orientation to the
             # actual USD rig.  The TF and ground-truth messages use this same
             # quaternion, so USD, ROS TF, and the pose topic remain aligned.
             from simulator.sensors.transforms import rpy_deg_from_quaternion
 
-            sampled_rpy_deg = rpy_deg_from_quaternion(sample.orientation_xyzw)
+            sampled_rpy_deg = rpy_deg_from_quaternion(commanded_sample.orientation_xyzw)
             rig_api.SetRotate(Gf.Vec3f(*sampled_rpy_deg), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+            simulation_app.update()
+            timestamp_s = float(timeline.get_current_time())
+            if last_timestamp_s is not None and timestamp_s <= last_timestamp_s:
+                raise RuntimeError("Isaac timeline did not advance after rendering; refusing synthetic timestamps")
+            render_phase_offsets_s.append(timestamp_s - commanded_timestamp_s)
+            sample = trajectory.sample(timestamp_s)
             _publish_ground_truth(gt_pub, sample, timestamp_s)
             _publish_tf(tf_pub, sample, timestamp_s)
-            simulation_app.update()
-            rclpy.spin_once(node, timeout_sec=0.0)
+            last_timestamp_s = timestamp_s
             if args.realtime:
                 time.sleep(max(0.0, (1.0 / 60.0) - (time.perf_counter() - wall_start)))
 
@@ -457,6 +495,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "observed_rgb_frames": len(rgb_stamps),
             "observed_rgb_hz": (len(rgb_stamps) - 1) / (rgb_stamps[-1] - rgb_stamps[0]) if len(rgb_stamps) > 1 and rgb_stamps[-1] > rgb_stamps[0] else None,
             "clock_source": "Isaac timeline current_time",
+            "ros_callback_service": "MultiThreadedExecutor background thread",
+            "timestamp_phase": {
+                "clock_reference": TOPICS["clock"],
+                "truth_and_rig_source": "Isaac timeline current_time",
+                "policy": "command_rig_before_update_publish_truth_after_update",
+                "evaluation_policy": "interpolate_ground_truth_at_estimator_timestamps",
+                "synthetic_frame_time_fallback": False,
+                "render_phase_offset_mean_s": None if not render_phase_offsets_s else sum(render_phase_offsets_s) / len(render_phase_offsets_s),
+                "render_phase_offset_max_abs_s": None if not render_phase_offsets_s else max(abs(value) for value in render_phase_offsets_s),
+            },
             "static_tf_topic": "/tf_static",
             "truth_tf_child_frame": FRAMES["truth_sensor_rig"],
             "lidar_config": lidar_spec,
@@ -466,6 +514,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 "rgb": _timestamp_summary(clock_stamps, rgb_stamps),
                 "lidar": _timestamp_summary(clock_stamps, lidar_stamps),
             },
+            "lidar_cloud_points": _point_count_summary(lidar_point_counts),
             "lidar_noise": {
                 "enabled": noise_config.enabled,
                 "relay": "simulator.ros.lidar_noise_relay" if lidar_relay is not None else None,
@@ -500,6 +549,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             pass
         raise
     finally:
+        if executor is not None:
+            try:
+                executor.shutdown(timeout_sec=1.0)
+            except Exception:
+                pass
+        if executor_thread is not None and executor_thread.is_alive():
+            executor_thread.join(timeout=1.0)
         if node is not None:
             try:
                 node.destroy_node()

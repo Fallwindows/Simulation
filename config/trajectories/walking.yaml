@@ -1,7 +1,7 @@
 {
   "name": "walking",
-  "duration_s": 20.0,
-  "speed_mps": 0.8,
+  "duration_s": 20.5,
+  "speed_mps": 1.0,
   "start_position_m": [1.5, 0.0, 0.0],
   "yaw_deg": 0.0,
   "sample_hz": 60.0,
@@ -11,5 +11,5 @@
   "sway_hz": 0.9,
   "yaw_amplitude_deg": 2.0,
   "pitch_amplitude_deg": 1.5,
-  "speed_variation_fraction": 0.05
+  "speed_variation_fraction": 0.0
 }

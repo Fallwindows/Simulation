@@ -27,7 +27,8 @@
 - `/clock`, TF, RGB, LiDAR, and ground-truth messages across the live native ROS/Zenoh graph.
 - Browser backend `/api/health` plus live RGB/LiDAR cache status.
 - Native `rtabmap_odom` and `rtabmap_slam` launch with the LiDAR-only simulator stream; the consolidated launcher requires a live `/slam/map_cloud` sample before accepting the run.
-- The final consolidated smoke produced an isolated RTAB-Map database, ground-truth/estimate CSVs with quaternion fields, `initial_se3` metrics, and a unique Isaac status artifact under `runs/20260912-155756059/`.
+- The final consolidated smoke produced an isolated RTAB-Map database, ground-truth/estimate CSVs with quaternion fields, `initial_se3` metrics, and a unique Isaac status artifact under `runs/20260912-191841478/`.
+- The final live artifact used the native Isaac Sim 6.1 `Example_Rotary` RTX LiDAR asset with explicit ROS `xyzw` to Isaac `wxyz` conversion and a rig-relative local mount; it recorded 1,230 simulation frames, 30 Hz RGB, dense LiDAR, 73 valid odometry samples, 18 map updates, and zero invalid quaternions.
 - TF ownership is split cleanly: `sim_world -> truth_sensor_rig` is visualization-only, while the estimator tree is `map -> odom -> sensor_rig -> camera_link/lidar_link`.
 
 ## Remaining manual verification
@@ -58,7 +59,7 @@
 
 ## Important architecture
 
-The simulator publishes sensor observations and ground truth. Ground truth is never remapped to `/slam/odom` or inserted into the estimator TF tree. RTAB-Map/ICP owns estimator odometry and `map -> odom`; the dashboard consumes ROS-visible caches, not Isaac internals. Live metrics use bounded nearest-time matches with an explicit initial SE(3) alignment and orientation RMSE.
+The simulator publishes sensor observations and ground truth. Ground truth is never remapped to `/slam/odom` or inserted into the estimator TF tree. RTAB-Map/ICP owns estimator odometry and `map -> odom`; the dashboard consumes ROS-visible caches, not Isaac internals. Live metrics interpolate high-rate ground truth at estimator timestamps, reject invalid quaternions, and record explicit initial SE(3) alignment and orientation RMSE.
 
 ## Known risks
 

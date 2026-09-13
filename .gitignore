@@ -14,6 +14,7 @@ log/
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
+ros2_ws/src/grocery_sim_mapping/.simulation_source_sha
 
 # Isaac Sim / Omniverse runtime outputs and caches
 .nvidia-omniverse/

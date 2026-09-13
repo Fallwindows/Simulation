@@ -36,8 +36,8 @@ $database = Join-Path $runDir "rtabmap.db"
   database_path = $database
   topics = @{ lidar = $contractData.topics.lidar_points; odom = $contractData.topics.estimated_odom; map = $contractData.topics.map_points }
 } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runDir "mapping_metadata.json") -Encoding UTF8
-$env:RMW_IMPLEMENTATION = if ($env:RMW_IMPLEMENTATION) { $env:RMW_IMPLEMENTATION } else { "rmw_zenoh_cpp" }
-$env:ROS_DOMAIN_ID = if ($env:ROS_DOMAIN_ID) { $env:ROS_DOMAIN_ID } else { "0" }
+$env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"
+$env:ROS_DOMAIN_ID = "0"
 $pixiBaseArgs = @("run", "--manifest-path", (Join-Path $workspace "pixi.toml"), "ros2")
 
 foreach ($packageName in @("rtabmap_odom", "rtabmap_slam", "grocery_sim_mapping")) {

@@ -97,6 +97,14 @@ class ContractTests(unittest.TestCase):
         self.assertIn("[switch]$Headless", sim)
         self.assertIn("Choose either -Gui or -Headless", sim)
 
+    def test_runtime_uses_local_isaac_lidar_pose_and_continuous_ros_executor(self):
+        root = Path(__file__).resolve().parents[1]
+        runtime = (root / "simulator/runtime/isaac_sim_runner.py").read_text(encoding="utf-8")
+        self.assertIn('orientations=[spec["orientation_wxyz_isaac"]]', runtime)
+        self.assertIn("MultiThreadedExecutor", runtime)
+        self.assertIn("command_rig_before_update_publish_truth_after_update", runtime)
+        self.assertNotIn("frame / 60.0", runtime)
+
     def test_windows_setup_does_not_enable_global_auto_export(self):
         root = Path(__file__).resolve().parents[1]
         setup = (root / "scripts/setup_rtabmap_windows.ps1").read_text(encoding="utf-8")
@@ -105,3 +113,18 @@ class ContractTests(unittest.TestCase):
         self.assertIn("Push-Location $workspace", setup)
         self.assertLess(setup.index("--packages-up-to"), setup.index("--cmake-args"))
         self.assertIn("link_directories\\(\\$\\{PCL_LIBRARY_DIRS\\}\\)", setup)
+        self.assertIn("pixi install", setup)
+        self.assertIn("repoPackage", setup)
+        self.assertIn("sourceSha", setup)
+
+    def test_launcher_owns_ros_domain_and_requires_sim_time_freshness(self):
+        root = Path(__file__).resolve().parents[1]
+        baseline = (root / "scripts/run_baseline.ps1").read_text(encoding="utf-8")
+        collector = (root / "evaluation/ros_collector.py").read_text(encoding="utf-8")
+        self.assertIn('$env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"', baseline)
+        self.assertIn('$env:ROS_DOMAIN_ID = "0"', baseline)
+        self.assertIn("simulation_time_complete", baseline)
+        self.assertIn("/rtabmap/pause", baseline)
+        self.assertIn("/rtabmap/backup", baseline)
+        self.assertIn("simulation_time_target_s", collector)
+        self.assertIn("simulation_time_reached", collector)
