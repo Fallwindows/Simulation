@@ -1,9 +1,15 @@
 param(
   [Alias("Run")]
   [string]$RunDir = "",
-  [string]$CaptureDir = ""
+  [string]$CaptureDir = "",
+  [string]$PixiPath = "",
+  [string]$RosWorkspace = ""
 )
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")
+$repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$pixi = Resolve-PixiExecutable $PixiPath
+$workspace = Resolve-RosWorkspace $RosWorkspace
 if (-not $RunDir -and -not $CaptureDir) { throw "Pass -RunDir or -CaptureDir." }
 if (-not $CaptureDir) { $CaptureDir = Join-Path (Resolve-Path $RunDir).Path "capture" }
 $capture = (Resolve-Path -LiteralPath $CaptureDir).Path
@@ -18,10 +24,12 @@ $slamManifest = Get-Content -LiteralPath $slamManifestPath -Raw | ConvertFrom-Js
 if ($slamManifest.status -ne "complete") { throw "Offline SLAM is not complete." }
 $perception = Join-Path $run "perception"
 New-Item -ItemType Directory -Force -Path $perception | Out-Null
-[ordered]@{
-  status="interface_ready"; detector_status="not_implemented"; estimated_inventory_written=$false
-  capture_id=$manifest.capture_id; capture_sha256=$manifest.capture_sha256; slam_manifest="../slam/slam_manifest.json"
-  inputs=[ordered]@{ rgb_video="../capture/rgb_camera.mp4"; rgb_frames="../capture/rgb_frames.jsonl"; camera_info="../capture/camera_info.json"; slam_poses="../slam/slam_poses.csv"; slam_map="../slam/slam_map.pcd" }
-  ground_truth_consumed=$false; ground_truth_required=$false
-} | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $perception "perception_manifest.json") -Encoding UTF8
-Write-Host "Perception interface validated; detector/tracker is intentionally not implemented and no fake inventory was written."
+$args = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.perception.rgb_tracking","--capture-dir",$capture,"--slam-dir",$slam,"--output-dir",$perception,"--repo-root",$repo)
+Push-Location $repo
+try {
+  & $pixi @args
+  if ($LASTEXITCODE -ne 0) { throw "Offline RGB perception failed with exit code $LASTEXITCODE." }
+} finally { Pop-Location }
+$result = Get-Content -LiteralPath (Join-Path $perception "perception_manifest.json") -Raw | ConvertFrom-Json
+if ($result.status -ne "complete" -or -not (Test-Path -LiteralPath (Join-Path $perception "estimated_inventory.csv"))) { throw "Offline RGB perception did not produce a complete estimate." }
+Write-Host "Offline RGB perception complete: $perception"
