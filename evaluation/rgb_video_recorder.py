@@ -68,9 +68,18 @@ def _decode_image(message) -> np.ndarray | None:
 
 
 class RgbVideoRecorder:
-    def __init__(self, output: Path, metadata_path: Path, duration_s: float, startup_timeout_s: float):
+    def __init__(
+        self,
+        output: Path,
+        metadata_path: Path,
+        duration_s: float,
+        startup_timeout_s: float,
+        frames_path: Path | None = None,
+        camera_info_path: Path | None = None,
+    ):
         import rclpy
         from rclpy.node import Node
+        from sensor_msgs.msg import CameraInfo
         from sensor_msgs.msg import Image
         from rosgraph_msgs.msg import Clock
 
@@ -78,6 +87,8 @@ class RgbVideoRecorder:
         self.node = Node("grocery_sim_rgb_video_recorder")
         self.output = output
         self.metadata_path = metadata_path
+        self.frames_path = frames_path
+        self.camera_info_path = camera_info_path
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
         self.started_wall = time.monotonic()
@@ -95,7 +106,10 @@ class RgbVideoRecorder:
         self.height: int | None = None
         self.encoding: str | None = None
         self.done_reason = "not_started"
+        self.frame_records: list[dict[str, object]] = []
+        self.camera_info_record: dict[str, object] | None = None
         self.node.create_subscription(Image, RGB_TOPIC, self._on_image, 5)
+        self.node.create_subscription(CameraInfo, "/sim/camera/rgb/camera_info", self._on_camera_info, 10)
         self.node.create_subscription(Clock, CLOCK_TOPIC, self._on_clock, 20)
 
     def _on_clock(self, message) -> None:
@@ -121,6 +135,23 @@ class RgbVideoRecorder:
             self.writer = cv2.VideoWriter(str(self.output), fourcc, 30.0, (self.width, self.height))
         return self.writer.isOpened()
 
+    def _on_camera_info(self, message) -> None:
+        if self.camera_info_record is not None:
+            return
+        stamp = _stamp(message)
+        self.camera_info_record = {
+            "topic": "/sim/camera/rgb/camera_info",
+            "stamp_s": stamp,
+            "frame_id": str(message.header.frame_id),
+            "width": int(message.width),
+            "height": int(message.height),
+            "distortion_model": str(message.distortion_model),
+            "d": [float(value) for value in message.d],
+            "k": [float(value) for value in message.k],
+            "r": [float(value) for value in message.r],
+            "p": [float(value) for value in message.p],
+        }
+
     def _on_image(self, message) -> None:
         stamp = _stamp(message)
         if self.last_image_stamp_s is not None and stamp <= self.last_image_stamp_s:
@@ -141,6 +172,14 @@ class RgbVideoRecorder:
             self.first_image_stamp_s = stamp
             self.encoding = str(message.encoding)
         self.frames_written += 1
+        self.frame_records.append({
+            "frame_index": self.frames_written - 1,
+            "stamp_s": stamp,
+            "frame_id": str(message.header.frame_id),
+            "width": int(message.width),
+            "height": int(message.height),
+            "encoding": str(message.encoding),
+        })
 
     def spin_until_done(self) -> None:
         while self.rclpy.ok():
@@ -184,6 +223,14 @@ class RgbVideoRecorder:
         }
         self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        if self.frames_path is not None:
+            self.frames_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.frames_path.open("w", encoding="utf-8", newline="\n") as handle:
+                for record in self.frame_records:
+                    handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+        if self.camera_info_path is not None and self.camera_info_record is not None:
+            self.camera_info_path.parent.mkdir(parents=True, exist_ok=True)
+            self.camera_info_path.write_text(json.dumps(self.camera_info_record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         if not complete:
             raise RuntimeError(f"RGB video recording failed: {metadata}")
         return metadata
@@ -195,11 +242,20 @@ def main() -> None:
     parser.add_argument("--metadata", required=True)
     parser.add_argument("--duration-seconds", type=float, required=True)
     parser.add_argument("--startup-timeout-seconds", type=float, default=90.0)
+    parser.add_argument("--frames-jsonl", default="")
+    parser.add_argument("--camera-info-json", default="")
     args = parser.parse_args()
     import rclpy
 
     rclpy.init()
-    recorder = RgbVideoRecorder(Path(args.output), Path(args.metadata), args.duration_seconds, args.startup_timeout_seconds)
+    recorder = RgbVideoRecorder(
+        Path(args.output),
+        Path(args.metadata),
+        args.duration_seconds,
+        args.startup_timeout_seconds,
+        Path(args.frames_jsonl) if args.frames_jsonl else None,
+        Path(args.camera_info_json) if args.camera_info_json else None,
+    )
     try:
         recorder.spin_until_done()
         recorder.close()
