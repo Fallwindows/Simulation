@@ -139,8 +139,16 @@ class CollectorNode:
                 self.completion_reason = "simulation_time_reached"
                 self.post_target_grace_deadline = now + self.post_target_grace_s
             elif self.capture_started is not None and now - self.capture_started >= self.wall_guard_timeout_s:
-                self.completion_reason = "simulation_time_stalled_wall_guard"
-                break
+                # A queued clock callback can deliver the target timestamp at
+                # the same boundary as the wall guard. Preserve the semantic
+                # completion reason when the target is already observable.
+                if self.latest_sim_time_s is not None and self.sim_time_target_s is not None and self.latest_sim_time_s >= self.sim_time_target_s - 1e-3:
+                    self.sim_time_complete = True
+                    self.completion_reason = "simulation_time_reached"
+                    self.post_target_grace_deadline = now + self.post_target_grace_s
+                else:
+                    self.completion_reason = "simulation_time_stalled_wall_guard"
+                    break
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def write(self) -> None:
