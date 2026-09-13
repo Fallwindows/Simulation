@@ -21,4 +21,4 @@ class GeometryTests(unittest.TestCase):
         shelf_count = sum(p.kind == "shelf" for p in layout.primitives)
         bay_count = int(self.scenario.environment.length_m // self.scenario.environment.bay_width_m)
         self.assertGreater(shelf_count, 2 * bay_count * self.scenario.environment.shelf_levels)
-        self.assertEqual(shelf_count, 231)
+        self.assertEqual(shelf_count, 229)

@@ -64,7 +64,9 @@ def _stable_rng(seed: int, *parts: object) -> random.Random:
 
 def _zone_name(bay: int, bay_count: int, row_index: int) -> str:
     """Return the merchandising zone for a bay while mirroring both rows."""
-    if bay >= max(0, bay_count - 2):
+    # Put a compact produce section within the walking view rather than only
+    # at the exit, so the RGB proof video visibly contains fruit.
+    if 7 <= bay <= 10:
         return "produce"
     zones = ("cereal", "snacks", "cans_jars", "beverage")
     zone_index = min(len(zones) - 1, int(bay * len(zones) / max(1, bay_count - 2)))
@@ -139,17 +141,31 @@ def _make_asset(
     identity_parts: tuple[object, ...],
     name: str,
 ) -> AssetInstance:
-    yaw_rng = _stable_rng(config.seed, "yaw", *identity_parts)
+    pose_rng = _stable_rng(config.seed, "pose", *identity_parts)
     yaw = 0.0 if row_y < 0.0 else 180.0
-    yaw += yaw_rng.uniform(-2.0, 2.0)
+    yaw += pose_rng.uniform(-3.6, 3.6) if record.model_type in {"box", "carton", "bottle", "can", "jar"} else pose_rng.uniform(-5.0, 5.0)
+    # Small per-object offsets make a row read as hand-stocked while remaining
+    # safely inside the shelf footprint.  The RNG key is the semantic identity,
+    # so inserting a facing cannot shift every later object's pose.
+    x_offset = 0.0 if record.model_type == "crate" else pose_rng.uniform(-0.011, 0.011)
+    depth_offset = 0.0 if record.model_type == "crate" else pose_rng.uniform(-0.014, 0.014)
+    px, py, pz = position
+    scale = (1.0, 1.0, 1.0)
+    if record.model_type == "fruit":
+        # Fruit is intentionally less uniform than packaged goods.  Keep the
+        # center fixed so the sampled shelf support remains valid.
+        sx = pose_rng.uniform(0.93, 1.07)
+        sy = pose_rng.uniform(0.93, 1.07)
+        sz = pose_rng.uniform(0.94, 1.09)
+        scale = (sx, sy, sz)
     suffix = "/".join(str(part) for part in identity_parts)
     return AssetInstance(
         name=name,
         asset_key=record.asset_key,
         category=record.category,
-        position_m=position,
+        position_m=(px + x_offset, py + depth_offset, pz),
         rotation_rpy_deg=(0.0, 0.0, yaw),
-        scale_xyz=(1.0, 1.0, 1.0),
+        scale_xyz=scale,
         semantic_id=f"retail/{record.asset_key}/{suffix}",
     )
 
@@ -241,14 +257,16 @@ def _populate_produce(
     crate_position = (x, row_y, shelf_z + SHELF_THICKNESS_M / 2.0 + crate.dimensions_m[2] / 2.0)
     assets.append(_make_asset(crate, config, row_index, row_y, crate_position, crate_identity, "produce_bin_" + "_".join(crate_identity[1:])))
 
-    x_offsets = (-0.14, -0.047, 0.047, 0.14)
-    y_offsets = (-0.085, 0.0, 0.085)
+    x_offsets = (-0.085, -0.028, 0.028, 0.085)
+    y_offsets = (-0.025, 0.0, 0.025)
     for fruit_index in range(config.produce_items_per_crate):
         layer, remainder = divmod(fruit_index, len(x_offsets) * len(y_offsets))
         x_index, y_index = divmod(remainder, len(y_offsets))
         jitter = _stable_rng(config.seed, "fruit_jitter", row_index, bay, bin_index, fruit_index)
-        px = x + x_offsets[x_index] + jitter.uniform(-0.006, 0.006)
-        py = row_y + y_offsets[y_index] + jitter.uniform(-0.006, 0.006)
+        # A deterministic, bounded scatter keeps the recognizable crate
+        # footprint but removes the rigid lattice look of a point grid.
+        px = x + x_offsets[x_index] + jitter.uniform(-0.020, 0.020)
+        py = row_y + y_offsets[y_index] + jitter.uniform(-0.014, 0.014)
         pz = crate_position[2] + crate.dimensions_m[2] / 2.0 + fruit.dimensions_m[2] / 2.0 + layer * 0.07
         identity = ("bin", "r" + str(row_index), "b" + str(bay), "i" + str(bin_index), "fruit" + str(fruit_index))
         assets.append(_make_asset(fruit, config, row_index, row_y, (px, py, pz), identity, "fruit_" + "_".join(identity[1:])))
@@ -276,11 +294,14 @@ def build_aisle_layout(config: AisleConfig) -> AisleLayout:
                 y = row_y + side * config.shelf_depth_m * 0.42
                 primitives.append(Box(f"upright_r{row_index}_b{bay}_{int(side)}", (x, y, config.floor_z_m + config.shelf_height_m / 2.0), (0.08, 0.08, config.shelf_height_m), "upright"))
 
+    # Keep one clearly visible produce run on the near row so the walkthrough
+    # actually presents fruit before the aisle exit.  It remains grouped at
+    # the endcap and uses four deterministic bins/categories.
     produce_assignments = (
-        (0, bay_count - 2, "red_apples", 0),
-        (0, bay_count - 1, "green_apples", 1),
-        (1, bay_count - 2, "oranges", 2),
-        (1, bay_count - 1, "lemons", 3),
+        (0, 7, "red_apples", 0),
+        (0, 8, "green_apples", 1),
+        (0, 9, "oranges", 2),
+        (0, 10, "lemons", 3),
     )
     for row_index, bay, fruit_category, bin_index in produce_assignments:
         _populate_produce(
@@ -290,7 +311,10 @@ def build_aisle_layout(config: AisleConfig) -> AisleLayout:
             row_index,
             config.shelf_rows_y_m[row_index],
             bay,
-            shelf_positions[(row_index, bay)][0],
+            # Top-shelf produce displays clear the next shelf board, so the
+            # fruit remains visible from the calibrated first-person camera
+            # while the crate stays shelf-supported.
+            shelf_positions[(row_index, bay)][-1],
             fruit_category,
             bin_index,
         )

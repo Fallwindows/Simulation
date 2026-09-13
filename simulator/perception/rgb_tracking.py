@@ -303,18 +303,19 @@ def _augment_with_lidar_estimates(
     slam: Path,
     frames: list[dict[str, object]],
     frame_annotations: list[dict[str, object]],
-) -> tuple[dict[int, np.ndarray], dict[str, object]]:
+) -> tuple[dict[int, np.ndarray], dict[int, np.ndarray], dict[str, object]]:
     """Associate projected LiDAR returns with RGB proposals and make start-relative estimates."""
 
     poses = _load_slam_poses(slam / "slam_poses.csv")
     if not poses:
-        return {}, {"status": "unavailable", "reason": "no_valid_slam_poses"}
+        return {}, {}, {"status": "unavailable", "reason": "no_valid_slam_poses"}
     geometry = _load_sensor_geometry(capture / "sensor_transforms.json")
     start_t = np.asarray(poses[0].position_m, dtype=np.float64)
     start_r = _quat_to_matrix(poses[0].orientation_xyzw)
     frame_timestamps = [float(frame["stamp_s"]) for frame in frames]
     annotations_by_frame = {int(record["frame_index"]): record for record in frame_annotations}
-    observations: dict[int, list[np.ndarray]] = {}
+    observations_start: dict[int, list[np.ndarray]] = {}
+    observations_map: dict[int, list[np.ndarray]] = {}
     scan_count = 0
     projected_point_count = 0
 
@@ -387,12 +388,14 @@ def _augment_with_lidar_estimates(
                 selected_indices = index_array
             estimate = np.median(points_start[selected_indices], axis=0)
             track_id = int(detection["track_id"])
-            observations.setdefault(track_id, []).append(estimate)
+            observations_start.setdefault(track_id, []).append(estimate)
+            observations_map.setdefault(track_id, []).append(points_world[selected_indices].mean(axis=0))
             detection["depth_point_count"] = int(len(selected_indices))
 
         scan_count += 1
 
-    track_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations.items() if values}
+    track_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations_start.items() if values}
+    map_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations_map.items() if values}
     for frame_record in frame_annotations:
         for detection in frame_record["detections"]:
             estimate = track_estimates.get(int(detection["track_id"]))
@@ -402,7 +405,12 @@ def _augment_with_lidar_estimates(
             rounded = [round(float(value), 3) for value in estimate]
             detection["estimated_center_start_relative_m"] = rounded
             detection["coordinate_source"] = "lidar_projected_with_slam_pose"
-    return track_estimates, {
+    for frame_record in frame_annotations:
+        for detection in frame_record["detections"]:
+            estimate = map_estimates.get(int(detection["track_id"]))
+            if estimate is not None:
+                detection["estimated_center_map_m"] = [round(float(value), 3) for value in estimate]
+    return track_estimates, map_estimates, {
         "status": "complete",
         "start_pose_world_m": [round(float(value), 6) for value in start_t],
         "start_pose_orientation_xyzw": [round(float(value), 8) for value in poses[0].orientation_xyzw],
@@ -501,8 +509,13 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     if decoded != len(frames_index):
         raise RuntimeError(f"RGB frame/index mismatch: decoded={decoded}, indexed={len(frames_index)}")
 
-    track_estimates, localization = _augment_with_lidar_estimates(capture, slam, frames_index, frame_annotations)
+    track_estimates, map_estimates, localization = _augment_with_lidar_estimates(capture, slam, frames_index, frame_annotations)
     raw_to_canonical, canonical_estimates, canonical_members = _consolidate_track_estimates(track_estimates)
+    canonical_map_estimates: dict[int, np.ndarray] = {}
+    for canonical_id, raw_members in canonical_members.items():
+        values = [map_estimates[raw_id] for raw_id in raw_members if raw_id in map_estimates]
+        if values:
+            canonical_map_estimates[canonical_id] = np.median(np.stack(values), axis=0)
     localization["canonical_track_count"] = len(canonical_estimates)
     localization["canonicalization_radius_m"] = 0.21
 
@@ -526,6 +539,10 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             detection["estimated_center_start_relative_m"] = [
                 round(float(value), 3) for value in canonical_estimates[canonical_id]
             ]
+            if canonical_id in canonical_map_estimates:
+                detection["estimated_center_map_m"] = [
+                    round(float(value), 3) for value in canonical_map_estimates[canonical_id]
+                ]
             detection["coordinate_source"] = "lidar_projected_with_slam_pose_consolidated"
 
     track_rows = []
@@ -549,6 +566,9 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             "estimated_x_m": round(float(canonical_estimates[canonical_id][0]), 3),
             "estimated_y_m": round(float(canonical_estimates[canonical_id][1]), 3),
             "estimated_z_m": round(float(canonical_estimates[canonical_id][2]), 3),
+            "map_x_m": round(float(canonical_map_estimates[canonical_id][0]), 3) if canonical_id in canonical_map_estimates else None,
+            "map_y_m": round(float(canonical_map_estimates[canonical_id][1]), 3) if canonical_id in canonical_map_estimates else None,
+            "map_z_m": round(float(canonical_map_estimates[canonical_id][2]), 3) if canonical_id in canonical_map_estimates else None,
             "depth_source": "lidar_projected_with_slam_pose",
             "3d_observation_count": sum(observation_counts.get(raw_id, 0) for raw_id in raw_members),
             "raw_track_count": len(raw_members),
@@ -561,7 +581,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
 
     for row in track_rows:
         row["3d_observation_count"] = int(row["3d_observation_count"])
-    fields = ["track_id", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "depth_source", "3d_observation_count", "raw_track_count"]
+    fields = ["track_id", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "map_x_m", "map_y_m", "map_z_m", "depth_source", "3d_observation_count", "raw_track_count"]
     _write_csv(output / "estimated_inventory.csv", track_rows, fields)
     _write_csv(output / "tracks.csv", track_rows, fields)
     (output / "estimated_inventory.json").write_text(json.dumps(track_rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")

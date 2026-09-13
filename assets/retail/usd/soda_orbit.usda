@@ -11,18 +11,31 @@ def Xform "Asset" (
         def Cylinder "Body" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            double radius = 0.05000
-            double height = 0.21060
-            double3 xformOp:translate = (0, 0, -0.02970)
+            int vertices = 40
+            double radius = 0.04550
+            double height = 0.17280
+            double3 xformOp:translate = (0, 0, -0.03240)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Cone "Shoulder" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 40
+            double radius = 0.04550
+            double radius2 = 0.02850
+            double height = 0.02565
+            double3 xformOp:translate = (0, 0, 0.06615)
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/Body>
         }
         def Cylinder "Neck" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            double radius = 0.03100
-            double height = 0.05940
-            double3 xformOp:translate = (0, 0, 0.10530)
+            int vertices = 32
+            double radius = 0.02850
+            double height = 0.04590
+            double3 xformOp:translate = (0, 0, 0.09720)
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/Body>
         }
@@ -39,16 +52,25 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
-        def Xform "Cap" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.14310)
-            double3 xformOp:scale = (0.02100, 0.02100, 0.00810)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Metal>
-            }
+        def Cylinder "Cap" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 32
+            double radius = 0.03000
+            double height = 0.01485
+            double3 xformOp:translate = (0, 0, 0.13230)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Metal>
+        }
+        def Cylinder "CapRidge" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 32
+            double radius = 0.03150
+            double height = 0.00378
+            double3 xformOp:translate = (0, 0, 0.12420)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Metal>
         }
     }
     def Scope "Looks" {
@@ -64,9 +86,15 @@ def Xform "Asset" (
         }
         def Material "Front" {
             token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
             def Shader "Texture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/soda_orbit.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 token outputs:rgb
             }
             def Shader "Preview" {

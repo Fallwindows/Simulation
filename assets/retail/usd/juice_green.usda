@@ -8,16 +8,13 @@ def Xform "Asset" (
     kind = "component"
 ) {
     def Xform "Geometry" {
-        def Xform "Body" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.00000)
-            double3 xformOp:scale = (0.06500, 0.05500, 0.14000)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Body>
-            }
+        def Mesh "BodyShell" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.05675, -0.05500, -0.14000), (0.05675, -0.05500, -0.14000), (0.06500, -0.04675, -0.14000), (0.06500, 0.04675, -0.14000), (0.05675, 0.05500, -0.14000), (-0.05675, 0.05500, -0.14000), (-0.06500, 0.04675, -0.14000), (-0.06500, -0.04675, -0.14000), (-0.05675, -0.05500, 0.14000), (0.05675, -0.05500, 0.14000), (0.06500, -0.04675, 0.14000), (0.06500, 0.04675, 0.14000), (0.05675, 0.05500, 0.14000), (-0.05675, 0.05500, 0.14000), (-0.06500, 0.04675, 0.14000), (-0.06500, -0.04675, 0.14000)]
+            int[] faceVertexCounts = [8, 8, 4, 4, 4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [7, 6, 5, 4, 3, 2, 1, 0, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 9, 8, 1, 2, 10, 9, 2, 3, 11, 10, 3, 4, 12, 11, 4, 5, 13, 12, 5, 6, 14, 13, 6, 7, 15, 14, 7, 0, 8, 15]
+            rel material:binding = </Asset/Looks/Body>
         }
         def Mesh "FrontPanel" (
             prepend apiSchemas = ["MaterialBindingAPI"]
@@ -34,7 +31,7 @@ def Xform "Asset" (
         }
         def Xform "TopBand" {
             double3 xformOp:translate = (0.00000, 0.06300, 0.09520)
-            double3 xformOp:scale = (0.05850, 0.00600, 0.01400)
+            double3 xformOp:scale = (0.05590, 0.00600, 0.01400)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Cube "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -42,6 +39,35 @@ def Xform "Asset" (
                 double size = 2.0
                 rel material:binding = </Asset/Looks/Front>
             }
+        }
+        def Xform "BottomTrim" {
+            double3 xformOp:translate = (0.00000, 0.06400, -0.11200)
+            double3 xformOp:scale = (0.05330, 0.00500, 0.00350)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Metal>
+            }
+        }
+        def Mesh "CartonTop" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.04910, -0.04840, -0.01050), (0.04910, -0.04840, -0.01050), (0.05460, -0.04290, -0.01050), (0.05460, 0.04290, -0.01050), (0.04910, 0.04840, -0.01050), (-0.04910, 0.04840, -0.01050), (-0.05460, 0.04290, -0.01050), (-0.05460, -0.04290, -0.01050), (-0.04910, -0.04840, 0.01050), (0.04910, -0.04840, 0.01050), (0.05460, -0.04290, 0.01050), (0.05460, 0.04290, 0.01050), (0.04910, 0.04840, 0.01050), (-0.04910, 0.04840, 0.01050), (-0.05460, 0.04290, 0.01050), (-0.05460, -0.04290, 0.01050)]
+            int[] faceVertexCounts = [8, 8, 4, 4, 4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [7, 6, 5, 4, 3, 2, 1, 0, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 9, 8, 1, 2, 10, 9, 2, 3, 11, 10, 3, 4, 12, 11, 4, 5, 13, 12, 5, 6, 14, 13, 6, 7, 15, 14, 7, 0, 8, 15]
+            rel material:binding = </Asset/Looks/Front>
+        }
+        def Cylinder "PourCap" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 24
+            double radius = 0.01950
+            double height = 0.01540
+            double3 xformOp:translate = (0, 0, 0.14140)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Metal>
         }
     }
     def Scope "Looks" {
@@ -57,9 +83,15 @@ def Xform "Asset" (
         }
         def Material "Front" {
             token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
             def Shader "Texture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/juice_green.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 token outputs:rgb
             }
             def Shader "Preview" {

@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the grocery aisle Isaac Sim sensor runtime")
-    parser.add_argument("--scenario", default=str(REPO_ROOT / "config/scenarios/baseline_straight.yaml"))
+    parser.add_argument("--scenario", default=str(REPO_ROOT / "config/scenarios/walking_baseline.yaml"))
     parser.add_argument("--frames", type=int, default=0, help="Simulation frames; 0 derives the count from the trajectory duration")
     parser.add_argument("--headless", action="store_true", help="Run without the Isaac Sim viewport")
     parser.add_argument("--realtime", action="store_true", help="Pace the simulation at 60 Hz for external ROS/dashboard consumers")

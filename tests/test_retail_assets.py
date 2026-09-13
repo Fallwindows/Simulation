@@ -39,7 +39,7 @@ class RetailAssetTests(unittest.TestCase):
     def test_dimension_aware_shelf_levels_are_dense_but_clear(self):
         counts = shelf_level_counts_by_zone(self.config, self.catalog)
         self.assertEqual(counts, {"cereal": 5, "snacks": 5, "cans_jars": 7, "beverage": 6, "produce": 6})
-        self.assertEqual(len(self.shelves), 231)
+        self.assertEqual(len(self.shelves), 229)
         for row in range(2):
             for bay in range(self.bay_count):
                 levels = [key for key in self.shelves if key[:2] == (row, bay)]
@@ -55,13 +55,13 @@ class RetailAssetTests(unittest.TestCase):
         regular = [asset for asset in self.layout.assets if asset.category != "produce_crate"]
         self.assertTrue(any("/d1/" in asset.semantic_id for asset in regular))
         self.assertEqual(Counter(asset.category for asset in self.layout.assets), Counter({
-            "cereal": 440,
-            "snacks": 341,
-            "cans": 320,
-            "juice": 267,
-            "soda": 221,
-            "jars": 215,
-            "water": 144,
+                "cereal": 402,
+                "snacks": 285,
+                "cans": 177,
+                "juice": 374,
+                "soda": 346,
+                "jars": 115,
+                "water": 196,
             "red_apples": 24,
             "green_apples": 24,
             "oranges": 24,
@@ -79,7 +79,10 @@ class RetailAssetTests(unittest.TestCase):
     def test_all_assets_resolve_and_products_are_shelf_anchored(self):
         for asset in self.layout.assets:
             self.assertIn(asset.asset_key, self.catalog_by_key)
-            self.assertEqual(asset.scale_xyz, (1.0, 1.0, 1.0))
+            if asset.category in {"red_apples", "green_apples", "oranges", "lemons"}:
+                self.assertTrue(all(0.90 <= value <= 1.12 for value in asset.scale_xyz))
+            else:
+                self.assertEqual(asset.scale_xyz, (1.0, 1.0, 1.0))
             self.assertGreater(abs(asset.position_m[1]), self.config.shelf_depth_m / 2.0)
         for asset in self.layout.assets:
             if asset.category == "produce_crate":

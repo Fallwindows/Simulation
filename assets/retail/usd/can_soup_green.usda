@@ -11,9 +11,30 @@ def Xform "Asset" (
         def Cylinder "Body" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
+            int vertices = 40
             double radius = 0.05500
             double height = 0.13000
             rel material:binding = </Asset/Looks/Body>
+        }
+        def Cylinder "TopRim" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 40
+            double radius = 0.05335
+            double height = 0.00455
+            double3 xformOp:translate = (0, 0, 0.06695)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Metal>
+        }
+        def Cylinder "BottomRim" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 40
+            double radius = 0.05335
+            double height = 0.00325
+            double3 xformOp:translate = (0, 0, -0.06695)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Metal>
         }
         def Mesh "FrontPanel" (
             prepend apiSchemas = ["MaterialBindingAPI"]
@@ -27,17 +48,6 @@ def Xform "Asset" (
                 interpolation = "vertex"
             )
             rel material:binding = </Asset/Looks/Front>
-        }
-        def Xform "Lid" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.07400)
-            double3 xformOp:scale = (0.04950, 0.04950, 0.00900)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Metal>
-            }
         }
     }
     def Scope "Looks" {
@@ -53,9 +63,15 @@ def Xform "Asset" (
         }
         def Material "Front" {
             token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
             def Shader "Texture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/can_soup_green.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 token outputs:rgb
             }
             def Shader "Preview" {

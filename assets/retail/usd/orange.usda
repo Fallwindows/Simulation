@@ -9,7 +9,7 @@ def Xform "Asset" (
 ) {
     def Xform "Geometry" {
         def Xform "Fruit" {
-            double3 xformOp:scale = (0.13000, 0.13000, 0.13000)
+            double3 xformOp:scale = (0.21000, 0.21000, 0.21000)
             uniform token[] xformOpOrder = ["xformOp:scale"]
             def Sphere "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -18,16 +18,15 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Body>
             }
         }
-        def Xform "Stem" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.07280)
-            double3 xformOp:scale = (0.00780, 0.00780, 0.01300)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Stem>
-            }
+        def Cylinder "Stem" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 12
+            double radius = 0.01155
+            double height = 0.04200
+            double3 xformOp:translate = (0, 0, 0.11760)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Stem>
         }
     }
     def Scope "Looks" {
@@ -43,9 +42,15 @@ def Xform "Asset" (
         }
         def Material "Front" {
             token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
             def Shader "Texture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/orange.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 token outputs:rgb
             }
             def Shader "Preview" {

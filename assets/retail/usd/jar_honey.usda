@@ -11,9 +11,40 @@ def Xform "Asset" (
         def Cylinder "Body" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
+            int vertices = 40
             double radius = 0.06000
             double height = 0.18000
             rel material:binding = </Asset/Looks/Body>
+        }
+        def Cylinder "Shoulder" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 40
+            double radius = 0.05520
+            double height = 0.01440
+            double3 xformOp:translate = (0, 0, 0.07020)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Cylinder "Lid" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 40
+            double radius = 0.05400
+            double height = 0.01260
+            double3 xformOp:translate = (0, 0, 0.09180)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Metal>
+        }
+        def Cylinder "LidBand" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 40
+            double radius = 0.05640
+            double height = 0.00450
+            double3 xformOp:translate = (0, 0, 0.08550)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Front>
         }
         def Mesh "FrontPanel" (
             prepend apiSchemas = ["MaterialBindingAPI"]
@@ -27,17 +58,6 @@ def Xform "Asset" (
                 interpolation = "vertex"
             )
             rel material:binding = </Asset/Looks/Front>
-        }
-        def Xform "Lid" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.09900)
-            double3 xformOp:scale = (0.05400, 0.05400, 0.00900)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Metal>
-            }
         }
     }
     def Scope "Looks" {
@@ -53,9 +73,15 @@ def Xform "Asset" (
         }
         def Material "Front" {
             token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
             def Shader "Texture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/jar_honey.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 token outputs:rgb
             }
             def Shader "Preview" {

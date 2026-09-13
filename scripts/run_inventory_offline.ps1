@@ -32,4 +32,11 @@ try {
 } finally { Pop-Location }
 $result = Get-Content -LiteralPath (Join-Path $perception "perception_manifest.json") -Raw | ConvertFrom-Json
 if ($result.status -ne "complete" -or -not (Test-Path -LiteralPath (Join-Path $perception "estimated_inventory.csv"))) { throw "Offline RGB perception did not produce a complete estimate." }
-Write-Host "Offline RGB perception complete: $perception"
+$evaluationArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.perception.inventory_evaluation","--capture-dir",$capture,"--slam-dir",$slam,"--perception-dir",$perception,"--repo-root",$repo)
+Push-Location $repo
+try {
+  & $pixi @evaluationArgs
+  if ($LASTEXITCODE -ne 0) { throw "Inventory evaluation failed with exit code $LASTEXITCODE." }
+} finally { Pop-Location }
+if (-not (Test-Path -LiteralPath (Join-Path $perception "inventory.xlsx")) -or -not (Test-Path -LiteralPath (Join-Path $slam "slam_map_with_inventory.ply"))) { throw "Inventory evaluation did not produce the spreadsheet and inventory map." }
+Write-Host "Offline RGB perception and post-estimation inventory evaluation complete: $perception"
