@@ -1,0 +1,483 @@
+{
+  "schema_version": 1,
+  "standard_front_axis": "+Y",
+  "units": "meters",
+  "assets": [
+    {
+      "asset_key": "cereal_sunrise",
+      "category": "cereal",
+      "usd_path": "usd/cereal_sunrise.usda",
+      "texture_path": "textures/cereal_sunrise.png",
+      "dimensions_m": [
+        0.13,
+        0.1,
+        0.31
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "SUNRISE OATS"
+    },
+    {
+      "asset_key": "cereal_harvest",
+      "category": "cereal",
+      "usd_path": "usd/cereal_harvest.usda",
+      "texture_path": "textures/cereal_harvest.png",
+      "dimensions_m": [
+        0.13,
+        0.1,
+        0.31
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "HARVEST LOOP"
+    },
+    {
+      "asset_key": "cereal_grain",
+      "category": "cereal",
+      "usd_path": "usd/cereal_grain.usda",
+      "texture_path": "textures/cereal_grain.png",
+      "dimensions_m": [
+        0.13,
+        0.1,
+        0.3
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "GRAIN DAY"
+    },
+    {
+      "asset_key": "cereal_berry",
+      "category": "cereal",
+      "usd_path": "usd/cereal_berry.usda",
+      "texture_path": "textures/cereal_berry.png",
+      "dimensions_m": [
+        0.13,
+        0.1,
+        0.31
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "BERRY CLOUD"
+    },
+    {
+      "asset_key": "cereal_honey",
+      "category": "cereal",
+      "usd_path": "usd/cereal_honey.usda",
+      "texture_path": "textures/cereal_honey.png",
+      "dimensions_m": [
+        0.13,
+        0.1,
+        0.31
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "HONEY CRUNCH"
+    },
+    {
+      "asset_key": "cereal_morning",
+      "category": "cereal",
+      "usd_path": "usd/cereal_morning.usda",
+      "texture_path": "textures/cereal_morning.png",
+      "dimensions_m": [
+        0.13,
+        0.1,
+        0.3
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "MORNING MIX"
+    },
+    {
+      "asset_key": "snack_cracker",
+      "category": "snacks",
+      "usd_path": "usd/snack_cracker.usda",
+      "texture_path": "textures/snack_cracker.png",
+      "dimensions_m": [
+        0.13,
+        0.09,
+        0.24
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "CRISP STACK"
+    },
+    {
+      "asset_key": "snack_pretzel",
+      "category": "snacks",
+      "usd_path": "usd/snack_pretzel.usda",
+      "texture_path": "textures/snack_pretzel.png",
+      "dimensions_m": [
+        0.13,
+        0.09,
+        0.24
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "PRETZEL POP"
+    },
+    {
+      "asset_key": "snack_chips",
+      "category": "snacks",
+      "usd_path": "usd/snack_chips.usda",
+      "texture_path": "textures/snack_chips.png",
+      "dimensions_m": [
+        0.13,
+        0.09,
+        0.25
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "GARDEN CRUNCH"
+    },
+    {
+      "asset_key": "snack_wafer",
+      "category": "snacks",
+      "usd_path": "usd/snack_wafer.usda",
+      "texture_path": "textures/snack_wafer.png",
+      "dimensions_m": [
+        0.13,
+        0.09,
+        0.23
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "WAFER WAVE"
+    },
+    {
+      "asset_key": "snack_popcorn",
+      "category": "snacks",
+      "usd_path": "usd/snack_popcorn.usda",
+      "texture_path": "textures/snack_popcorn.png",
+      "dimensions_m": [
+        0.13,
+        0.09,
+        0.24
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "box",
+      "product_name": "POPCORN FIELD"
+    },
+    {
+      "asset_key": "juice_citrus",
+      "category": "juice",
+      "usd_path": "usd/juice_citrus.usda",
+      "texture_path": "textures/juice_citrus.png",
+      "dimensions_m": [
+        0.13,
+        0.11,
+        0.28
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "carton",
+      "product_name": "CITRUS PRESS"
+    },
+    {
+      "asset_key": "juice_berry",
+      "category": "juice",
+      "usd_path": "usd/juice_berry.usda",
+      "texture_path": "textures/juice_berry.png",
+      "dimensions_m": [
+        0.13,
+        0.11,
+        0.28
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "carton",
+      "product_name": "BERRY POUR"
+    },
+    {
+      "asset_key": "juice_green",
+      "category": "juice",
+      "usd_path": "usd/juice_green.usda",
+      "texture_path": "textures/juice_green.png",
+      "dimensions_m": [
+        0.13,
+        0.11,
+        0.28
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "carton",
+      "product_name": "GREEN GROVE"
+    },
+    {
+      "asset_key": "juice_apple",
+      "category": "juice",
+      "usd_path": "usd/juice_apple.usda",
+      "texture_path": "textures/juice_apple.png",
+      "dimensions_m": [
+        0.13,
+        0.11,
+        0.28
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "carton",
+      "product_name": "APPLE PRESS"
+    },
+    {
+      "asset_key": "water_sky",
+      "category": "water",
+      "usd_path": "usd/water_sky.usda",
+      "texture_path": "textures/water_sky.png",
+      "dimensions_m": [
+        0.1,
+        0.1,
+        0.28
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bottle",
+      "product_name": "SKY WATER"
+    },
+    {
+      "asset_key": "water_clear",
+      "category": "water",
+      "usd_path": "usd/water_clear.usda",
+      "texture_path": "textures/water_clear.png",
+      "dimensions_m": [
+        0.1,
+        0.1,
+        0.28
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bottle",
+      "product_name": "CLEAR SPRING"
+    },
+    {
+      "asset_key": "soda_orbit",
+      "category": "soda",
+      "usd_path": "usd/soda_orbit.usda",
+      "texture_path": "textures/soda_orbit.png",
+      "dimensions_m": [
+        0.1,
+        0.1,
+        0.27
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bottle",
+      "product_name": "ORBIT FIZZ"
+    },
+    {
+      "asset_key": "soda_cherry",
+      "category": "soda",
+      "usd_path": "usd/soda_cherry.usda",
+      "texture_path": "textures/soda_cherry.png",
+      "dimensions_m": [
+        0.1,
+        0.1,
+        0.27
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bottle",
+      "product_name": "CHERRY SPARK"
+    },
+    {
+      "asset_key": "soda_lime",
+      "category": "soda",
+      "usd_path": "usd/soda_lime.usda",
+      "texture_path": "textures/soda_lime.png",
+      "dimensions_m": [
+        0.1,
+        0.1,
+        0.27
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bottle",
+      "product_name": "LIME LIFT"
+    },
+    {
+      "asset_key": "can_soup_red",
+      "category": "cans",
+      "usd_path": "usd/can_soup_red.usda",
+      "texture_path": "textures/can_soup_red.png",
+      "dimensions_m": [
+        0.11,
+        0.11,
+        0.13
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "can",
+      "product_name": "HEARTH SOUP"
+    },
+    {
+      "asset_key": "can_soup_green",
+      "category": "cans",
+      "usd_path": "usd/can_soup_green.usda",
+      "texture_path": "textures/can_soup_green.png",
+      "dimensions_m": [
+        0.11,
+        0.11,
+        0.13
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "can",
+      "product_name": "HERB SOUP"
+    },
+    {
+      "asset_key": "can_beans",
+      "category": "cans",
+      "usd_path": "usd/can_beans.usda",
+      "texture_path": "textures/can_beans.png",
+      "dimensions_m": [
+        0.11,
+        0.11,
+        0.13
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "can",
+      "product_name": "BLUE BEANS"
+    },
+    {
+      "asset_key": "can_tomato",
+      "category": "cans",
+      "usd_path": "usd/can_tomato.usda",
+      "texture_path": "textures/can_tomato.png",
+      "dimensions_m": [
+        0.11,
+        0.11,
+        0.13
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "can",
+      "product_name": "TOMATO TABLE"
+    },
+    {
+      "asset_key": "jar_honey",
+      "category": "jars",
+      "usd_path": "usd/jar_honey.usda",
+      "texture_path": "textures/jar_honey.png",
+      "dimensions_m": [
+        0.12,
+        0.12,
+        0.18
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "jar",
+      "product_name": "GOLDEN HIVE"
+    },
+    {
+      "asset_key": "jar_pickle",
+      "category": "jars",
+      "usd_path": "usd/jar_pickle.usda",
+      "texture_path": "textures/jar_pickle.png",
+      "dimensions_m": [
+        0.12,
+        0.12,
+        0.18
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "jar",
+      "product_name": "DILL GARDEN"
+    },
+    {
+      "asset_key": "jar_sauce",
+      "category": "jars",
+      "usd_path": "usd/jar_sauce.usda",
+      "texture_path": "textures/jar_sauce.png",
+      "dimensions_m": [
+        0.12,
+        0.12,
+        0.18
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "jar",
+      "product_name": "SAUCE HOUSE"
+    },
+    {
+      "asset_key": "produce_crate_green",
+      "category": "produce_crate",
+      "usd_path": "usd/produce_crate_green.usda",
+      "texture_path": "textures/produce_crate_green.png",
+      "dimensions_m": [
+        0.44,
+        0.32,
+        0.22
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "crate",
+      "product_name": "FARM CRATE"
+    },
+    {
+      "asset_key": "produce_crate_red",
+      "category": "produce_crate",
+      "usd_path": "usd/produce_crate_red.usda",
+      "texture_path": "textures/produce_crate_red.png",
+      "dimensions_m": [
+        0.44,
+        0.32,
+        0.22
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "crate",
+      "product_name": "MARKET CRATE"
+    },
+    {
+      "asset_key": "red_apple",
+      "category": "red_apples",
+      "usd_path": "usd/red_apple.usda",
+      "texture_path": "textures/red_apple.png",
+      "dimensions_m": [
+        0.12,
+        0.12,
+        0.12
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "fruit",
+      "product_name": "RED APPLE"
+    },
+    {
+      "asset_key": "green_apple",
+      "category": "green_apples",
+      "usd_path": "usd/green_apple.usda",
+      "texture_path": "textures/green_apple.png",
+      "dimensions_m": [
+        0.12,
+        0.12,
+        0.12
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "fruit",
+      "product_name": "GREEN APPLE"
+    },
+    {
+      "asset_key": "orange",
+      "category": "oranges",
+      "usd_path": "usd/orange.usda",
+      "texture_path": "textures/orange.png",
+      "dimensions_m": [
+        0.13,
+        0.13,
+        0.13
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "fruit",
+      "product_name": "ORANGE"
+    },
+    {
+      "asset_key": "lemon",
+      "category": "lemons",
+      "usd_path": "usd/lemon.usda",
+      "texture_path": "textures/lemon.png",
+      "dimensions_m": [
+        0.12,
+        0.12,
+        0.11
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "fruit",
+      "product_name": "LEMON"
+    },
+    {
+      "asset_key": "promo_market_sign",
+      "category": "promotional_sign",
+      "usd_path": "usd/promo_market_sign.usda",
+      "texture_path": "textures/promo_market_sign.png",
+      "dimensions_m": [
+        0.92,
+        0.05,
+        0.48
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "sign",
+      "product_name": "FRESH MARKET"
+    }
+  ]
+}

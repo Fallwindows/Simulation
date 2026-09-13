@@ -1,15 +1,12 @@
-"""Optional Isaac Sim USD adapter for the deterministic aisle description.
-
-Imports are intentionally delayed: the core and its tests do not require the
-Isaac runtime. The USD primitive API is stable enough for this small adapter,
-while sensor graph/API choices remain isolated in the runtime integration.
-"""
+"""Isaac Sim USD adapter for the deterministic aisle description."""
 
 from __future__ import annotations
 
 import re
 
 from simulator.environment.aisle_builder import AisleLayout
+from simulator.environment.materials import MaterialLibrary
+from simulator.environment.retail_catalog import load_retail_catalog
 
 
 class IsaacRuntimeUnavailable(RuntimeError):
@@ -17,7 +14,7 @@ class IsaacRuntimeUnavailable(RuntimeError):
 
 
 class IsaacAisleBuilder:
-    def __init__(self, stage=None):
+    def __init__(self, stage=None, materials: MaterialLibrary | None = None):
         try:
             import omni.usd  # type: ignore
             from pxr import Gf, Sdf, UsdGeom  # type: ignore
@@ -27,24 +24,62 @@ class IsaacAisleBuilder:
         self._Gf = Gf
         self._Sdf = Sdf
         self._UsdGeom = UsdGeom
-        # USD Stage objects can evaluate false when they have no default prim;
-        # use an explicit None check so a freshly created Isaac stage is kept.
         self.stage = stage if stage is not None else omni.usd.get_context().get_stage()
+        self.materials = materials or MaterialLibrary(self.stage)
+        self.default_materials = self.materials.create_defaults()
+
+    @staticmethod
+    def _safe(value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_]", "_", value)
+
+    def _structural_material(self, kind: str):
+        if kind == "floor":
+            return self.default_materials["floor_tile"]
+        if kind in {"wall", "rear_panel", "baseboard"}:
+            return self.default_materials["drywall"]
+        if kind == "ceiling":
+            return self.default_materials["ceiling"]
+        if kind == "price_strip":
+            return self.default_materials["price_strip"]
+        if kind in {"endcap"}:
+            return self.default_materials["endcap"]
+        return self.default_materials["shelving_metal"]
+
+    def _build_box(self, primitive, path: str) -> None:
+        prim = self.stage.DefinePrim(self._Sdf.Path(path), "Cube")
+        cube = self._UsdGeom.Cube(prim)
+        cube.GetSizeAttr().Set(1.0)
+        api = self._UsdGeom.XformCommonAPI(prim)
+        api.SetTranslate(self._Gf.Vec3d(*primitive.center_m))
+        api.SetScale(self._Gf.Vec3f(*(size for size in primitive.size_m)))
+        prim.CreateAttribute("grocery:kind", self._Sdf.ValueTypeNames.String).Set(primitive.kind)
+        self.materials.bind(prim, self._structural_material(primitive.kind))
+
+    def _build_asset(self, asset, catalog, root: str) -> None:
+        record = catalog.by_key(asset.asset_key)
+        if not record.usd_path.is_file():
+            raise FileNotFoundError(f"Retail asset USD is missing: {record.usd_path}")
+        path = f"{root}/retail_assets/{self._safe(asset.category)}/{self._safe(asset.name)}"
+        prim = self.stage.DefinePrim(self._Sdf.Path(path), "Xform")
+        reference_path = str(record.usd_path).replace("\\", "/")
+        if not prim.GetReferences().AddReference(reference_path):
+            raise RuntimeError(f"Failed to add USD reference {reference_path} at {path}")
+        prim.SetInstanceable(True)
+        api = self._UsdGeom.XformCommonAPI(prim)
+        api.SetTranslate(self._Gf.Vec3d(*asset.position_m))
+        api.SetRotate(self._Gf.Vec3f(*asset.rotation_rpy_deg), self._UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        api.SetScale(self._Gf.Vec3f(*asset.scale_xyz))
+        prim.CreateAttribute("grocery:asset_key", self._Sdf.ValueTypeNames.String).Set(asset.asset_key)
+        prim.CreateAttribute("grocery:category", self._Sdf.ValueTypeNames.String).Set(asset.category)
+        prim.CreateAttribute("grocery:semantic_id", self._Sdf.ValueTypeNames.String).Set(asset.semantic_id)
 
     def build(self, layout: AisleLayout, root: str = "/World/GroceryAisle") -> int:
-        """Materialize layout boxes and return the number of created primitives."""
+        """Materialize structure and reusable USD asset references."""
+        catalog = load_retail_catalog(layout.asset_manifest_path)
         for primitive in layout.primitives:
-            # USD path components must be valid identifiers.  The deterministic
-            # geometry uses ``-1``/``1`` side suffixes for uprights, so convert
-            # those (and any future punctuation) without changing object order.
-            kind = re.sub(r"[^A-Za-z0-9_]", "_", primitive.kind)
-            name = re.sub(r"[^A-Za-z0-9_]", "_", primitive.name)
-            path = f"{root}/{kind}/{name}"
-            sdf_path = self._Sdf.Path(path)
-            if not sdf_path.IsAbsolutePath:
-                raise ValueError(f"USD primitive path must be absolute, got {path!r}")
-            prim = self.stage.DefinePrim(sdf_path, "Cube")
-            cube = self._UsdGeom.Cube(prim)
-            cube.AddTranslateOp().Set(self._Gf.Vec3d(*primitive.center_m))
-            cube.AddScaleOp().Set(self._Gf.Vec3d(*(size / 2.0 for size in primitive.size_m)))
-        return len(layout.primitives)
+            kind = self._safe(primitive.kind)
+            name = self._safe(primitive.name)
+            self._build_box(primitive, f"{root}/structure/{kind}/{name}")
+        for asset in layout.assets:
+            self._build_asset(asset, catalog, root)
+        return len(layout.primitives) + len(layout.assets)

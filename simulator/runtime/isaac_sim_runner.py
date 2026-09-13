@@ -60,6 +60,7 @@ def lidar_runtime_spec(lidar_config) -> dict[str, object]:
         "translation_m": list(lidar_config.pose_in_rig.position_m),
         "orientation_xyzw_ros": list(orientation_xyzw),
         "orientation_wxyz_isaac": list(quaternion_xyzw_to_wxyz(orientation_xyzw)),
+        "pattern_firing_rate_hz": int(getattr(lidar_config, "pattern_firing_rate_hz", 8000)),
         "mount_frame": "sensor_rig",
         "mount_semantics": "rig_relative",
         "world_pose_semantics": "sensor_rig_world_pose_composed_with_local_mount",
@@ -108,10 +109,11 @@ def _define_xform(stage, path: str, frame_name: str):
 
 
 def _build_world(stage, scenario):
-    from pxr import Gf, UsdGeom, UsdLux
+    from pxr import Gf, Sdf, UsdGeom, UsdLux
 
     from simulator.environment.aisle_builder import build_aisle_layout
     from simulator.environment.isaac_builder import IsaacAisleBuilder
+    from simulator.environment.materials import MaterialLibrary
 
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
@@ -121,17 +123,29 @@ def _build_world(stage, scenario):
     world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
     _set_name_override(world, "sim_world")
     layout = build_aisle_layout(scenario.environment)
-    primitive_count = IsaacAisleBuilder(stage=stage).build(layout, "/World/GroceryAisle")
+    material_library = MaterialLibrary(stage, "/World/Looks")
+    primitive_count = IsaacAisleBuilder(stage=stage, materials=material_library).build(layout, "/World/GroceryAisle")
 
     dome = UsdLux.DomeLight.Define(stage, "/World/DomeLight")
-    dome.GetIntensityAttr().Set(float(scenario.environment.lighting_lux))
-    dome.GetColorAttr().Set(Gf.Vec3f(1.0, 0.96, 0.9))
-    distant = UsdLux.DistantLight.Define(stage, "/World/DistantLight")
-    distant.GetIntensityAttr().Set(2500.0)
-    distant.GetAngleAttr().Set(0.5)
-    UsdGeom.XformCommonAPI(distant).SetRotate(Gf.Vec3f(-35.0, -25.0, 25.0))
+    dome.GetIntensityAttr().Set(80.0)
+    dome.GetColorAttr().Set(Gf.Vec3f(0.94, 0.97, 1.0))
+    light_count = 0
+    spacing_m = 3.0
+    light_intensity = max(450.0, float(scenario.environment.lighting_lux) * 1.8)
+    x = 1.5
+    while x < scenario.environment.length_m:
+        for row, y in enumerate((-0.85, 0.85)):
+            light = UsdLux.RectLight.Define(stage, f"/World/AreaLights/Area_{light_count:03d}")
+            light.GetIntensityAttr().Set(light_intensity)
+            light.GetWidthAttr().Set(1.25)
+            light.GetHeightAttr().Set(0.45)
+            light.GetColorAttr().Set(Gf.Vec3f(1.0, 0.96, 0.90))
+            UsdGeom.XformCommonAPI(light).SetTranslate(Gf.Vec3d(x, y, scenario.environment.ceiling_height_m - 0.18))
+            light.GetPrim().CreateAttribute("grocery:light_row", Sdf.ValueTypeNames.Int).Set(row)
+            light_count += 1
+        x += spacing_m
 
-    return layout, primitive_count
+    return layout, primitive_count, {"scope": "/World/Looks", "dome_intensity": 80.0, "area_light_count": light_count, "area_light_spacing_m": spacing_m}
 
 
 def _build_sensor_rig(stage, scenario):
@@ -264,7 +278,7 @@ def _create_lidar(lidar_path: str, lidar_config, topic: str):
             "omni:sensor:Core:scanRateBaseHz": spec["tick_rate_hz"],
             "omni:sensor:Core:nearRangeM": spec["near_range_m"],
             "omni:sensor:Core:farRangeM": spec["far_range_m"],
-            "omni:sensor:Core:patternFiringRateHz": 20000,
+            "omni:sensor:Core:patternFiringRateHz": spec["pattern_firing_rate_hz"],
         },
     )
     prim = lidar.prims[0]
@@ -366,7 +380,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         stage = omni.usd.get_context().get_stage()
 
         print("[grocery-runtime] building aisle USD", flush=True)
-        layout, primitive_count = _build_world(stage, scenario)
+        layout, primitive_count, lighting_summary = _build_world(stage, scenario)
         print("[grocery-runtime] building sensor rig USD", flush=True)
         _, camera_path, lidar_path = _build_sensor_rig(stage, scenario)
         print("[grocery-runtime] creating camera ROS graph", flush=True)
@@ -386,6 +400,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
         import rclpy
         from geometry_msgs.msg import PoseStamped
+        from std_msgs.msg import Header
         from tf2_msgs.msg import TFMessage
         from rclpy.executors import MultiThreadedExecutor
         from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
@@ -395,6 +410,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         executor = MultiThreadedExecutor(num_threads=2)
         executor.add_node(node)
         gt_pub = node.create_publisher(PoseStamped, TOPICS["ground_truth_pose"], 10)
+        lidar_heartbeat_pub = node.create_publisher(Header, TOPICS["lidar_heartbeat"], 10)
         tf_pub = node.create_publisher(TFMessage, "/tf", 10)
         static_tf = StaticTransformBroadcaster(node)
         _publish_static_tf(static_tf, scenario)
@@ -421,6 +437,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         def _on_lidar(message) -> None:
             lidar_stamps.append(float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0)
             lidar_point_counts.append(int(getattr(message, "width", 0)) * int(getattr(message, "height", 0)))
+            heartbeat = Header()
+            heartbeat.stamp = message.header.stamp
+            heartbeat.frame_id = "lidar_link"
+            lidar_heartbeat_pub.publish(heartbeat)
 
         from rosgraph_msgs.msg import Clock
         from sensor_msgs.msg import Image, PointCloud2
@@ -482,12 +502,17 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "frames_simulated": frames,
             "primitive_count": primitive_count,
             "product_count": len(layout.products),
+            "asset_count": len(layout.assets),
+            "asset_manifest": layout.asset_manifest_path,
+            "materials": {"scope": lighting_summary["scope"], "shared_library": True},
+            "lighting": lighting_summary,
             "topics": {
                 "clock": TOPICS["clock"],
                 "rgb": TOPICS["rgb_image"],
                 "camera_info": TOPICS["rgb_camera_info"],
                 "lidar_ideal": TOPICS["lidar_ideal_points"],
                 "lidar": TOPICS["lidar_points"],
+                "lidar_heartbeat": TOPICS["lidar_heartbeat"],
                 "ground_truth_pose": TOPICS["ground_truth_pose"],
             },
             "frames": list(FRAMES.values()),
@@ -518,6 +543,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "lidar_noise": {
                 "enabled": noise_config.enabled,
                 "relay": "simulator.ros.lidar_noise_relay" if lidar_relay is not None else None,
+                "max_points": None if lidar_relay is None else lidar_relay.max_points,
                 "received_clouds": None if lidar_relay is None else lidar_relay.received_clouds,
                 "published_clouds": None if lidar_relay is None else lidar_relay.published_clouds,
                 "last_point_count": None if lidar_relay is None else lidar_relay.last_point_count,

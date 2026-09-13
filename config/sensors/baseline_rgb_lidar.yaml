@@ -16,6 +16,7 @@
     "vertical_fov_deg": [-25.0, 15.0],
     "horizontal_samples": 720,
     "vertical_samples": 32,
+    "pattern_firing_rate_hz": 3000,
     "pose_in_rig": {"position_m": [0.0, 0.0, 1.55], "rpy_deg": [0.0, 0.0, 0.0]}
   }
 }

@@ -12,7 +12,7 @@ from simulator.sensors.noise import NoiseConfig, apply_lidar_noise, jitter_times
 
 
 class LidarNoiseRelay:
-    def __init__(self, node, config: NoiseConfig, seed: int):
+    def __init__(self, node, config: NoiseConfig, seed: int, max_points: int = 20000):
         try:
             from sensor_msgs_py import point_cloud2
         except ImportError as exc:  # pragma: no cover - ROS-only path
@@ -20,6 +20,7 @@ class LidarNoiseRelay:
         self.node = node
         self.config = config
         self.seed = int(seed)
+        self.max_points = max(1, int(max_points))
         self._counter = 0
         self.received_clouds = 0
         self.published_clouds = 0
@@ -50,6 +51,9 @@ class LidarNoiseRelay:
             for x, y, z in self._point_cloud2.read_points(message, field_names=("x", "y", "z"), skip_nans=True)
         ]
         points = apply_lidar_noise(points, self.config, frame_seed)
+        if len(points) > self.max_points:
+            stride = max(1, (len(points) + self.max_points - 1) // self.max_points)
+            points = points[::stride][: self.max_points]
         self.last_point_count = len(points)
         header = message.header
         header.frame_id = FRAMES["lidar_link"]

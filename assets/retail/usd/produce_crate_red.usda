@@ -1,0 +1,109 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    kind = "component"
+) {
+    def Xform "Geometry" {
+        def Cube "Base" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            double3 xformOp:translate = (0.00000, 0.00000, 0.00000)
+            double3 xformOp:scale = (0.22000, 0.16000, 0.11000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Cube "SlatX0" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            double3 xformOp:translate = (-0.16720, 0.00000, 0.00000)
+            double3 xformOp:scale = (0.01760, 0.16480, 0.13750)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </Asset/Looks/Front>
+        }
+        def Cube "SlatX1" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            double3 xformOp:translate = (0.16720, 0.00000, 0.00000)
+            double3 xformOp:scale = (0.01760, 0.16480, 0.13750)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </Asset/Looks/Front>
+        }
+        def Cube "SlatZ0" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            double3 xformOp:translate = (0.00000, 0.00000, -0.06160)
+            double3 xformOp:scale = (0.22660, 0.01280, 0.01100)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </Asset/Looks/Front>
+        }
+        def Cube "SlatZ1" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            double3 xformOp:translate = (0.00000, 0.00000, 0.06160)
+            double3 xformOp:scale = (0.22660, 0.01280, 0.01100)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </Asset/Looks/Front>
+        }
+        def Sphere "Fruit" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            double radius = 0.5
+            double3 xformOp:translate = (0, 0, 0.14520)
+            double3 xformOp:scale = (0.10120, 0.07360, 0.09900)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </Asset/Looks/Front>
+        }
+    }
+    def Scope "Looks" {
+        def Material "Body" {
+            token outputs:surface.connect = </Asset/Looks/Body/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.62353, 0.30196, 0.21569)
+                float inputs:roughness = 0.6200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Front" {
+            token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "Texture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/produce_crate_red.png@
+                token outputs:rgb
+            }
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.92549, 0.76078, 0.28627)
+                float inputs:roughness = 0.5400
+                float inputs:metallic = 0.0000
+                color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
+                token outputs:surface
+            }
+        }
+        def Material "Metal" {
+            token outputs:surface.connect = </Asset/Looks/Metal/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.48000, 0.52000, 0.55000)
+                float inputs:roughness = 0.2800
+                float inputs:metallic = 0.7000
+                token outputs:surface
+            }
+        }
+        def Material "Stem" {
+            token outputs:surface.connect = </Asset/Looks/Stem/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.12000, 0.23000, 0.08000)
+                float inputs:roughness = 0.7200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+    }
+}

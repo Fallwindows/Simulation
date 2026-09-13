@@ -15,9 +15,11 @@
     "rgb_camera_info": "/sim/camera/rgb/camera_info",
     "lidar_ideal_points": "/sim/lidar/points_ideal",
     "lidar_points": "/sim/lidar/points",
+    "lidar_heartbeat": "/sim/lidar/heartbeat",
     "ground_truth_pose": "/sim/ground_truth/pose",
     "estimated_odom": "/slam/odom",
-    "map_points": "/slam/map_cloud"
+    "map_points": "/slam/map_cloud",
+    "map_heartbeat": "/slam/map_heartbeat"
   },
   "dashboard": {
     "host": "127.0.0.1",
