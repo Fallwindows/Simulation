@@ -3,7 +3,7 @@ import unittest
 import cv2
 import numpy as np
 
-from simulator.perception.rgb_tracking import BlobTracker, detect_product_blobs
+from simulator.perception.rgb_tracking import BlobTracker, _consolidate_track_estimates, detect_product_blobs
 
 
 class PerceptionTests(unittest.TestCase):
@@ -28,3 +28,14 @@ class PerceptionTests(unittest.TestCase):
         self.assertEqual(len(first), 1)
         self.assertEqual(len(second), 1)
         self.assertEqual(first[0]["track_id"], second[0]["track_id"])
+
+    def test_3d_track_consolidation_merges_rgb_fragments_without_ground_truth(self):
+        mapping, centers, members = _consolidate_track_estimates({
+            12: np.asarray([2.00, -1.00, 0.80]),
+            31: np.asarray([2.08, -1.02, 0.81]),
+            44: np.asarray([4.00, 1.00, 1.20]),
+        }, merge_radius_m=0.15)
+        self.assertEqual(len(centers), 2)
+        self.assertEqual(mapping[12], mapping[31])
+        self.assertNotEqual(mapping[12], mapping[44])
+        self.assertEqual(sorted(members[mapping[12]]), [12, 31])
