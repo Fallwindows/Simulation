@@ -413,6 +413,60 @@ def _augment_with_lidar_estimates(
     }
 
 
+def _consolidate_track_estimates(
+    track_estimates: dict[int, np.ndarray],
+    merge_radius_m: float = 0.21,
+) -> tuple[dict[int, int], dict[int, np.ndarray], dict[int, list[int]]]:
+    """Merge RGB track fragments using estimated 3D position only.
+
+    RGB components can split when a product crosses a shelf edge or changes
+    apparent size.  The canonical ID is therefore assigned from the estimated
+    start-relative center, never from simulator identity or ground truth.
+    """
+
+    clusters: list[dict[str, object]] = []
+    grid: dict[tuple[int, int, int], list[int]] = {}
+    for raw_track_id in sorted(track_estimates):
+        point = np.asarray(track_estimates[raw_track_id], dtype=np.float64)
+        cell = tuple(np.floor(point / merge_radius_m).astype(int))
+        candidates: list[int] = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    candidates.extend(grid.get((cell[0] + dx, cell[1] + dy, cell[2] + dz), []))
+        selected = None
+        selected_distance = float("inf")
+        for cluster_index in candidates:
+            center = np.asarray(clusters[cluster_index]["center"], dtype=np.float64)
+            distance = float(np.linalg.norm(center - point))
+            if distance <= merge_radius_m and distance < selected_distance:
+                selected = cluster_index
+                selected_distance = distance
+        if selected is None:
+            selected = len(clusters)
+            clusters.append({"center": point.copy(), "count": 1, "members": [raw_track_id]})
+            grid.setdefault(cell, []).append(selected)
+        else:
+            cluster = clusters[selected]
+            count = int(cluster["count"]) + 1
+            cluster["center"] = (np.asarray(cluster["center"]) * (count - 1) + point) / count
+            cluster["count"] = count
+            cluster["members"].append(raw_track_id)
+
+    order = sorted(range(len(clusters)), key=lambda index: tuple(float(value) for value in clusters[index]["center"]))
+    raw_to_canonical: dict[int, int] = {}
+    canonical_estimates: dict[int, np.ndarray] = {}
+    canonical_members: dict[int, list[int]] = {}
+    for canonical_id, cluster_index in enumerate(order, start=1):
+        cluster = clusters[cluster_index]
+        canonical_estimates[canonical_id] = np.asarray(cluster["center"], dtype=np.float64)
+        members = [int(value) for value in cluster["members"]]
+        canonical_members[canonical_id] = members
+        for raw_track_id in members:
+            raw_to_canonical[raw_track_id] = canonical_id
+    return raw_to_canonical, canonical_estimates, canonical_members
+
+
 def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: str | Path, repo_root: str | Path | None = None) -> dict[str, object]:
     """Run RGB tracking plus sensor-only 3D localization."""
 
@@ -448,43 +502,66 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         raise RuntimeError(f"RGB frame/index mismatch: decoded={decoded}, indexed={len(frames_index)}")
 
     track_estimates, localization = _augment_with_lidar_estimates(capture, slam, frames_index, frame_annotations)
+    raw_to_canonical, canonical_estimates, canonical_members = _consolidate_track_estimates(track_estimates)
+    localization["canonical_track_count"] = len(canonical_estimates)
+    localization["canonicalization_radius_m"] = 0.21
+
+    observation_counts: dict[int, int] = {}
+    for frame in frame_annotations:
+        for detection in frame["detections"]:
+            if detection.get("coordinate_source") != "lidar_projected_with_slam_pose":
+                continue
+            track_id = int(detection["track_id"])
+            observation_counts[track_id] = observation_counts.get(track_id, 0) + 1
+
+    # Replace fragment IDs in the output stream with stable 3D-associated IDs.
+    for frame in frame_annotations:
+        for detection in frame["detections"]:
+            raw_track_id = int(detection["track_id"])
+            canonical_id = raw_to_canonical.get(raw_track_id)
+            if canonical_id is None:
+                continue
+            detection["raw_track_id"] = raw_track_id
+            detection["track_id"] = canonical_id
+            detection["estimated_center_start_relative_m"] = [
+                round(float(value), 3) for value in canonical_estimates[canonical_id]
+            ]
+            detection["coordinate_source"] = "lidar_projected_with_slam_pose_consolidated"
+
+    track_rows = []
+    for canonical_id in sorted(canonical_estimates):
+        raw_members = canonical_members[canonical_id]
+        member_tracks = [tracker.tracks[raw_id] for raw_id in raw_members if raw_id in tracker.tracks]
+        if not member_tracks:
+            continue
+        total_detections = sum(track.detection_count for track in member_tracks)
+        weighted_u = sum(track.center_px[0] * track.detection_count for track in member_tracks) / max(1, total_detections)
+        weighted_v = sum(track.center_px[1] * track.detection_count for track in member_tracks) / max(1, total_detections)
+        track_rows.append({
+            "track_id": canonical_id,
+            "class": "unknown_product",
+            "source": "rgb_lidar_slam_consolidated",
+            "first_frame_index": min(track.first_frame_index for track in member_tracks),
+            "last_frame_index": max(track.last_frame_index for track in member_tracks),
+            "detection_count": total_detections,
+            "center_u_px": round(weighted_u, 3),
+            "center_v_px": round(weighted_v, 3),
+            "estimated_x_m": round(float(canonical_estimates[canonical_id][0]), 3),
+            "estimated_y_m": round(float(canonical_estimates[canonical_id][1]), 3),
+            "estimated_z_m": round(float(canonical_estimates[canonical_id][2]), 3),
+            "depth_source": "lidar_projected_with_slam_pose",
+            "3d_observation_count": sum(observation_counts.get(raw_id, 0) for raw_id in raw_members),
+            "raw_track_count": len(raw_members),
+        })
 
     annotation_path = output / "frame_annotations.jsonl"
     with annotation_path.open("w", encoding="utf-8", newline="\n") as handle:
         for record in frame_annotations:
             handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
 
-    track_rows = []
-    for track in sorted(tracker.tracks.values(), key=lambda item: item.track_id):
-        if track.detection_count < 2:
-            continue
-        track_rows.append({
-            "track_id": track.track_id,
-            "class": "unknown_product",
-            "source": "rgb_color_connected_component",
-            "first_frame_index": track.first_frame_index,
-            "last_frame_index": track.last_frame_index,
-            "detection_count": track.detection_count,
-            "center_u_px": round(track.center_px[0], 3),
-            "center_v_px": round(track.center_px[1], 3),
-            "estimated_x_m": round(float(track_estimates[track.track_id][0]), 3) if track.track_id in track_estimates else "",
-            "estimated_y_m": round(float(track_estimates[track.track_id][1]), 3) if track.track_id in track_estimates else "",
-            "estimated_z_m": round(float(track_estimates[track.track_id][2]), 3) if track.track_id in track_estimates else "",
-            "depth_source": "lidar_projected_with_slam_pose" if track.track_id in track_estimates else "rgb_only_no_lidar_association",
-            "3d_observation_count": 0,
-        })
-    # Track-level 3D observations are represented in the coordinate summary;
-    # the per-frame JSONL retains each measured point count.  Keeping the CSV
-    # row one-per-track makes it directly usable as an inventory spreadsheet.
     for row in track_rows:
-        track_id = int(row["track_id"])
-        row["3d_observation_count"] = sum(
-            1
-            for frame in frame_annotations
-            for detection in frame["detections"]
-            if int(detection["track_id"]) == track_id and detection.get("coordinate_source") == "lidar_projected_with_slam_pose"
-        )
-    fields = ["track_id", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "depth_source", "3d_observation_count"]
+        row["3d_observation_count"] = int(row["3d_observation_count"])
+    fields = ["track_id", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "depth_source", "3d_observation_count", "raw_track_count"]
     _write_csv(output / "estimated_inventory.csv", track_rows, fields)
     _write_csv(output / "tracks.csv", track_rows, fields)
     (output / "estimated_inventory.json").write_text(json.dumps(track_rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -503,6 +580,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "frame_count": len(frame_annotations),
         "detection_count": sum(len(item["detections"]) for item in frame_annotations),
         "track_count": len(track_rows),
+        "raw_rgb_track_count": len(tracker.tracks),
         "video": "../capture/rgb_camera.mp4",
         "frames": "../capture/rgb_frames.jsonl",
         "annotations": "frame_annotations.jsonl",
