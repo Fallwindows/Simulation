@@ -18,4 +18,7 @@ class GeometryTests(unittest.TestCase):
     def test_layout_contains_two_shelf_rows_and_floor(self):
         layout = build_aisle_layout(self.scenario.environment)
         self.assertEqual(sum(p.kind == "floor" for p in layout.primitives), 1)
-        self.assertEqual(sum(p.kind == "shelf" for p in layout.primitives) // self.scenario.environment.shelf_levels, 2 * int(self.scenario.environment.length_m // self.scenario.environment.bay_width_m))
+        shelf_count = sum(p.kind == "shelf" for p in layout.primitives)
+        bay_count = int(self.scenario.environment.length_m // self.scenario.environment.bay_width_m)
+        self.assertGreater(shelf_count, 2 * bay_count * self.scenario.environment.shelf_levels)
+        self.assertEqual(shelf_count, 240)

@@ -61,6 +61,12 @@ class AisleConfig:
     shelf_rows_y_m: tuple[float, ...]
     lighting_lux: float
     asset_manifest_path: str = ""
+    shelf_clearance_m: float = 0.03
+    facing_gap_m: float = 0.025
+    depth_facings: int = 2
+    depth_gap_m: float = 0.025
+    edge_margin_m: float = 0.03
+    produce_items_per_crate: int = 24
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,13 @@ def _finite(value: Any, name: str) -> float:
     return result
 
 
+def _nonnegative(value: Any, name: str) -> float:
+    result = float(value)
+    if not math.isfinite(result) or result < 0.0:
+        raise ValueError(f"{name} must be nonnegative")
+    return result
+
+
 def _pose(data: dict[str, Any], name: str) -> PoseConfig:
     return PoseConfig(_tuple3(data.get("position_m", [0.0, 0.0, 0.0]), f"{name}.position_m"), _tuple3(data.get("rpy_deg", [0.0, 0.0, 0.0]), f"{name}.rpy_deg"))
 
@@ -145,6 +158,12 @@ def _aisle(data: dict[str, Any], source_path: Path | None = None) -> AisleConfig
         raise ValueError("shelf_rows_y_m must not be empty")
     manifest_value = str(data.get("asset_manifest", "../../assets/retail/manifest.json"))
     manifest_path = (source_path.parent / manifest_value).resolve() if source_path is not None else Path(manifest_value).resolve()
+    depth_facings = int(data.get("depth_facings", 2))
+    if depth_facings < 1 or depth_facings > 4:
+        raise ValueError("depth_facings must be between 1 and 4")
+    produce_items_per_crate = int(data.get("produce_items_per_crate", 24))
+    if produce_items_per_crate < 1 or produce_items_per_crate > 100:
+        raise ValueError("produce_items_per_crate must be between 1 and 100")
     return AisleConfig(
         name=str(data.get("name", "aisle")),
         length_m=_positive(data["length_m"], "length_m"),
@@ -159,6 +178,12 @@ def _aisle(data: dict[str, Any], source_path: Path | None = None) -> AisleConfig
         shelf_rows_y_m=rows,
         lighting_lux=_positive(data.get("lighting_lux", 450.0), "lighting_lux"),
         asset_manifest_path=str(manifest_path),
+        shelf_clearance_m=_nonnegative(data.get("shelf_clearance_m", 0.03), "shelf_clearance_m"),
+        facing_gap_m=_nonnegative(data.get("facing_gap_m", 0.025), "facing_gap_m"),
+        depth_facings=depth_facings,
+        depth_gap_m=_nonnegative(data.get("depth_gap_m", 0.025), "depth_gap_m"),
+        edge_margin_m=_nonnegative(data.get("edge_margin_m", 0.03), "edge_margin_m"),
+        produce_items_per_crate=produce_items_per_crate,
     )
 
 

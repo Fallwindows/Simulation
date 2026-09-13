@@ -1,10 +1,14 @@
-import random
 import re
 import unittest
+from collections import Counter
 from pathlib import Path
 
 from simulator.config.loader import load_scenario
-from simulator.environment.aisle_builder import build_aisle_layout
+from simulator.environment.aisle_builder import (
+    SHELF_THICKNESS_M,
+    build_aisle_layout,
+    shelf_level_counts_by_zone,
+)
 from simulator.environment.retail_catalog import load_retail_catalog
 
 
@@ -13,9 +17,17 @@ class RetailAssetTests(unittest.TestCase):
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[1]
         cls.scenario = load_scenario(root / "config/scenarios/baseline_straight.yaml")
-        cls.layout = build_aisle_layout(cls.scenario.environment)
-        cls.catalog = load_retail_catalog(cls.scenario.environment.asset_manifest_path)
+        cls.config = cls.scenario.environment
+        cls.layout = build_aisle_layout(cls.config)
+        cls.catalog = load_retail_catalog(cls.config.asset_manifest_path)
         cls.catalog_by_key = {asset.asset_key: asset for asset in cls.catalog.assets}
+        cls.bay_count = int(cls.config.length_m // cls.config.bay_width_m)
+        cls.shelves = {}
+        for primitive in cls.layout.primitives:
+            match = re.match(r"shelf_r(\d+)_b(\d+)_l(\d+)$", primitive.name)
+            if match:
+                row, bay, level = (int(value) for value in match.groups())
+                cls.shelves[(row, bay, level)] = primitive
 
     def test_catalog_is_complete_and_portable(self):
         self.assertEqual(len(self.catalog.assets), 34)
@@ -24,96 +36,98 @@ class RetailAssetTests(unittest.TestCase):
             self.assertTrue(asset.texture_path.is_file(), asset.asset_key)
             self.assertEqual(asset.local_front_axis, "+Y")
 
-    def test_structure_matches_original_open_aisle(self):
-        kinds = [primitive.kind for primitive in self.layout.primitives]
-        self.assertEqual(len(self.layout.primitives), 241)
-        self.assertEqual(kinds.count("floor"), 1)
-        self.assertEqual(kinds.count("shelf"), 160)
-        self.assertEqual(kinds.count("upright"), 80)
-        self.assertEqual(set(kinds), {"floor", "shelf", "upright"})
-        forbidden = ("wall", "ceiling", "baseboard", "rear_panel", "shelf_lip", "price_strip", "endcap")
-        self.assertFalse(any(kind in forbidden for kind in kinds))
-        self.assertEqual(self.layout.primitives[0].center_m, (12.0, 0.0, -0.05))
-        self.assertEqual(self.layout.primitives[1].center_m, (0.6, -1.65, 0.55))
-        self.assertAlmostEqual(self.layout.primitives[-1].center_m[0], 23.4, places=12)
-        self.assertEqual(self.layout.primitives[-1].center_m[1:], (1.881, 1.1))
+    def test_dimension_aware_shelf_levels_are_dense_but_clear(self):
+        counts = shelf_level_counts_by_zone(self.config, self.catalog)
+        self.assertEqual(counts, {"cereal": 5, "snacks": 6, "cans_jars": 7, "beverage": 6, "produce": 6})
+        self.assertEqual(len(self.shelves), 240)
+        for row in range(2):
+            for bay in range(self.bay_count):
+                levels = [key for key in self.shelves if key[:2] == (row, bay)]
+                z_values = [self.shelves[key].center_m[2] for key in sorted(levels)]
+                self.assertEqual(z_values, sorted(z_values))
+                self.assertEqual(len(set(z_values)), len(z_values))
 
-    def _legacy_product_slots(self):
-        config = self.scenario.environment
-        rng = random.Random(config.seed)
-        bay_count = max(1, int(config.length_m // config.bay_width_m))
-        x0 = config.bay_width_m / 2.0
-        level_spacing = config.shelf_height_m / config.shelf_levels
-        slots = []
-        for row_index, row_y in enumerate(config.shelf_rows_y_m):
-            for bay in range(bay_count):
-                x = x0 + bay * config.bay_width_m
-                for level in range(config.shelf_levels):
-                    z = config.floor_z_m + (level + 1) * level_spacing
-                    for slot in range(4):
-                        if rng.random() > config.product_density:
-                            continue
-                        px = x - config.bay_width_m * 0.36 + (slot + 0.5) * config.bay_width_m * 0.18
-                        py = row_y + (rng.random() - 0.5) * max(0.02, config.shelf_depth_m * 0.35)
-                        rng.random()
-                        slots.append((f"product_r{row_index}_b{bay}_l{level}_s{slot}", px, py, z))
-        return slots
+    def test_dense_count_and_real_depth_facings(self):
+        self.assertGreaterEqual(len(self.layout.assets), 800)
+        self.assertLessEqual(len(self.layout.assets), 1500)
+        self.assertGreater(len(self.layout.assets), 3 * 433)
+        regular = [asset for asset in self.layout.assets if asset.category != "produce_crate"]
+        self.assertTrue(any("/d1/" in asset.semantic_id for asset in regular))
+        self.assertEqual(Counter(asset.category for asset in self.layout.assets), Counter({
+            "snacks": 311,
+            "cereal": 265,
+            "cans": 212,
+            "juice": 198,
+            "jars": 152,
+            "soda": 124,
+            "water": 92,
+            "red_apples": 24,
+            "green_apples": 24,
+            "oranges": 24,
+            "lemons": 24,
+            "produce_crate": 4,
+        }))
 
-    def test_asset_slots_preserve_original_rng_decisions_and_positions(self):
-        expected = self._legacy_product_slots()
-        actual = [(asset.name, asset.position_m[0], asset.position_m[1]) for asset in self.layout.assets]
-        self.assertEqual(len(actual), len(expected))
-        for (name, x, y), (expected_name, expected_x, expected_y, _) in zip(actual, expected):
-            self.assertEqual(name, expected_name)
-            self.assertAlmostEqual(x, expected_x, places=12)
-            self.assertAlmostEqual(y, expected_y, places=12)
+    def test_every_physical_object_has_one_unique_identity(self):
+        ids = [asset.instance_id for asset in self.layout.assets]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(all(ids))
+        self.assertEqual([asset.instance_id for asset in self.layout.assets], [asset.semantic_id for asset in self.layout.assets])
+        self.assertEqual(self.layout, build_aisle_layout(self.config))
 
-    def test_same_seed_is_deterministic_and_every_asset_resolves(self):
-        self.assertEqual(self.layout, build_aisle_layout(self.scenario.environment))
-        self.assertGreater(len(self.layout.assets), 0)
-        self.assertTrue(all(asset.asset_key in self.catalog_by_key for asset in self.layout.assets))
-        self.assertTrue(all(asset.scale_xyz == (1.0, 1.0, 1.0) for asset in self.layout.assets))
-
-    def test_assets_sit_on_shelves_and_do_not_enter_corridor(self):
-        config = self.scenario.environment
-        level_spacing = config.shelf_height_m / config.shelf_levels
+    def test_all_assets_resolve_and_products_are_shelf_anchored(self):
         for asset in self.layout.assets:
-            match = re.match(r"product_r(\d+)_b(\d+)_l(\d+)_s\d+$", asset.name)
-            self.assertIsNotNone(match)
-            row, bay, level = (int(value) for value in match.groups())
+            self.assertIn(asset.asset_key, self.catalog_by_key)
+            self.assertEqual(asset.scale_xyz, (1.0, 1.0, 1.0))
+            self.assertGreater(abs(asset.position_m[1]), self.config.shelf_depth_m / 2.0)
+        for asset in self.layout.assets:
+            if asset.category == "produce_crate":
+                continue
+            product_match = re.match(r"product_r(\d+)_b(\d+)_l(\d+)_d\d+_f\d+$", asset.name)
+            if product_match is None:
+                continue
+            row, bay, level = (int(value) for value in product_match.groups())
+            shelf = self.shelves[(row, bay, level)]
             record = self.catalog_by_key[asset.asset_key]
-            shelf_center_z = config.floor_z_m + (level + 1) * level_spacing
-            expected_z = shelf_center_z + 0.03 + record.dimensions_m[2] / 2.0
+            expected_z = shelf.center_m[2] + SHELF_THICKNESS_M / 2.0 + record.dimensions_m[2] / 2.0
             self.assertAlmostEqual(asset.position_m[2], expected_z, places=12)
-            self.assertGreater(abs(asset.position_m[1]), config.shelf_depth_m / 2.0)
-            self.assertEqual(row, 0 if asset.position_m[1] < 0.0 else 1)
-            self.assertLess(abs(asset.position_m[0] - (config.bay_width_m / 2.0 + bay * config.bay_width_m)), config.bay_width_m / 2.0)
+            self.assertLessEqual(abs(asset.position_m[1] - shelf.center_m[1]) + record.dimensions_m[1] / 2.0, self.config.shelf_depth_m / 2.0 + 1e-9)
+            next_shelf = self.shelves.get((row, bay, level + 1))
+            if next_shelf is not None:
+                product_top = asset.position_m[2] + record.dimensions_m[2] / 2.0
+                next_shelf_bottom = next_shelf.center_m[2] - SHELF_THICKNESS_M / 2.0
+                self.assertGreaterEqual(next_shelf_bottom - product_top, self.config.shelf_clearance_m - 1e-9)
 
-    def test_assets_face_the_aisle_and_fruit_is_in_final_bays(self):
-        config = self.scenario.environment
-        bay_count = int(config.length_m // config.bay_width_m)
-        fruit_categories = {"red_apples", "green_apples", "oranges", "lemons"}
-        fruit_assets = []
+    def test_produce_is_substantial_and_inside_four_bins(self):
+        crates = [asset for asset in self.layout.assets if asset.category == "produce_crate"]
+        fruits = [asset for asset in self.layout.assets if asset.category in {"red_apples", "green_apples", "oranges", "lemons"}]
+        self.assertEqual(len(crates), 4)
+        self.assertEqual(len(fruits), 96)
+        self.assertEqual(Counter(asset.category for asset in fruits), Counter({
+            "red_apples": 24,
+            "green_apples": 24,
+            "oranges": 24,
+            "lemons": 24,
+        }))
+        crate_by_prefix = {"/".join(asset.semantic_id.split("/")[2:]): asset for asset in crates}
+        for fruit in fruits:
+            prefix = "/".join(fruit.semantic_id.split("/")[2:-1])
+            crate = crate_by_prefix[prefix]
+            fruit_record = self.catalog_by_key[fruit.asset_key]
+            crate_record = self.catalog_by_key[crate.asset_key]
+            self.assertLessEqual(abs(fruit.position_m[0] - crate.position_m[0]) + fruit_record.dimensions_m[0] / 2.0, crate_record.dimensions_m[0] / 2.0 + 0.01)
+            self.assertLessEqual(abs(fruit.position_m[1] - crate.position_m[1]) + fruit_record.dimensions_m[1] / 2.0, crate_record.dimensions_m[1] / 2.0 + 0.01)
+
+    def test_products_face_the_aisle_without_corridor_intrusion(self):
         for asset in self.layout.assets:
+            if asset.category == "produce_crate":
+                continue
             yaw = asset.rotation_rpy_deg[2] % 360.0
             if asset.position_m[1] < 0.0:
                 self.assertLess(min(yaw, 360.0 - yaw), 5.0)
             else:
                 self.assertLess(abs(yaw - 180.0), 5.0)
-            if asset.category in fruit_categories:
-                fruit_assets.append(asset)
-                match = re.match(r"product_r\d+_b(\d+)_l(\d+)_s\d+$", asset.name)
-                self.assertIsNotNone(match)
-                bay, level = (int(value) for value in match.groups())
-                self.assertGreaterEqual(bay, bay_count - 2)
-                self.assertEqual(level, 0)
-        self.assertGreater(len(fruit_assets), 0)
-
-    def test_categories_are_zoned_without_changing_slots(self):
-        categories = {asset.category for asset in self.layout.assets}
-        self.assertTrue({"cereal", "snacks", "cans", "jars", "juice", "water", "soda"} <= categories)
-        self.assertTrue({"red_apples", "green_apples", "oranges", "lemons"} <= categories)
-        self.assertFalse(any(asset.name.startswith("endcap_") for asset in self.layout.assets))
+            self.assertGreater(abs(asset.position_m[1]), 1.0)
 
 
 if __name__ == "__main__":
