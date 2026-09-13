@@ -23,7 +23,6 @@ class CollectorNode:
         import rclpy
         from geometry_msgs.msg import PoseStamped
         from nav_msgs.msg import Odometry
-        from rclpy.callback_groups import ReentrantCallbackGroup
         from rclpy.node import Node
         from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
         from rosgraph_msgs.msg import Clock
@@ -46,7 +45,6 @@ class CollectorNode:
         self.post_target_grace_s = 15.0
         self.post_target_grace_deadline: float | None = None
         self.wall_guard_timeout_s = max(30.0, self.duration_s * 2.0)
-        self.callback_group = ReentrantCallbackGroup()
         self.ground_truth: list[PoseSample] = []
         self.estimate: list[PoseSample] = []
         self.invalid_quaternion_counts = {"ground_truth": 0, "estimate": 0}
@@ -60,17 +58,17 @@ class CollectorNode:
             "tf": {"topic": "/tf", "count": 0, "first_stamp_s": None, "last_stamp_s": None},
             "tf_static": {"topic": "/tf_static", "count": 0, "first_stamp_s": None, "last_stamp_s": None},
         }
-        self.node.create_subscription(PoseStamped, TOPICS["ground_truth_pose"], self._on_ground_truth, 50, callback_group=self.callback_group)
-        self.node.create_subscription(Odometry, TOPICS["estimated_odom"], self._on_odom, 50, callback_group=self.callback_group)
-        self.node.create_subscription(Clock, TOPICS["clock"], self._on_clock, 50, callback_group=self.callback_group)
-        self.node.create_subscription(Image, TOPICS["rgb_image"], lambda message: self._observe("rgb", message), 2, callback_group=self.callback_group)
-        self.node.create_subscription(PointCloud2, TOPICS["lidar_points"], lambda message: self._observe("lidar", message), 1, callback_group=self.callback_group)
-        self.node.create_subscription(PointCloud2, TOPICS["map_points"], lambda message: self._observe("map", message), 1, callback_group=self.callback_group)
-        self.node.create_subscription(TFMessage, "/tf", lambda message: self._observe("tf", message), 50, callback_group=self.callback_group)
+        self.node.create_subscription(PoseStamped, TOPICS["ground_truth_pose"], self._on_ground_truth, 50)
+        self.node.create_subscription(Odometry, TOPICS["estimated_odom"], self._on_odom, 50)
+        self.node.create_subscription(Clock, TOPICS["clock"], self._on_clock, 50)
+        self.node.create_subscription(Image, TOPICS["rgb_image"], lambda message: self._observe("rgb", message), 2)
+        self.node.create_subscription(PointCloud2, TOPICS["lidar_points"], lambda message: self._observe("lidar", message), 1)
+        self.node.create_subscription(PointCloud2, TOPICS["map_points"], lambda message: self._observe("map", message), 1)
+        self.node.create_subscription(TFMessage, "/tf", lambda message: self._observe("tf", message), 50)
         static_qos = QoSProfile(depth=1)
         static_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
         static_qos.reliability = ReliabilityPolicy.RELIABLE
-        self.node.create_subscription(TFMessage, "/tf_static", lambda message: self._observe("tf_static", message), static_qos, callback_group=self.callback_group)
+        self.node.create_subscription(TFMessage, "/tf_static", lambda message: self._observe("tf_static", message), static_qos)
 
     @staticmethod
     def _message_stamp(message) -> float | None:
@@ -124,7 +122,7 @@ class CollectorNode:
         if self.capture_started_sim_time_s is None:
             self.capture_started_sim_time_s = _stamp(message)
 
-    def spin_until_done(self, executor) -> None:
+    def spin_until_done(self) -> None:
         startup_deadline = self.started + self.startup_timeout_s
         while self.rclpy.ok():
             now = time.monotonic()
@@ -161,8 +159,7 @@ class CollectorNode:
                 else:
                     self.completion_reason = "simulation_time_stalled_wall_guard"
                     break
-            executor.spin_once(timeout_sec=0.0)
-            time.sleep(0.01)
+            self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def write(self) -> None:
         metadata = {
@@ -203,7 +200,6 @@ def main() -> None:
     parser.add_argument("--startup-timeout-seconds", type=float, default=90.0)
     args = parser.parse_args()
     import rclpy
-    from rclpy.executors import MultiThreadedExecutor
 
     rclpy.init()
     collector = CollectorNode(
@@ -212,14 +208,10 @@ def main() -> None:
         args.duration_seconds,
         args.startup_timeout_seconds,
     )
-    executor = MultiThreadedExecutor(num_threads=4)
-    executor.add_node(collector.node)
     try:
-        collector.spin_until_done(executor)
+        collector.spin_until_done()
         collector.write()
     finally:
-        executor.remove_node(collector.node)
-        executor.shutdown(timeout_sec=2.0)
         collector.node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
