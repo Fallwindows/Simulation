@@ -17,6 +17,8 @@ def _stamp(message) -> float:
 
 
 class CollectorNode:
+    SIM_CLOCK_START_TOLERANCE_S = 1.0
+
     def __init__(self, run_dir: Path, scenario: str, duration_s: float, startup_timeout_s: float):
         import rclpy
         from geometry_msgs.msg import PoseStamped
@@ -129,7 +131,15 @@ class CollectorNode:
             if self.capture_started is None:
                 if self.capture_started_sim_time_s is not None:
                     self.capture_started = now
-                    self.sim_time_target_s = self.capture_started_sim_time_s + self.duration_s
+                    # Isaac resets the simulation clock to zero for each run.
+                    # The first received sample can be one render tick late,
+                    # so target the scenario duration itself while the clock
+                    # is still near zero instead of extending the run by that
+                    # transport delay.
+                    if self.capture_started_sim_time_s <= self.SIM_CLOCK_START_TOLERANCE_S:
+                        self.sim_time_target_s = self.duration_s
+                    else:
+                        self.sim_time_target_s = self.capture_started_sim_time_s + self.duration_s
                     self.completion_reason = "capturing_sim_time"
                 elif now >= startup_deadline:
                     self.completion_reason = "startup_timeout"
@@ -151,7 +161,8 @@ class CollectorNode:
                 else:
                     self.completion_reason = "simulation_time_stalled_wall_guard"
                     break
-            executor.spin_once(timeout_sec=0.1)
+            executor.spin_once(timeout_sec=0.0)
+            time.sleep(0.01)
 
     def write(self) -> None:
         metadata = {
