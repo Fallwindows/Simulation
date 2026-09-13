@@ -1,4 +1,5 @@
 param(
+  [Alias("Run")]
   [string]$RunDir = "",
   [string]$CaptureDir = "",
   [string]$PixiPath = "",
