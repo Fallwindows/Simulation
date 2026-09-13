@@ -33,12 +33,15 @@ $mappingData = Get-Content -LiteralPath $mappingPath -Raw | ConvertFrom-Json
 $contractData = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 $collectorDuration = [double]$trajectoryData.duration_s
 $collectorStartupTimeout = 90
+$isWalkingScenario = [IO.Path]::GetFileNameWithoutExtension($scenarioPath) -eq "walking_baseline"
 
 $runId = Get-Date -Format "yyyyMMdd-HHmmssfff"
 $runDir = Join-Path $repo (Join-Path "runs" $runId)
 $logDir = Join-Path $runDir "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $isaacStatusPath = Join-Path $runDir "isaac_runtime_status.json"
+$rgbVideoPath = Join-Path $runDir "rgb_camera.mp4"
+$rgbVideoMetadataPath = Join-Path $runDir "rgb_camera_video.json"
 $manifestPath = Join-Path $runDir "run_manifest.json"
 $effectiveConfigPath = Join-Path $runDir "effective_config.json"
 $pixiManifest = Join-Path $workspace "pixi.toml"
@@ -275,6 +278,12 @@ try {
   $services += Start-LoggedProcess "dashboard" "powershell.exe" $dashboardArgs $repo
   $services += Start-LoggedProcess "mapping" "powershell.exe" $mappingArgs $repo
   $services += Start-LoggedProcess "collector" $pixi $collectorArgs $repo
+  $recorder = $null
+  if ($isWalkingScenario) {
+    $recorderArgs = @("run", "--manifest-path", $pixiManifest, "python", "-m", "evaluation.rgb_video_recorder", "--output", $rgbVideoPath, "--metadata", $rgbVideoMetadataPath, "--duration-seconds", "$collectorDuration", "--startup-timeout-seconds", "$collectorStartupTimeout")
+    $services += Start-LoggedProcess "rgb_recorder" $pixi $recorderArgs $repo
+    $recorder = @($services | Where-Object Name -eq "rgb_recorder")[0]
+  }
 
   $health = $false
   for ($i = 0; $i -lt 30; $i++) {
@@ -316,6 +325,11 @@ try {
 
   Assert-Running (@($services | Where-Object Name -eq "dashboard")[0]) "dashboard"
   Assert-Running (@($services | Where-Object Name -eq "mapping")[0]) "mapping"
+  if ($null -ne $recorder) {
+    Wait-TrackedProcess $recorder ($collectorDuration + $collectorStartupTimeout + 15) "rgb_recorder"
+    $recorder.Process.Refresh()
+    if ($null -ne $recorder.Process.ExitCode -and $recorder.Process.ExitCode -ne 0) { throw "RGB recorder exited with code $($recorder.Process.ExitCode); see $logDir\rgb_recorder.err.log" }
+  }
   $collector = @($services | Where-Object Name -eq "collector")[0]
   Wait-TrackedProcess $collector ($collectorDuration + $collectorStartupTimeout + 15) "collector"
   $collector.Process.Refresh()
@@ -332,6 +346,7 @@ try {
   if ([int]$dashboardStatus.map_point_count -le 0) { throw "No /slam/map_cloud data was observed; refusing to claim a successful mapping run." }
 
   $requiredArtifacts = @("metadata.json", "metrics.json", "ground_truth.csv", "estimate.csv", "rtabmap.db", "run_manifest.json", "effective_config.json")
+  if ($isWalkingScenario) { $requiredArtifacts += @("rgb_camera.mp4", "rgb_camera_video.json") }
   foreach ($artifact in $requiredArtifacts) {
     $path = Join-Path $runDir $artifact
     if (-not (Test-Path -LiteralPath $path)) { throw "Required run artifact missing: $path" }
@@ -363,6 +378,12 @@ try {
   # advancing sensor checks above.
   $mapFreshnessMaxAgeS = 1.5
   if ($null -eq $mapObservation.last_stamp_s -or ([double]$clockObservation.last_stamp_s - [double]$mapObservation.last_stamp_s) -gt $mapFreshnessMaxAgeS) { throw "Fresh /slam/map_cloud data was not observed near the final simulation clock (age budget ${mapFreshnessMaxAgeS}s)." }
+  $videoInfo = $null
+  if ($isWalkingScenario) {
+    $videoInfo = Get-Content -LiteralPath $rgbVideoMetadataPath -Raw | ConvertFrom-Json
+    if ($videoInfo.status -ne "complete" -or [int]$videoInfo.frame_count -le 0 -or [int]$videoInfo.width -ne 1280 -or [int]$videoInfo.height -ne 720) { throw "RGB walking video validation failed; see $rgbVideoMetadataPath" }
+    if ([double]$videoInfo.duration_s -lt ($collectorDuration * 0.8)) { throw "RGB walking video is too short; see $rgbVideoMetadataPath" }
+  }
   Write-LauncherProgress "topic_freshness_passed"
   Write-Host "ROS topic freshness passed; backing up RTAB-Map database"
   Write-LauncherProgress "backup_start"
@@ -374,6 +395,13 @@ try {
   $runManifest.completed_utc = [DateTime]::UtcNow.ToString("o")
   $runManifest.isaac_status = Get-Content -LiteralPath $isaacStatusPath -Raw | ConvertFrom-Json
   $runManifest.database_validation = [ordered]@{ node_count = $databaseNodeCount; pause_service = "/rtabmap/pause"; backup_service = "/rtabmap/backup"; shutdown_policy = "RTAB-Map pause and backup services before launcher cleanup" }
+  if ($isWalkingScenario) {
+    $demoDir = Join-Path $repo "demo"
+    New-Item -ItemType Directory -Force -Path $demoDir | Out-Null
+    $demoVideoPath = Join-Path $demoDir "current_walking_aisle.mp4"
+    Copy-Item -LiteralPath $rgbVideoPath -Destination $demoVideoPath -Force
+    $runManifest.video = [ordered]@{ source = $rgbVideoPath; repository_path = "demo/current_walking_aisle.mp4"; metadata = $rgbVideoMetadataPath; codec = $videoInfo.codec; width = $videoInfo.width; height = $videoInfo.height; nominal_fps = $videoInfo.nominal_fps; frame_count = $videoInfo.frame_count; duration_s = $videoInfo.duration_s; file_size_bytes = $videoInfo.file_size_bytes }
+  }
   Save-RunManifest
 
   Write-Host "Run complete: $runId"
