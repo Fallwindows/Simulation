@@ -11,8 +11,8 @@ def Xform "Asset" (
         def Cylinder "Body" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            float radius = 0.05000
-            float height = 0.21060
+            double radius = 0.05000
+            double height = 0.21060
             double3 xformOp:translate = (0, 0, -0.02970)
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/Body>
@@ -20,8 +20,8 @@ def Xform "Asset" (
         def Cylinder "Neck" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            float radius = 0.03100
-            float height = 0.05940
+            double radius = 0.03100
+            double height = 0.05940
             double3 xformOp:translate = (0, 0, 0.10530)
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/Body>
@@ -39,13 +39,16 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
-        def Cube "Cap" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
+        def Xform "Cap" {
             double3 xformOp:translate = (0.00000, 0.00000, 0.14310)
             double3 xformOp:scale = (0.02100, 0.02100, 0.00810)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </Asset/Looks/Metal>
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Metal>
+            }
         }
     }
     def Scope "Looks" {

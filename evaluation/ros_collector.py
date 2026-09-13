@@ -26,8 +26,7 @@ class CollectorNode:
         from rclpy.node import Node
         from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
         from rosgraph_msgs.msg import Clock
-        from sensor_msgs.msg import Image
-        from std_msgs.msg import Header
+        from sensor_msgs.msg import Image, PointCloud2
         from tf2_msgs.msg import TFMessage
 
         self.rclpy = rclpy
@@ -54,16 +53,8 @@ class CollectorNode:
             "estimate": {"topic": TOPICS["estimated_odom"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
             "clock": {"topic": TOPICS["clock"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
             "rgb": {"topic": TOPICS["rgb_image"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
-            # A raw RTX PointCloud2 can contain hundreds of thousands of
-            # points in the asset-rich scene.  Use the runtime's stamped
-            # heartbeat for freshness, while RTAB-Map still consumes the
-            # unchanged /sim/lidar/points stream and the Isaac status records
-            # raw scan counts separately.
-            "lidar": {"topic": TOPICS["lidar_heartbeat"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
-            # The dashboard consumes the real map cloud and emits this stamped
-            # heartbeat.  Avoid deserializing a large final PointCloud2 in the
-            # evaluation collector just to prove map freshness.
-            "map": {"topic": TOPICS["map_heartbeat"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "lidar": {"topic": TOPICS["lidar_points"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
+            "map": {"topic": TOPICS["map_points"], "count": 0, "first_stamp_s": None, "last_stamp_s": None},
             "tf": {"topic": "/tf", "count": 0, "first_stamp_s": None, "last_stamp_s": None},
             "tf_static": {"topic": "/tf_static", "count": 0, "first_stamp_s": None, "last_stamp_s": None},
         }
@@ -71,8 +62,8 @@ class CollectorNode:
         self.node.create_subscription(Odometry, TOPICS["estimated_odom"], self._on_odom, 50)
         self.node.create_subscription(Clock, TOPICS["clock"], self._on_clock, 50)
         self.node.create_subscription(Image, TOPICS["rgb_image"], lambda message: self._observe("rgb", message), 2)
-        self.node.create_subscription(Header, TOPICS["lidar_heartbeat"], lambda message: self._observe("lidar", message), 10)
-        self.node.create_subscription(Header, TOPICS["map_heartbeat"], lambda message: self._observe("map", message), 10)
+        self.node.create_subscription(PointCloud2, TOPICS["lidar_points"], lambda message: self._observe("lidar", message), 1)
+        self.node.create_subscription(PointCloud2, TOPICS["map_points"], lambda message: self._observe("map", message), 1)
         self.node.create_subscription(TFMessage, "/tf", lambda message: self._observe("tf", message), 50)
         static_qos = QoSProfile(depth=1)
         static_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
@@ -83,8 +74,6 @@ class CollectorNode:
     def _message_stamp(message) -> float | None:
         if hasattr(message, "clock"):
             return float(message.clock.sec) + float(message.clock.nanosec) / 1_000_000_000.0
-        if hasattr(message, "stamp"):
-            return float(message.stamp.sec) + float(message.stamp.nanosec) / 1_000_000_000.0
         if hasattr(message, "header"):
             return float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0
         if hasattr(message, "transforms") and message.transforms:

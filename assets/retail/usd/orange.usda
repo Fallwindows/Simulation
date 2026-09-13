@@ -8,21 +8,26 @@ def Xform "Asset" (
     kind = "component"
 ) {
     def Xform "Geometry" {
-        def Sphere "Fruit" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
-            double radius = 0.5
+        def Xform "Fruit" {
             double3 xformOp:scale = (0.13000, 0.13000, 0.13000)
             uniform token[] xformOpOrder = ["xformOp:scale"]
-            rel material:binding = </Asset/Looks/Body>
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
         }
-        def Cube "Stem" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
+        def Xform "Stem" {
             double3 xformOp:translate = (0.00000, 0.00000, 0.07280)
             double3 xformOp:scale = (0.00780, 0.00780, 0.01300)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </Asset/Looks/Stem>
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Stem>
+            }
         }
     }
     def Scope "Looks" {

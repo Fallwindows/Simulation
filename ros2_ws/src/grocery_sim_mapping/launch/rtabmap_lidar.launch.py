@@ -54,7 +54,7 @@ def generate_launch_description():
                 formatted = _rtabmap_value(key, value)
                 odom_params[key] = formatted
                 slam_params[key] = formatted
-        odom_params.update({"publish_tf": True})
+        odom_params.update({"publish_tf": True, "scan_cloud_max_points": 50000})
         slam_params.update({"publish_tf": True, "database_path": database_path})
 
         return [

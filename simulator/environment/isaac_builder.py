@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 
 from simulator.environment.aisle_builder import AisleLayout
-from simulator.environment.materials import MaterialLibrary
 from simulator.environment.retail_catalog import load_retail_catalog
 
 
@@ -14,7 +13,7 @@ class IsaacRuntimeUnavailable(RuntimeError):
 
 
 class IsaacAisleBuilder:
-    def __init__(self, stage=None, materials: MaterialLibrary | None = None):
+    def __init__(self, stage=None):
         try:
             import omni.usd  # type: ignore
             from pxr import Gf, Sdf, UsdGeom  # type: ignore
@@ -25,25 +24,10 @@ class IsaacAisleBuilder:
         self._Sdf = Sdf
         self._UsdGeom = UsdGeom
         self.stage = stage if stage is not None else omni.usd.get_context().get_stage()
-        self.materials = materials or MaterialLibrary(self.stage)
-        self.default_materials = self.materials.create_defaults()
 
     @staticmethod
     def _safe(value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_]", "_", value)
-
-    def _structural_material(self, kind: str):
-        if kind == "floor":
-            return self.default_materials["floor_tile"]
-        if kind in {"wall", "rear_panel", "baseboard"}:
-            return self.default_materials["drywall"]
-        if kind == "ceiling":
-            return self.default_materials["ceiling"]
-        if kind == "price_strip":
-            return self.default_materials["price_strip"]
-        if kind in {"endcap"}:
-            return self.default_materials["endcap"]
-        return self.default_materials["shelving_metal"]
 
     def _build_box(self, primitive, path: str) -> None:
         prim = self.stage.DefinePrim(self._Sdf.Path(path), "Cube")
@@ -51,14 +35,11 @@ class IsaacAisleBuilder:
         cube.GetSizeAttr().Set(1.0)
         api = self._UsdGeom.XformCommonAPI(prim)
         api.SetTranslate(self._Gf.Vec3d(*primitive.center_m))
-        api.SetScale(self._Gf.Vec3f(*(size for size in primitive.size_m)))
+        api.SetScale(self._Gf.Vec3f(*primitive.size_m))
         prim.CreateAttribute("grocery:kind", self._Sdf.ValueTypeNames.String).Set(primitive.kind)
-        self.materials.bind(prim, self._structural_material(primitive.kind))
 
     def _build_asset(self, asset, catalog, root: str) -> None:
         record = catalog.by_key(asset.asset_key)
-        if not record.usd_path.is_file():
-            raise FileNotFoundError(f"Retail asset USD is missing: {record.usd_path}")
         path = f"{root}/retail_assets/{self._safe(asset.category)}/{self._safe(asset.name)}"
         prim = self.stage.DefinePrim(self._Sdf.Path(path), "Xform")
         reference_path = str(record.usd_path).replace("\\", "/")
@@ -74,7 +55,7 @@ class IsaacAisleBuilder:
         prim.CreateAttribute("grocery:semantic_id", self._Sdf.ValueTypeNames.String).Set(asset.semantic_id)
 
     def build(self, layout: AisleLayout, root: str = "/World/GroceryAisle") -> int:
-        """Materialize structure and reusable USD asset references."""
+        """Build original structure and reference assets in occupied slots."""
         catalog = load_retail_catalog(layout.asset_manifest_path)
         for primitive in layout.primitives:
             kind = self._safe(primitive.kind)

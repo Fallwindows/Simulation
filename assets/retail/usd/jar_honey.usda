@@ -11,8 +11,8 @@ def Xform "Asset" (
         def Cylinder "Body" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            float radius = 0.06000
-            float height = 0.18000
+            double radius = 0.06000
+            double height = 0.18000
             rel material:binding = </Asset/Looks/Body>
         }
         def Mesh "FrontPanel" (
@@ -28,13 +28,16 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
-        def Cube "Lid" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
+        def Xform "Lid" {
             double3 xformOp:translate = (0.00000, 0.00000, 0.09900)
             double3 xformOp:scale = (0.05400, 0.05400, 0.00900)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </Asset/Looks/Metal>
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Metal>
+            }
         }
     }
     def Scope "Looks" {

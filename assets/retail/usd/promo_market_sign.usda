@@ -8,13 +8,16 @@ def Xform "Asset" (
     kind = "component"
 ) {
     def Xform "Geometry" {
-        def Cube "Body" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
+        def Xform "Body" {
             double3 xformOp:translate = (0.00000, 0.00000, 0.00000)
             double3 xformOp:scale = (0.46000, 0.02500, 0.24000)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </Asset/Looks/Body>
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
         }
         def Mesh "FrontPanel" (
             prepend apiSchemas = ["MaterialBindingAPI"]
@@ -29,13 +32,16 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
-        def Cube "TopBand" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
+        def Xform "TopBand" {
             double3 xformOp:translate = (0.00000, 0.03300, 0.16320)
             double3 xformOp:scale = (0.41400, 0.00600, 0.02400)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </Asset/Looks/Front>
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Front>
+            }
         }
     }
     def Scope "Looks" {

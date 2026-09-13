@@ -61,9 +61,6 @@ class AisleConfig:
     shelf_rows_y_m: tuple[float, ...]
     lighting_lux: float
     asset_manifest_path: str = ""
-    min_facings_per_bay: int = 7
-    max_facings_per_bay: int = 12
-    ceiling_height_m: float = 3.4
 
 
 @dataclass(frozen=True)
@@ -87,7 +84,6 @@ class LidarConfig:
     horizontal_samples: int
     vertical_samples: int
     pose_in_rig: PoseConfig
-    pattern_firing_rate_hz: int = 8000
 
 
 @dataclass(frozen=True)
@@ -147,10 +143,6 @@ def _aisle(data: dict[str, Any], source_path: Path | None = None) -> AisleConfig
     rows = tuple(float(v) for v in data.get("shelf_rows_y_m", [-1.65, 1.65]))
     if not rows:
         raise ValueError("shelf_rows_y_m must not be empty")
-    min_facings = int(data.get("min_facings_per_bay", 7))
-    max_facings = int(data.get("max_facings_per_bay", 12))
-    if min_facings < 1 or max_facings < min_facings:
-        raise ValueError("facings per bay must be positive and ordered")
     manifest_value = str(data.get("asset_manifest", "../../assets/retail/manifest.json"))
     manifest_path = (source_path.parent / manifest_value).resolve() if source_path is not None else Path(manifest_value).resolve()
     return AisleConfig(
@@ -167,9 +159,6 @@ def _aisle(data: dict[str, Any], source_path: Path | None = None) -> AisleConfig
         shelf_rows_y_m=rows,
         lighting_lux=_positive(data.get("lighting_lux", 450.0), "lighting_lux"),
         asset_manifest_path=str(manifest_path),
-        min_facings_per_bay=min_facings,
-        max_facings_per_bay=max_facings,
-        ceiling_height_m=_positive(data.get("ceiling_height_m", 3.4), "ceiling_height_m"),
     )
 
 
@@ -196,20 +185,7 @@ def _lidar(data: dict[str, Any]) -> LidarConfig:
     minimum, maximum = _positive(data["min_range_m"], "lidar.min_range_m"), _positive(data["max_range_m"], "lidar.max_range_m")
     if minimum >= maximum:
         raise ValueError("lidar.min_range_m must be less than lidar.max_range_m")
-    pattern_firing_rate_hz = int(data.get("pattern_firing_rate_hz", 8000))
-    if pattern_firing_rate_hz < 1:
-        raise ValueError("lidar.pattern_firing_rate_hz must be positive")
-    return LidarConfig(
-        str(data["preset"]),
-        _positive(data["hz"], "lidar.hz"),
-        minimum,
-        maximum,
-        fov,
-        horizontal,
-        vertical,
-        _pose(data.get("pose_in_rig", {}), "lidar.pose_in_rig"),
-        pattern_firing_rate_hz,
-    )
+    return LidarConfig(str(data["preset"]), _positive(data["hz"], "lidar.hz"), minimum, maximum, fov, horizontal, vertical, _pose(data.get("pose_in_rig", {}), "lidar.pose_in_rig"))
 
 
 def _trajectory(data: dict[str, Any]) -> TrajectoryConfig:

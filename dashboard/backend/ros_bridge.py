@@ -26,7 +26,6 @@ class RosDashboardBridge:
             from nav_msgs.msg import Odometry  # type: ignore
             from sensor_msgs.msg import Image, PointCloud2  # type: ignore
             from sensor_msgs_py import point_cloud2  # type: ignore
-            from std_msgs.msg import Header  # type: ignore
         except ImportError as exc:
             raise RuntimeError("ROS 2 rclpy is unavailable") from exc
         self.rclpy = rclpy
@@ -37,7 +36,6 @@ class RosDashboardBridge:
         self._PointCloud2 = PointCloud2
         self._PoseStamped = PoseStamped
         self._Odometry = Odometry
-        self._Header = Header
         self._point_cloud2 = point_cloud2
         self._ground_truth: list[PoseSample] = []
         self._estimate: list[PoseSample] = []
@@ -55,7 +53,6 @@ class RosDashboardBridge:
         self.node.create_subscription(self._Image, self.topics["rgb_image"], self._on_image, 10)
         self.node.create_subscription(self._PointCloud2, self.topics["lidar_points"], self._on_lidar, 10)
         self.node.create_subscription(self._PointCloud2, self.topics["map_points"], self._on_map, 10)
-        self._map_heartbeat_pub = self.node.create_publisher(self._Header, self.topics["map_heartbeat"], 10)
         self.node.create_subscription(self._PoseStamped, self.topics["ground_truth_pose"], self._on_ground_truth, 10)
         self.node.create_subscription(self._Odometry, self.topics["estimated_odom"], self._on_odom, 10)
         self.rclpy.spin(self.node)
@@ -87,10 +84,6 @@ class RosDashboardBridge:
 
     def _on_map(self, message) -> None:
         self.state.update_points("map", self._points(message))
-        heartbeat = self._Header()
-        heartbeat.stamp = message.header.stamp
-        heartbeat.frame_id = "map"
-        self._map_heartbeat_pub.publish(heartbeat)
 
     @staticmethod
     def _stamp(message) -> float:

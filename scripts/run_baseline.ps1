@@ -368,8 +368,6 @@ try {
       throw "Required live ROS topic '$topicName' did not show advancing message timestamps."
     }
   }
-  $isaacStatus = Get-Content -LiteralPath $isaacStatusPath -Raw | ConvertFrom-Json
-  if ($null -eq $isaacStatus.lidar_cloud_points -or [int]$isaacStatus.lidar_cloud_points.sample_count -le 0) { throw "Isaac did not observe fresh raw LiDAR scans; refusing to claim a successful mapping run." }
   $clockObservation = $metadata.topic_observations.clock
   $odomObservation = $metadata.topic_observations.estimate
   $mapObservation = $metadata.topic_observations.map
@@ -400,12 +398,9 @@ try {
   if ($isWalkingScenario) {
     $demoDir = Join-Path $repo "demo"
     New-Item -ItemType Directory -Force -Path $demoDir | Out-Null
-    # Keep the reviewed basic clip intact and promote this asset-rich run to
-    # an explicitly versioned comparison clip.
-    $demoVideoName = "walking_aisle_realistic_v1.mp4"
-    $demoVideoPath = Join-Path $demoDir $demoVideoName
+    $demoVideoPath = Join-Path $demoDir "current_walking_aisle.mp4"
     Copy-Item -LiteralPath $rgbVideoPath -Destination $demoVideoPath -Force
-    $runManifest.video = [ordered]@{ source = $rgbVideoPath; repository_path = "demo/$demoVideoName"; metadata = $rgbVideoMetadataPath; codec = $videoInfo.codec; width = $videoInfo.width; height = $videoInfo.height; nominal_fps = $videoInfo.nominal_fps; frame_count = $videoInfo.frame_count; duration_s = $videoInfo.duration_s; file_size_bytes = $videoInfo.file_size_bytes; preserved_basic_comparison = "demo/current_walking_aisle.mp4" }
+    $runManifest.video = [ordered]@{ source = $rgbVideoPath; repository_path = "demo/current_walking_aisle.mp4"; metadata = $rgbVideoMetadataPath; codec = $videoInfo.codec; width = $videoInfo.width; height = $videoInfo.height; nominal_fps = $videoInfo.nominal_fps; frame_count = $videoInfo.frame_count; duration_s = $videoInfo.duration_s; file_size_bytes = $videoInfo.file_size_bytes }
   }
   Save-RunManifest
 

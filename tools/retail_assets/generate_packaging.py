@@ -153,13 +153,19 @@ def _front_panel(width: float, depth: float, height: float) -> str:
 
 
 def _cube(name: str, size: tuple[float, float, float], translate: tuple[float, float, float], material: str) -> str:
-    return f'''        def Cube "{name}" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {{
+    # Isaac's USD bounds/render path does not apply nonuniform xform ops
+    # authored directly on a Gprim. Put the scale on an Xform parent so the
+    # physical dimensions remain correct in both USD consumers.
+    return f'''        def Xform "{name}" {{
             double3 xformOp:translate = ({translate[0]:.5f}, {translate[1]:.5f}, {translate[2]:.5f})
             double3 xformOp:scale = ({size[0] / 2.0:.5f}, {size[1] / 2.0:.5f}, {size[2] / 2.0:.5f})
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </Asset/Looks/{material}>
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {{
+                double size = 2.0
+                rel material:binding = </Asset/Looks/{material}>
+            }}
         }}'''
 
 
@@ -178,8 +184,8 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
         geometry.append(f'''        def Cylinder "Body" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {{
-            float radius = {radius:.5f}
-            float height = {height:.5f}
+            double radius = {radius:.5f}
+            double height = {height:.5f}
             rel material:binding = </Asset/Looks/{body_material}>
         }}''')
         geometry.append(_front_panel(width, depth, height * 0.65))
@@ -189,8 +195,8 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
         geometry.append(f'''        def Cylinder "Body" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {{
-            float radius = {radius:.5f}
-            float height = {height * 0.78:.5f}
+            double radius = {radius:.5f}
+            double height = {height * 0.78:.5f}
             double3 xformOp:translate = (0, 0, {-height * 0.11:.5f})
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/{body_material}>
@@ -198,8 +204,8 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
         geometry.append(f'''        def Cylinder "Neck" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {{
-            float radius = {radius * 0.62:.5f}
-            float height = {height * 0.22:.5f}
+            double radius = {radius * 0.62:.5f}
+            double height = {height * 0.22:.5f}
             double3 xformOp:translate = (0, 0, {height * 0.39:.5f})
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/{body_material}>
@@ -207,13 +213,15 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
         geometry.append(_front_panel(width, depth, height * 0.42))
         geometry.append(_cube("Cap", (width * 0.42, depth * 0.42, height * 0.06), (0.0, 0.0, height * 0.53), "Metal"))
     elif spec.model_type == "fruit":
-        geometry.append(f'''        def Sphere "Fruit" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {{
-            double radius = 0.5
+        geometry.append(f'''        def Xform "Fruit" {{
             double3 xformOp:scale = ({width:.5f}, {depth:.5f}, {height:.5f})
             uniform token[] xformOpOrder = ["xformOp:scale"]
-            rel material:binding = </Asset/Looks/{body_material}>
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {{
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/{body_material}>
+            }}
         }}''')
         geometry.append(_cube("Stem", (width * 0.12, depth * 0.12, height * 0.20), (0.0, 0.0, height * 0.56), "Stem"))
     elif spec.model_type == "crate":
@@ -222,14 +230,16 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
             geometry.append(_cube(f"SlatX{index}", (width * 0.08, depth * 1.03, height * 1.25), (x, 0.0, 0.0), front_material))
         for index, z in enumerate((-height * 0.28, height * 0.28)):
             geometry.append(_cube(f"SlatZ{index}", (width * 1.03, depth * 0.08, height * 0.10), (0.0, 0.0, z), front_material))
-        geometry.append(f'''        def Sphere "Fruit" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {{
-            double radius = 0.5
+        geometry.append(f'''        def Xform "Fruit" {{
             double3 xformOp:translate = (0, 0, {height * 0.66:.5f})
             double3 xformOp:scale = ({width * 0.23:.5f}, {depth * 0.23:.5f}, {height * 0.45:.5f})
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </Asset/Looks/Front>
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {{
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Front>
+            }}
         }}''')
     else:
         raise ValueError(spec.model_type)

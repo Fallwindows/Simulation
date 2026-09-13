@@ -128,7 +128,6 @@ class ContractTests(unittest.TestCase):
         self.assertIn("/rtabmap/backup", baseline)
         self.assertIn("evaluation.rgb_video_recorder", baseline)
         self.assertIn("rgb_camera.mp4", baseline)
-        self.assertIn("walking_aisle_realistic_v1.mp4", baseline)
-        self.assertIn("current_walking_aisle.mp4", baseline)
+        self.assertIn("demo/current_walking_aisle.mp4", baseline)
         self.assertIn("simulation_time_target_s", collector)
         self.assertIn("simulation_time_reached", collector)
