@@ -38,8 +38,8 @@ class RetailAssetTests(unittest.TestCase):
 
     def test_dimension_aware_shelf_levels_are_dense_but_clear(self):
         counts = shelf_level_counts_by_zone(self.config, self.catalog)
-        self.assertEqual(counts, {"cereal": 5, "snacks": 6, "cans_jars": 7, "beverage": 6, "produce": 6})
-        self.assertEqual(len(self.shelves), 240)
+        self.assertEqual(counts, {"cereal": 5, "snacks": 5, "cans_jars": 7, "beverage": 6, "produce": 6})
+        self.assertEqual(len(self.shelves), 231)
         for row in range(2):
             for bay in range(self.bay_count):
                 levels = [key for key in self.shelves if key[:2] == (row, bay)]
@@ -48,19 +48,20 @@ class RetailAssetTests(unittest.TestCase):
                 self.assertEqual(len(set(z_values)), len(z_values))
 
     def test_dense_count_and_real_depth_facings(self):
-        self.assertGreaterEqual(len(self.layout.assets), 800)
-        self.assertLessEqual(len(self.layout.assets), 1500)
-        self.assertGreater(len(self.layout.assets), 3 * 433)
+        self.assertGreaterEqual(len(self.layout.assets), 1800)
+        self.assertLessEqual(len(self.layout.assets), 2300)
+        self.assertGreater(len(self.layout.assets), 4 * 433)
+        self.assertGreaterEqual(len({asset.asset_key for asset in self.layout.assets}), 30)
         regular = [asset for asset in self.layout.assets if asset.category != "produce_crate"]
         self.assertTrue(any("/d1/" in asset.semantic_id for asset in regular))
         self.assertEqual(Counter(asset.category for asset in self.layout.assets), Counter({
-            "snacks": 311,
-            "cereal": 265,
-            "cans": 212,
-            "juice": 198,
-            "jars": 152,
-            "soda": 124,
-            "water": 92,
+            "cereal": 440,
+            "snacks": 341,
+            "cans": 320,
+            "juice": 267,
+            "soda": 221,
+            "jars": 215,
+            "water": 144,
             "red_apples": 24,
             "green_apples": 24,
             "oranges": 24,

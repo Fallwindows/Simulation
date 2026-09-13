@@ -1,6 +1,6 @@
 param(
   [string]$IsaacPython = "C:\isaacsim\python.bat",
-  [string]$Scenario = "config/scenarios/baseline_straight.yaml",
+  [string]$Scenario = "config/scenarios/walking_baseline.yaml",
   [string]$PixiPath = "",
   [string]$RosWorkspace = "",
   [int]$Frames = 0,

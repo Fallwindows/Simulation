@@ -2,7 +2,7 @@ param(
   [string]$PixiPath = "",
   [string]$RosWorkspace = "",
   [string]$RunId = "",
-  [string]$Scenario = "config/scenarios/baseline_straight.yaml"
+  [string]$Scenario = "config/scenarios/walking_baseline.yaml"
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")

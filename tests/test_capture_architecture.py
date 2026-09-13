@@ -23,9 +23,9 @@ class CaptureArchitectureTests(unittest.TestCase):
     def test_inventory_export_is_deterministic_and_has_semantic_ids(self):
         with tempfile.TemporaryDirectory() as directory:
             result = export_inventory(SCENARIO, directory)
-            self.assertEqual(result["asset_count"], 1454)
+            self.assertEqual(result["asset_count"], 2048)
             rows = json.loads((Path(directory) / "inventory_ground_truth.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(rows), 1454)
+            self.assertEqual(len(rows), 2048)
             self.assertTrue(all(row["semantic_id"].startswith("retail/") for row in rows))
             self.assertIn("width_m", rows[0])
 

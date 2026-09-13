@@ -75,9 +75,11 @@ def _zone_name(bay: int, bay_count: int, row_index: int) -> str:
 
 def _zone_categories(zone: str, level: int) -> tuple[str, ...]:
     if zone == "cereal":
-        return ("cereal",)
+        # Adjacent cereal/snack products make each facing visually distinct
+        # while preserving the same aisle zoning and per-item semantics.
+        return ("cereal", "snacks")
     if zone == "snacks":
-        return ("snacks",)
+        return ("snacks", "cereal")
     if zone == "cans_jars":
         return ("cans", "jars")
     if zone == "beverage":
@@ -160,7 +162,7 @@ def _facing_count(config: AisleConfig, candidates: tuple[RetailAsset, ...], row:
     if capacity > 1 and count_rng.random() < 0.22:
         capacity -= 1
     # Keep the aisle richly stocked without turning each bay into a tiled wall.
-    return min(capacity, 4)
+    return min(capacity, 5)
 
 
 def _depth_offsets(config: AisleConfig, max_depth: float) -> tuple[float, ...]:
@@ -189,10 +191,11 @@ def _populate_shelf_products(
         return
     candidates = _candidate_assets(catalog, categories)
     facing_count = _facing_count(config, candidates, row_index, bay, level)
-    selected = [
-        _stable_rng(config.seed, "asset", row_index, bay, level, facing).choice(candidates)
-        for facing in range(facing_count)
-    ]
+    # Cycle through a deterministic, seeded starting point instead of making
+    # independent choices.  This keeps the richer catalog visible within a
+    # shelf section and still gives every physical facing its own identity.
+    start = _stable_rng(config.seed, "asset_start", row_index, bay, level).randrange(len(candidates))
+    selected = [candidates[(start + facing) % len(candidates)] for facing in range(facing_count)]
     total_width = sum(asset.dimensions_m[0] for asset in selected) + config.facing_gap_m * (facing_count - 1)
     cursor = -total_width / 2.0
     max_depth = max(asset.dimensions_m[1] for asset in selected)

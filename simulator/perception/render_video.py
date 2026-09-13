@@ -25,11 +25,21 @@ def _draw_overlay(image, record: dict[str, object]) -> None:
     for detection in record.get("detections", []):
         x0, y0, x1, y1 = [int(value) for value in detection["bbox_xyxy"]]
         cx, cy = [int(round(value)) for value in detection["center_px"]]
+        track_id = int(detection["track_id"])
         # BGR cyan keeps the overlay readable against both dark shelves and
         # bright package faces.  Track IDs stay in the spreadsheet/JSONL so
         # the video remains a simple visual proof instead of a text wall.
         cv2.rectangle(image, (x0, y0), (x1, y1), (255, 255, 0), 2)
         cv2.circle(image, (cx, cy), 5, (0, 0, 255), -1, lineType=cv2.LINE_AA)
+        estimate = detection.get("estimated_center_start_relative_m")
+        if isinstance(estimate, list) and len(estimate) == 3:
+            label = f"#{track_id} ({float(estimate[0]):.1f},{float(estimate[1]):.1f},{float(estimate[2]):.1f})m"
+        else:
+            label = f"#{track_id} (no-depth)"
+        text_x = max(0, min(image.shape[1] - 1, cx + 7))
+        text_y = max(14, min(image.shape[0] - 2, cy - 7))
+        cv2.putText(image, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.28, (0, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(image, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.28, (255, 255, 255), 1, cv2.LINE_AA)
 
 
 def render_outputs(run_dir: str | Path) -> dict[str, object]:
@@ -79,7 +89,8 @@ def render_outputs(run_dir: str | Path) -> dict[str, object]:
         "annotation_source": "../perception/frame_annotations.jsonl",
         "box_style": "2px cyan rectangle from RGB connected-component bounds",
         "center_dot_style": "5px filled red circle at measured component centroid",
-        "text_labels": "none; persistent IDs are in the tracking/export artifacts",
+        "text_labels": "persistent track ID plus estimated start-relative (x,y,z) meters",
+        "coordinate_frame": "start-relative sensor-rig frame; x forward, y left, z up",
         "ground_truth_consumed": False,
     }
     (outputs / "render_manifest.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -5,14 +5,16 @@ visible product-like regions from the captured RGB stream using colour and
 connected-component evidence, then maintains IDs with frame-to-frame motion
 and appearance association.  Ground-truth inventory is never opened here.
 
-The output is useful for the first visual demonstration while leaving a clean
-replacement boundary for a trained detector: the renderer consumes only the
-per-frame proposal/tracking JSONL produced by this module.
+The RGB proposal/tracking stage is followed by a sensor-only association step:
+raw LiDAR returns are projected through interpolated SLAM poses and camera
+calibration to obtain start-relative 3D estimates.  Ground-truth inventory is
+never opened here.
 """
 
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_left
 import csv
 import json
 import math
@@ -23,6 +25,8 @@ from typing import Iterable
 
 import cv2
 import numpy as np
+
+from evaluation.metrics import PoseSample, interpolate_pose, safe_quaternion
 
 
 @dataclass(frozen=True)
@@ -202,8 +206,215 @@ def _write_csv(path: Path, rows: list[dict[str, object]], fields: list[str]) -> 
         writer.writerows(rows)
 
 
+def _quat_to_matrix(q: tuple[float, float, float, float]) -> np.ndarray:
+    x, y, z, w = safe_quaternion(q) or ((0.0, 0.0, 0.0, 1.0))
+    return np.array([
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+        [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+        [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+    ], dtype=np.float64)
+
+
+def _load_slam_poses(path: Path) -> list[PoseSample]:
+    poses: list[PoseSample] = []
+    with path.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            orientation = safe_quaternion(tuple(float(row[key]) for key in ("qx", "qy", "qz", "qw")))
+            if orientation is None:
+                continue
+            poses.append(PoseSample(
+                float(row["timestamp_s"]),
+                (float(row["x_m"]), float(row["y_m"]), float(row["z_m"])),
+                orientation,
+            ))
+    return sorted(poses, key=lambda item: item.timestamp_s)
+
+
+def _load_sensor_geometry(path: Path) -> dict[str, object]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    transforms = {item["child"]: item for item in data["transforms"]}
+    return {
+        "rig_lidar_t": np.asarray(transforms["lidar_link"]["translation_m"], dtype=np.float64),
+        "rig_lidar_r": _quat_to_matrix(tuple(transforms["lidar_link"]["rotation_xyzw"])),
+        "rig_camera_t": np.asarray(transforms["camera_link"]["translation_m"], dtype=np.float64),
+        "rig_camera_r": _quat_to_matrix(tuple(transforms["camera_link"]["rotation_xyzw"])),
+        "link_optical_r": _quat_to_matrix(tuple(transforms["camera_optical_frame"]["rotation_xyzw"])),
+        "fx": float(data["intrinsics"]["fx_px"]),
+        "fy": float(data["intrinsics"]["fy_px"]),
+        "cx": float(data["intrinsics"]["cx_px"]),
+        "cy": float(data["intrinsics"]["cy_px"]),
+    }
+
+
+def _read_lidar_scans(bag_dir: Path):
+    """Yield decimated raw PointCloud2 xyz arrays without using truth topics."""
+
+    import rosbag2_py
+    from rclpy.serialization import deserialize_message
+    from sensor_msgs.msg import PointCloud2
+
+    reader = rosbag2_py.SequentialReader()
+    reader.open(
+        rosbag2_py.StorageOptions(uri=str(bag_dir).replace("\\", "/"), storage_id="sqlite3"),
+        rosbag2_py.ConverterOptions(input_serialization_format="cdr", output_serialization_format="cdr"),
+    )
+    while reader.has_next():
+        topic, serialized, _ = reader.read_next()
+        if topic != "/sim/lidar/points":
+            continue
+        message = deserialize_message(serialized, PointCloud2)
+        fields = {field.name: field for field in message.fields}
+        if not all(name in fields for name in ("x", "y", "z")):
+            continue
+        point_step = int(message.point_step)
+        raw = np.frombuffer(bytes(message.data), dtype=np.uint8)
+        if point_step <= 0 or raw.size < point_step:
+            continue
+        rows = raw[: (raw.size // point_step) * point_step].reshape((-1, point_step))
+        try:
+            points = np.stack([
+                rows[:, int(fields[name].offset):int(fields[name].offset) + 4].copy().view("<f4").reshape(-1)
+                for name in ("x", "y", "z")
+            ], axis=1).astype(np.float64, copy=False)
+        except (TypeError, ValueError):
+            continue
+        points = points[::8]
+        finite = np.isfinite(points).all(axis=1)
+        points = points[finite]
+        if len(points):
+            stamp = float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0
+            yield stamp, points
+
+
+def _nearest_frame_index(frames: list[dict[str, object]], timestamps: list[float], timestamp_s: float) -> int | None:
+    index = bisect_left(timestamps, timestamp_s)
+    candidates = [index]
+    if index > 0:
+        candidates.append(index - 1)
+    candidates = [candidate for candidate in candidates if 0 <= candidate < len(frames)]
+    if not candidates:
+        return None
+    selected = min(candidates, key=lambda candidate: abs(timestamps[candidate] - timestamp_s))
+    return selected if abs(timestamps[selected] - timestamp_s) <= 0.08 else None
+
+
+def _augment_with_lidar_estimates(
+    capture: Path,
+    slam: Path,
+    frames: list[dict[str, object]],
+    frame_annotations: list[dict[str, object]],
+) -> tuple[dict[int, np.ndarray], dict[str, object]]:
+    """Associate projected LiDAR returns with RGB proposals and make start-relative estimates."""
+
+    poses = _load_slam_poses(slam / "slam_poses.csv")
+    if not poses:
+        return {}, {"status": "unavailable", "reason": "no_valid_slam_poses"}
+    geometry = _load_sensor_geometry(capture / "sensor_transforms.json")
+    start_t = np.asarray(poses[0].position_m, dtype=np.float64)
+    start_r = _quat_to_matrix(poses[0].orientation_xyzw)
+    frame_timestamps = [float(frame["stamp_s"]) for frame in frames]
+    annotations_by_frame = {int(record["frame_index"]): record for record in frame_annotations}
+    observations: dict[int, list[np.ndarray]] = {}
+    scan_count = 0
+    projected_point_count = 0
+
+    for stamp_s, lidar_points in _read_lidar_scans(capture / "sensors_bag"):
+        pose = interpolate_pose(poses, stamp_s, max_gap_s=0.5)
+        if pose is None:
+            continue
+        frame_index = _nearest_frame_index(frames, frame_timestamps, stamp_s)
+        if frame_index is None:
+            continue
+        frame_record = annotations_by_frame.get(int(frames[frame_index]["frame_index"]))
+        if frame_record is None or not frame_record["detections"]:
+            continue
+        rig_lidar_t = geometry["rig_lidar_t"]
+        rig_lidar_r = geometry["rig_lidar_r"]
+        rig_camera_t = geometry["rig_camera_t"]
+        rig_camera_r = geometry["rig_camera_r"]
+        link_optical_r = geometry["link_optical_r"]
+        points_rig = lidar_points @ rig_lidar_r.T + rig_lidar_t
+        points_link = (points_rig - rig_camera_t) @ rig_camera_r
+        points_optical = points_link @ link_optical_r
+        positive = (points_optical[:, 2] > 0.25) & (points_optical[:, 2] < 45.0)
+        points_rig = points_rig[positive]
+        points_optical = points_optical[positive]
+        if not len(points_optical):
+            continue
+        u = geometry["fx"] * points_optical[:, 0] / points_optical[:, 2] + geometry["cx"]
+        v = geometry["fy"] * points_optical[:, 1] / points_optical[:, 2] + geometry["cy"]
+        in_image = (u >= 0.0) & (u < float(frames[frame_index]["width"])) & (v >= 0.0) & (v < float(frames[frame_index]["height"]))
+        points_rig = points_rig[in_image]
+        points_optical = points_optical[in_image]
+        u = u[in_image]
+        v = v[in_image]
+        if not len(points_optical):
+            continue
+        projected_point_count += len(points_optical)
+        world_r = _quat_to_matrix(pose.orientation_xyzw)
+        pose_t = np.asarray(pose.position_m, dtype=np.float64)
+        points_world = points_rig @ world_r.T + pose_t
+        points_start = (points_world - start_t) @ start_r
+        # Index detections into coarse image cells first.  This avoids creating
+        # a full boolean cloud mask for every box on every LiDAR scan.
+        cell_size = 32
+        detection_grid: dict[tuple[int, int], list[int]] = {}
+        detections = frame_record["detections"]
+        for detection_index, detection in enumerate(detections):
+            x0, y0, x1, y1 = [float(value) for value in detection["bbox_xyxy"]]
+            gx0, gy0 = int(x0 // cell_size), int(y0 // cell_size)
+            gx1, gy1 = int(x1 // cell_size), int(y1 // cell_size)
+            for gx in range(gx0, gx1 + 1):
+                for gy in range(gy0, gy1 + 1):
+                    detection_grid.setdefault((gx, gy), []).append(detection_index)
+        point_indices: list[list[int]] = [[] for _ in detections]
+        for point_index, (point_u, point_v) in enumerate(zip(u, v)):
+            for detection_index in detection_grid.get((int(point_u // cell_size), int(point_v // cell_size)), ()):
+                x0, y0, x1, y1 = [float(value) for value in detections[detection_index]["bbox_xyxy"]]
+                if x0 <= point_u <= x1 and y0 <= point_v <= y1:
+                    point_indices[detection_index].append(point_index)
+        for detection, indices in zip(detections, point_indices):
+            if len(indices) < 3:
+                continue
+            index_array = np.asarray(indices, dtype=np.int64)
+            depths = points_optical[index_array, 2]
+            # Prefer the front surface of a proposed product over returns from
+            # the shelf behind it, while retaining several returns for a stable
+            # robust center estimate.
+            front_cutoff = float(np.percentile(depths, 45.0))
+            selected_indices = index_array[depths <= front_cutoff]
+            if len(selected_indices) < 3:
+                selected_indices = index_array
+            estimate = np.median(points_start[selected_indices], axis=0)
+            track_id = int(detection["track_id"])
+            observations.setdefault(track_id, []).append(estimate)
+            detection["depth_point_count"] = int(len(selected_indices))
+
+        scan_count += 1
+
+    track_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations.items() if values}
+    for frame_record in frame_annotations:
+        for detection in frame_record["detections"]:
+            estimate = track_estimates.get(int(detection["track_id"]))
+            if estimate is None:
+                detection["coordinate_source"] = "rgb_only_no_lidar_association"
+                continue
+            rounded = [round(float(value), 3) for value in estimate]
+            detection["estimated_center_start_relative_m"] = rounded
+            detection["coordinate_source"] = "lidar_projected_with_slam_pose"
+    return track_estimates, {
+        "status": "complete",
+        "start_pose_world_m": [round(float(value), 6) for value in start_t],
+        "start_pose_orientation_xyzw": [round(float(value), 8) for value in poses[0].orientation_xyzw],
+        "coordinate_frame": "start-relative sensor-rig frame; x forward, y left, z up",
+        "scan_count_used": scan_count,
+        "projected_point_count": projected_point_count,
+        "track_count_with_3d_estimate": len(track_estimates),
+    }
+
+
 def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: str | Path, repo_root: str | Path | None = None) -> dict[str, object]:
-    """Run RGB-only tracking and write the render/evaluation interface."""
+    """Run RGB tracking plus sensor-only 3D localization."""
 
     capture = Path(capture_dir).resolve()
     slam = Path(slam_dir).resolve()
@@ -236,6 +447,8 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     if decoded != len(frames_index):
         raise RuntimeError(f"RGB frame/index mismatch: decoded={decoded}, indexed={len(frames_index)}")
 
+    track_estimates, localization = _augment_with_lidar_estimates(capture, slam, frames_index, frame_annotations)
+
     annotation_path = output / "frame_annotations.jsonl"
     with annotation_path.open("w", encoding="utf-8", newline="\n") as handle:
         for record in frame_annotations:
@@ -254,12 +467,24 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             "detection_count": track.detection_count,
             "center_u_px": round(track.center_px[0], 3),
             "center_v_px": round(track.center_px[1], 3),
-            "estimated_x_m": "",
-            "estimated_y_m": "",
-            "estimated_z_m": "",
-            "depth_source": "not_available_in_rgb_baseline",
+            "estimated_x_m": round(float(track_estimates[track.track_id][0]), 3) if track.track_id in track_estimates else "",
+            "estimated_y_m": round(float(track_estimates[track.track_id][1]), 3) if track.track_id in track_estimates else "",
+            "estimated_z_m": round(float(track_estimates[track.track_id][2]), 3) if track.track_id in track_estimates else "",
+            "depth_source": "lidar_projected_with_slam_pose" if track.track_id in track_estimates else "rgb_only_no_lidar_association",
+            "3d_observation_count": 0,
         })
-    fields = ["track_id", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "depth_source"]
+    # Track-level 3D observations are represented in the coordinate summary;
+    # the per-frame JSONL retains each measured point count.  Keeping the CSV
+    # row one-per-track makes it directly usable as an inventory spreadsheet.
+    for row in track_rows:
+        track_id = int(row["track_id"])
+        row["3d_observation_count"] = sum(
+            1
+            for frame in frame_annotations
+            for detection in frame["detections"]
+            if int(detection["track_id"]) == track_id and detection.get("coordinate_source") == "lidar_projected_with_slam_pose"
+        )
+    fields = ["track_id", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "depth_source", "3d_observation_count"]
     _write_csv(output / "estimated_inventory.csv", track_rows, fields)
     _write_csv(output / "tracks.csv", track_rows, fields)
     (output / "estimated_inventory.json").write_text(json.dumps(track_rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -271,7 +496,9 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "capture_only": True,
         "ground_truth_consumed": False,
         "ground_truth_required": False,
-        "slam_consumed_for_estimation": False,
+        "slam_consumed_for_estimation": True,
+        "lidar_consumed_for_estimation": True,
+        "localization": localization,
         "slam_artifact": str((slam / "slam_map.pcd").relative_to(output.parent)).replace("\\", "/") if (slam / "slam_map.pcd").exists() else None,
         "frame_count": len(frame_annotations),
         "detection_count": sum(len(item["detections"]) for item in frame_annotations),
@@ -281,7 +508,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "annotations": "frame_annotations.jsonl",
         "estimated_inventory": "estimated_inventory.csv",
         "git_sha": _git_sha(Path(repo_root).resolve()) if repo_root else None,
-        "notes": "Centers are measured RGB component centroids; 3D depth is intentionally blank until a depth-aware detector is added.",
+        "notes": "Boxes originate from RGB components; start-relative 3D centers are robust medians of projected LiDAR returns using interpolated SLAM pose.",
     }
     (output / "perception_manifest.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary
