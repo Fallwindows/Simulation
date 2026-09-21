@@ -1,12 +1,15 @@
 import hashlib
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
+from simulator.capture.export_metadata import export_metadata
+from simulator.presentation.rgb_bundle import emit_rgb_bundle
 from simulator.presentation.render_video import plan_segments, render_presentation
-from simulator.presentation.provenance import ROLE_SPECS, schema_catalog
+from simulator.presentation.provenance import DIAGNOSTIC_BASELINE_IDENTITY, ROLE_SPECS, schema_catalog
 from simulator.presentation.timeline import EXPECTED_SHOT_BOUNDARIES, inspect_inputs, load_plan
 
 
@@ -14,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "config" / "presentation" / "storyboard.yaml"
 BASELINE_INPUTS = ROOT / "config" / "presentation" / "diagnostic_baseline_inputs.json"
 BASELINE_VIDEO = ROOT / "demo" / "walking_aisle_final_hifi.mp4"
+SCENARIO = ROOT / "config" / "scenarios" / "baseline_straight.yaml"
+FFMPEG = Path(r"C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Library\bin\ffmpeg.exe")
+FFPROBE = FFMPEG.with_name("ffprobe.exe")
 
 
 def _sha256(path: Path) -> str:
@@ -22,6 +28,26 @@ def _sha256(path: Path) -> str:
 
 def _descriptor(path: Path) -> dict[str, str]:
     return {"path": str(path), "sha256": _sha256(path)}
+
+
+def _write_configured_camera_info_from_export(capture: Path) -> None:
+    """Compatibility for the pre-recorder branch; the accepted base writes this directly."""
+
+    path = capture / "camera_info.json"
+    if path.exists():
+        return
+    transforms = json.loads((capture / "sensor_transforms.json").read_text(encoding="utf-8"))
+    value = {
+        "schema_version": 1,
+        "provenance": "configured_intrinsics",
+        "observed_ros_message": False,
+        "source": "sensor_transforms.json",
+        "topic": transforms["topics"]["rgb_camera_info"],
+        "frame_id": transforms["frames"]["camera_optical"],
+        "model": "ideal_pinhole",
+        **transforms["intrinsics"],
+    }
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _placeholder_role(root: Path, role_name: str, capture_id: str, view_video: Path) -> dict[str, object]:
@@ -133,8 +159,89 @@ class PresentationTimelineTests(unittest.TestCase):
         self.assertEqual([segment.kind for segment in segments[:5]], ["diagnostic_baseline"] * 5)
         self.assertEqual([segment.kind for segment in segments[5:]], ["missing_input_slate"] * 7)
         self.assertTrue(all("references/storyboard" not in str(segment.video_path) for segment in segments))
+        self.assertEqual(_sha256(BASELINE_VIDEO), DIAGNOSTIC_BASELINE_IDENTITY["video_sha256"])
         with self.assertRaises(ValueError):
             plan_segments(plan, report, "complete")
+
+    def test_pinned_diagnostic_blob_predates_the_storyboard_manifest(self):
+        subprocess.run(
+            [
+                "git", "merge-base", "--is-ancestor",
+                DIAGNOSTIC_BASELINE_IDENTITY["introduced_commit"],
+                DIAGNOSTIC_BASELINE_IDENTITY["storyboard_manifest_commit"],
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        blob = subprocess.check_output(
+            [
+                "git", "rev-parse",
+                f"{DIAGNOSTIC_BASELINE_IDENTITY['introduced_commit']}:{DIAGNOSTIC_BASELINE_IDENTITY['video_path']}",
+            ],
+            cwd=ROOT,
+            text=True,
+        ).strip()
+        self.assertEqual(blob, DIAGNOSTIC_BASELINE_IDENTITY["video_git_blob"])
+        old_manifest = subprocess.run(
+            [
+                "git", "cat-file", "-e",
+                f"{DIAGNOSTIC_BASELINE_IDENTITY['introduced_commit']}:references/manifest.json",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        self.assertNotEqual(old_manifest.returncode, 0)
+        subprocess.run(
+            [
+                "git", "cat-file", "-e",
+                f"{DIAGNOSTIC_BASELINE_IDENTITY['storyboard_manifest_commit']}:references/manifest.json",
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+
+    def test_alternate_diagnostic_manifest_with_png_transcoded_to_h264_is_rejected_before_render(self):
+        self.assertTrue(FFMPEG.is_file())
+        reference = ROOT / "references" / "storyboard" / "01_enter_aisle_rgb.png"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            transcoded = root / "apparently-new-baseline.mp4"
+            subprocess.run(
+                [
+                    str(FFMPEG), "-hide_banner", "-loglevel", "error", "-loop", "1", "-i", str(reference),
+                    "-frames:v", "3", "-r", "30", "-vf", "scale=1280:720", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-y", str(transcoded),
+                ],
+                check=True,
+            )
+            self.assertNotEqual(_sha256(transcoded), _sha256(reference))
+            self.assertIn(b"ftyp", transcoded.read_bytes()[:32])
+            manifest = root / "alternate_diagnostic.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "label": "transcoded storyboard attack",
+                        "ground_truth_consumed": False,
+                        "roles": {
+                            "rgb_baseline": {
+                                "contract": "rgb",
+                                "status": "complete",
+                                "provenance": "diagnostic_baseline",
+                                "schema_id": "simulation.presentation.diagnostic_baseline.v1",
+                                "producer_id": "repository.demo.baseline.v1",
+                                "capture_id": "forged",
+                                "artifacts": {"view_video": _descriptor(transcoded)},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
+                inspect_inputs(load_plan(PLAN), manifest)
+            with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
+                render_presentation(PLAN, manifest, root / "output", "preview", "diagnostic", "unreachable", "unreachable")
 
     def test_arbitrary_placeholders_and_missing_hashes_cannot_be_complete(self):
         plan = load_plan(PLAN)
@@ -199,8 +306,8 @@ class PresentationTimelineTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_id": "simulation.presentation.view_derivation.v1",
-                        "producer_id": "evaluation.rgb_video_recorder.v1",
-                        "producer_source_sha256": _sha256(ROOT / "evaluation" / "rgb_video_recorder.py"),
+                        "producer_id": ROLE_SPECS["rgb"].view_producer_id,
+                        "producer_source_sha256": _sha256(ROOT / ROLE_SPECS["rgb"].view_producer_source_path),
                         "role": "rgb",
                         "capture_id": "capture-a",
                         "output_video_sha256": _sha256(view),
@@ -234,7 +341,7 @@ class PresentationTimelineTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_id": "simulation.presentation.view_derivation.v1",
-                        "producer_id": "evaluation.rgb_video_recorder.v1",
+                        "producer_id": ROLE_SPECS["rgb"].view_producer_id,
                         "producer_source_sha256": "0" * 64,
                         "role": "rgb",
                         "capture_id": "capture-a",
@@ -262,7 +369,7 @@ class PresentationTimelineTests(unittest.TestCase):
             self.assertTrue(any("producer source hash does not match" in error for error in errors))
             self.assertTrue(any("view manifest producer source hash mismatch" in error for error in errors))
 
-    def test_storyboard_pixels_are_rejected_as_inputs(self):
+    def test_alternate_diagnostic_manifest_is_rejected_even_for_byte_identical_storyboard_content(self):
         plan = load_plan(PLAN)
         reference = ROOT / "references" / "storyboard" / "01_enter_aisle_rgb.png"
         with tempfile.TemporaryDirectory() as directory:
@@ -292,13 +399,129 @@ class PresentationTimelineTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ValueError, "known storyboard content is forbidden"):
+            with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
                 inspect_inputs(plan, manifest)
+
+    def test_rgb_bundle_emitter_accepts_canonical_capture_outputs_end_to_end(self):
+        self.assertTrue(FFMPEG.is_file())
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory) / "run"
+            capture = run / "capture"
+            capture.mkdir(parents=True)
+            export_metadata(SCENARIO, capture, ROOT)
+            _write_configured_camera_info_from_export(capture)
+
+            video = capture / "rgb_camera.mp4"
+            subprocess.run(
+                [
+                    str(FFMPEG), "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "color=c=black:s=1280x720:r=30", "-frames:v", "1350", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-y", str(video),
+                ],
+                check=True,
+            )
+            frames = capture / "rgb_frames.jsonl"
+            with frames.open("w", encoding="utf-8", newline="\n") as handle:
+                for frame_index in range(1350):
+                    handle.write(
+                        json.dumps(
+                            {
+                                "frame_index": frame_index,
+                                "stamp_s": frame_index / 30.0,
+                                "frame_id": "camera_optical_frame",
+                                "width": 1280,
+                                "height": 720,
+                                "encoding": "rgb8",
+                            },
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+            metadata = capture / "rgb_video.json"
+            metadata.write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "frame_count": 1350,
+                        "first_image_stamp_s": 0.0,
+                        "last_image_stamp_s": 1349 / 30.0,
+                        "nominal_fps": 30.0,
+                        "width": 1280,
+                        "height": 720,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            files = []
+            for path in sorted(item for item in capture.rglob("*") if item.is_file()):
+                files.append(
+                    {
+                        "path": path.relative_to(capture).as_posix(),
+                        "sha256": _sha256(path),
+                        "size_bytes": path.stat().st_size,
+                    }
+                )
+            capture_manifest = capture / "capture_manifest.json"
+            capture_manifest.write_text(
+                json.dumps(
+                    {
+                        "manifest_version": 1,
+                        "status": "complete",
+                        "capture_id": "emitter-fixture",
+                        "duration_s": 45.0,
+                        "capture_sha256": "a" * 64,
+                        "bag": {
+                            "uri": "sensors_bag",
+                            "topics": [
+                                "/clock", "/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info",
+                                "/sim/lidar/points", "/tf", "/tf_static",
+                            ],
+                        },
+                        "rgb": {
+                            "video": video.name,
+                            "timestamp_index": frames.name,
+                            "camera_info": "camera_info.json",
+                            "camera_info_provenance": "configured_intrinsics",
+                            "metadata": metadata.name,
+                            "frame_count": 1350,
+                            "first_stamp_s": 0.0,
+                            "last_stamp_s": 1349 / 30.0,
+                        },
+                        "files": files,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            inputs = run / "presentation_rgb_inputs.json"
+            emit_rgb_bundle(capture_manifest, inputs, repo_root=ROOT, ffprobe=str(FFPROBE))
+            report = inspect_inputs(load_plan(PLAN), inputs)
+            self.assertEqual(report.ready_genuine_roles, frozenset({"rgb"}))
+            self.assertEqual(report.role_errors["rgb"], ())
+            receipt = json.loads((capture / "rgb_presentation_view_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["producer_id"], "simulator.presentation.rgb_bundle_emitter.v1")
+            self.assertEqual(receipt["output_video_sha256"], _sha256(video))
+            self.assertEqual(set(receipt["source_artifact_sha256"]), {"frame_index", "camera_info", "rgb_metadata", "capture_manifest"})
 
     def test_diagnostic_mode_cannot_write_delivery_profile(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "restricted to the 1280x720 preview"):
                 render_presentation(PLAN, BASELINE_INPUTS, directory, "delivery", "diagnostic", "ffmpeg", "ffprobe")
+
+    def test_diagnostic_output_claim_is_limited_to_the_pinned_source_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = render_presentation(
+                PLAN,
+                BASELINE_INPUTS,
+                directory,
+                "preview",
+                "diagnostic",
+                str(FFMPEG),
+                str(FFPROBE),
+            )
+            self.assertNotIn("storyboard_pixels_consumed", manifest)
+            self.assertEqual(manifest["diagnostic_source_identity"]["video_git_blob"], DIAGNOSTIC_BASELINE_IDENTITY["video_git_blob"])
+            self.assertTrue(manifest["provenance_validation"]["exact_storyboard_file_hashes_rejected"])
 
 
 if __name__ == "__main__":

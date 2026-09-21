@@ -14,7 +14,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .provenance import ROLE_SPECS, coherence_errors, storyboard_hashes, validate_role
+from .provenance import (
+    ROLE_SPECS,
+    coherence_errors,
+    storyboard_hashes,
+    validate_diagnostic_identity,
+    validate_role,
+)
 
 
 EXPECTED_SHOT_BOUNDARIES = (
@@ -268,6 +274,8 @@ def inspect_inputs(plan: PresentationPlan, path: str | Path) -> InputReport:
         raise ValueError("input roles must be a mapping")
 
     repo_root = plan.path.parents[2]
+    if any(isinstance(item, dict) and item.get("provenance") == "diagnostic_baseline" for item in roles_data.values()):
+        validate_diagnostic_identity(plan.path, source, repo_root)
     known_storyboard_hashes, storyboard_manifest_sha256 = storyboard_hashes(repo_root)
     validated_roles = {}
     for role_name, item in roles_data.items():

@@ -30,6 +30,18 @@ REQUIRED_CAPTURE_TOPICS = {
     "/tf_static",
 }
 
+DIAGNOSTIC_BASELINE_IDENTITY = {
+    "plan_path": "config/presentation/storyboard.yaml",
+    "plan_sha256_lf": "5a7e98db32134ba8f6507e60534a056bf9e5e35f3290d61eb9fa6b684479bc5f",
+    "manifest_path": "config/presentation/diagnostic_baseline_inputs.json",
+    "manifest_sha256_lf": "c18e9139feb34a59e9582aea331a83c2f1e0a8e1d77b2490dd3892eb21e8a9cf",
+    "video_path": "demo/walking_aisle_final_hifi.mp4",
+    "video_sha256": "c8a0032862b1397889d187295cc4132ad1d45caad4697fad3fd6f320384e4096",
+    "video_git_blob": "57628e29ab73fc83a9e7ad97167a01df9b66e472",
+    "introduced_commit": "d5e825c8f6dab77aa6a1007c9731c226b588dfcf",
+    "storyboard_manifest_commit": "d315aa9c21fa1bfb3aec284687c6ed4a49151941",
+}
+
 
 @dataclass(frozen=True)
 class RoleSpec:
@@ -55,8 +67,8 @@ ROLE_SPECS = {
             ("capture_manifest", "capture_manifest"),
             ("view_manifest", "view_manifest"),
         ),
-        "evaluation.rgb_video_recorder.v1",
-        "evaluation/rgb_video_recorder.py",
+        "simulator.presentation.rgb_bundle_emitter.v1",
+        "simulator/presentation/rgb_bundle.py",
         True,
     ),
     "lidar": RoleSpec(
@@ -134,6 +146,7 @@ def schema_catalog() -> dict[str, Any]:
             "schema_id": "simulation.presentation.diagnostic_baseline.v1",
             "producer_id": "repository.demo.baseline.v1",
             "artifacts": {"view_video": "video"},
+            "immutable_identity": DIAGNOSTIC_BASELINE_IDENTITY,
         },
         "roles": {
             name: {
@@ -206,6 +219,26 @@ def sha256_path(path: Path) -> str:
     raise FileNotFoundError(path)
 
 
+def _sha256_lf_text(path: Path) -> str:
+    normalized = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _git_blob_oid(path: Path) -> str:
+    content = path.read_bytes()
+    header = f"blob {len(content)}\0".encode("ascii")
+    return hashlib.sha1(header + content).hexdigest()
+
+
+def validate_diagnostic_identity(plan_path: Path, manifest_path: Path, repo_root: Path) -> None:
+    expected_plan = (repo_root / DIAGNOSTIC_BASELINE_IDENTITY["plan_path"]).resolve()
+    expected_manifest = (repo_root / DIAGNOSTIC_BASELINE_IDENTITY["manifest_path"]).resolve()
+    if plan_path.resolve() != expected_plan or _sha256_lf_text(plan_path) != DIAGNOSTIC_BASELINE_IDENTITY["plan_sha256_lf"]:
+        raise ValueError("diagnostic rendering requires the canonical immutable presentation plan")
+    if manifest_path.resolve() != expected_manifest or _sha256_lf_text(manifest_path) != DIAGNOSTIC_BASELINE_IDENTITY["manifest_sha256_lf"]:
+        raise ValueError("diagnostic rendering requires the canonical immutable input manifest")
+
+
 def storyboard_hashes(repo_root: Path) -> tuple[frozenset[str], str]:
     manifest_path = repo_root / "references" / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -273,6 +306,25 @@ def _validate_camera_info(path: Path) -> None:
     data = _json(path)
     if data.get("topic") != "/sim/camera/rgb/camera_info" or not str(data.get("frame_id", "")):
         raise ValueError("camera_info topic/frame_id is invalid")
+    if data.get("provenance") == "configured_intrinsics":
+        expected_keys = {
+            "schema_version", "provenance", "observed_ros_message", "source", "topic",
+            "frame_id", "model", "width_px", "height_px", "fx_px", "fy_px", "cx_px", "cy_px",
+        }
+        if set(data) != expected_keys:
+            raise ValueError("configured camera_info fields do not match the canonical export schema")
+        if data.get("schema_version") != 1 or data.get("observed_ros_message") is not False:
+            raise ValueError("configured camera_info provenance flags are invalid")
+        if data.get("source") != "sensor_transforms.json" or data.get("model") != "ideal_pinhole":
+            raise ValueError("configured camera_info source/model is invalid")
+        width, height = int(data.get("width_px", 0)), int(data.get("height_px", 0))
+        fx = _finite(data.get("fx_px"), "camera fx_px")
+        fy = _finite(data.get("fy_px"), "camera fy_px")
+        cx = _finite(data.get("cx_px"), "camera cx_px")
+        cy = _finite(data.get("cy_px"), "camera cy_px")
+        if width <= 0 or height <= 0 or fx <= 0 or fy <= 0 or not (0 <= cx < width) or not (0 <= cy < height):
+            raise ValueError("configured camera_info intrinsics are invalid")
+        return
     if int(data.get("width", 0)) <= 0 or int(data.get("height", 0)) <= 0:
         raise ValueError("camera_info dimensions are invalid")
     for key, length in (("k", 9), ("r", 9), ("p", 12)):
@@ -640,6 +692,11 @@ def validate_role(
                     actual = sha256_path(path)
                     if actual != declared:
                         errors.append("diagnostic view_video hash mismatch")
+                    expected_path = (repo_root / DIAGNOSTIC_BASELINE_IDENTITY["video_path"]).resolve()
+                    if path != expected_path or declared != DIAGNOSTIC_BASELINE_IDENTITY["video_sha256"]:
+                        raise ValueError("diagnostic source is not the pinned repository baseline")
+                    if _git_blob_oid(path) != DIAGNOSTIC_BASELINE_IDENTITY["video_git_blob"]:
+                        raise ValueError("diagnostic source does not match the pinned repository blob")
                     if actual in known_storyboard_hashes:
                         raise ValueError(f"known storyboard content is forbidden as an input: {path}")
                     try:

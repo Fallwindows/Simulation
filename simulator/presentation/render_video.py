@@ -18,6 +18,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from .provenance import DIAGNOSTIC_BASELINE_IDENTITY, validate_diagnostic_identity
 from .timeline import InputReport, PresentationPlan, RoleInput, Shot, inspect_inputs, load_plan
 
 
@@ -306,6 +307,8 @@ def render_presentation(
     ffprobe: str,
 ) -> dict[str, Any]:
     plan = load_plan(plan_path)
+    if mode == "diagnostic":
+        validate_diagnostic_identity(plan.path, Path(inputs_path).resolve(), plan.path.parents[2])
     report = inspect_inputs(plan, inputs_path)
     if not report.provenance_validated:
         raise ValueError("presentation provenance validation did not complete")
@@ -357,7 +360,7 @@ def render_presentation(
     manifest = {
         "schema_version": 1,
         "status": "diagnostic_incomplete" if mode == "diagnostic" and not report.complete else "complete",
-        "claim": "diagnostic timeline; unavailable technical intervals are labelled slates" if mode == "diagnostic" else "validated genuine-input presentation",
+        "claim": "diagnostic timeline from the pinned pre-storyboard RGB baseline; unavailable technical intervals are labelled slates" if mode == "diagnostic" else "validated genuine-input presentation",
         "mode": mode,
         "profile": profile_name,
         "width": profile.width,
@@ -366,12 +369,11 @@ def render_presentation(
         "frame_count": plan.frame_count,
         "duration_seconds": plan.duration_seconds,
         "ground_truth_consumed": False,
-        "storyboard_pixels_consumed": False,
         "provenance_validation": {
             "status": "validated",
             "storyboard_manifest_sha256": report.storyboard_manifest_sha256,
             "artifact_hashes_verified": True,
-            "known_storyboard_content_hashes_rejected": True,
+            "exact_storyboard_file_hashes_rejected": True,
         },
         "plan": str(plan.path),
         "plan_sha256": _file_sha256(plan.path),
@@ -405,6 +407,11 @@ def render_presentation(
             for segment in segments
         ],
     }
+    if mode == "diagnostic":
+        manifest["diagnostic_source_identity"] = {
+            "claim": "source is the repository baseline blob introduced before the canonical storyboard manifest",
+            **DIAGNOSTIC_BASELINE_IDENTITY,
+        }
     manifest_path = target_dir / f"{stem}_manifest.json"
     temporary_manifest = target_dir / f".{stem}_manifest.partial.json"
     temporary_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
