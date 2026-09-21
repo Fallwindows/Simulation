@@ -11,6 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 if ($Gui -and $Headless) { throw "Choose either -Gui or -Headless, not both." }
 . (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")
+. (Join-Path $PSScriptRoot "process_status.ps1")
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $pixi = Resolve-PixiExecutable $PixiPath
 $workspace = Resolve-RosWorkspace $RosWorkspace
@@ -43,13 +44,6 @@ function Stop-ProcessTree([int]$RootPid) {
   Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
 }
 
-function Wait-ProcessWithTimeout($Process, [int]$TimeoutSeconds, [string]$Name) {
-  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  while (-not $Process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
-  if (-not $Process.HasExited) { throw "$Name did not finish within $TimeoutSeconds seconds." }
-  return $Process.ExitCode
-}
-
 Push-Location $repo
 $router = $null
 $bag = $null
@@ -78,11 +72,13 @@ try {
   Start-Sleep -Seconds 6
 
   $bagUri = Join-Path $captureDir "sensors_bag"
-  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
-  $bag = Start-Process -FilePath $pixi -ArgumentList $bagArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "bag.out.log") -RedirectStandardError (Join-Path $logsDir "bag.err.log")
+  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--end-clock-seconds",([string]$duration),"--startup-timeout-seconds","120","--clock-stall-timeout-seconds","30")
+  $bagStatus = Join-Path $logsDir "bag.exit-status.json"
+  $bag = Start-TrackedProcess -FilePath $pixi -ArgumentList $bagArgs -WorkingDirectory $repo -StatusPath $bagStatus -RedirectStandardOutput (Join-Path $logsDir "bag.out.log") -RedirectStandardError (Join-Path $logsDir "bag.err.log")
 
   $recorderArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","evaluation.rgb_video_recorder","--output",(Join-Path $captureDir "rgb_camera.mp4"),"--metadata",(Join-Path $captureDir "rgb_video.json"),"--frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
-  $recorder = Start-Process -FilePath $pixi -ArgumentList $recorderArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "rgb.out.log") -RedirectStandardError (Join-Path $logsDir "rgb.err.log")
+  $recorderStatus = Join-Path $logsDir "rgb.exit-status.json"
+  $recorder = Start-TrackedProcess -FilePath $pixi -ArgumentList $recorderArgs -WorkingDirectory $repo -StatusPath $recorderStatus -RedirectStandardOutput (Join-Path $logsDir "rgb.out.log") -RedirectStandardError (Join-Path $logsDir "rgb.err.log")
   Start-Sleep -Seconds 2
 
   $simScript = Join-Path $PSScriptRoot "run_sim.ps1"
@@ -108,8 +104,10 @@ try {
   if ($isaacExit -ne 0) { throw "Isaac runtime failed with exit code $isaacExit." }
 
   $waitSeconds = [Math]::Max(180, [int]($duration * 15) + 60)
-  Wait-ProcessWithTimeout $recorder $waitSeconds "RGB capture recorder" | Out-Null
-  Wait-ProcessWithTimeout $bag $waitSeconds "raw ROS bag writer" | Out-Null
+  $recorderExit = Wait-ProcessWithTimeout -Process $recorder -TimeoutSeconds $waitSeconds -Name "RGB capture recorder" -StatusPath $recorderStatus
+  if ($recorderExit -ne 0) { throw "RGB capture recorder failed with exit code $recorderExit." }
+  $bagExit = Wait-ProcessWithTimeout -Process $bag -TimeoutSeconds $waitSeconds -Name "raw ROS bag writer" -StatusPath $bagStatus
+  if ($bagExit -ne 0) { throw "Raw ROS bag writer failed with exit code $bagExit." }
   $rgb = Get-Content -LiteralPath (Join-Path $captureDir "rgb_video.json") -Raw | ConvertFrom-Json
   $bagMeta = Get-Content -LiteralPath (Join-Path $captureDir "bag_metadata.json") -Raw | ConvertFrom-Json
   if ($rgb.status -ne "complete") { throw "RGB capture did not complete." }
@@ -126,18 +124,26 @@ try {
   }
   $topics = @($bagMeta.topics)
   $manifest = [ordered]@{
-    manifest_version=1; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha
+    manifest_version=2; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha
     rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; duration_s=$duration
-    bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
+    bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; topic_types=$bagMeta.topic_types; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
     rgb=[ordered]@{ video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; camera_info_provenance="configured_intrinsics"; metadata="rgb_video.json"; frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s }
     ground_truth=[ordered]@{ inventory_csv="inventory_ground_truth.csv"; inventory_json="inventory_ground_truth.json"; pose_topic="/sim/ground_truth/pose"; evaluation_only=$true }
     hashes=(Get-Content -LiteralPath (Join-Path $captureDir "experiment_hashes.json") -Raw | ConvertFrom-Json)
     software_versions="../software_versions.json"
     files=$files
   }
-  $canonical = $manifest | ConvertTo-Json -Depth 20 -Compress
-  $manifest.capture_sha256 = ([System.BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace("-","")).ToLowerInvariant()
-  $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $captureDir "capture_manifest.json") -Encoding UTF8
+  $manifestPath = Join-Path $captureDir "capture_manifest.json"
+  $stagingManifest = Join-Path $runDir "capture_manifest.staging.json"
+  try {
+    $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $stagingManifest -Encoding UTF8
+    & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.finalize_manifest finalize --staging $stagingManifest --output $manifestPath
+    if ($LASTEXITCODE -ne 0) { throw "Capture manifest finalization failed." }
+    & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.finalize_manifest verify --manifest $manifestPath
+    if ($LASTEXITCODE -ne 0) { throw "Capture manifest verification failed." }
+  } finally {
+    Remove-Item -LiteralPath $stagingManifest -Force -ErrorAction SilentlyContinue
+  }
   New-Item -ItemType File -Force -Path (Join-Path $captureDir "CAPTURE_COMPLETE") | Out-Null
   Write-Host "Capture complete: $captureDir"
 } finally {

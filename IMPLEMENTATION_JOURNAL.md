@@ -182,3 +182,69 @@ module marker. The exact default discovery order therefore retains the original
 recorder construction, subscription, encoding, cleanup, and metadata checks
 without inheriting NumPy loaded earlier by perception tests. Renderer code,
 source bindings, receipts, and generated media are unchanged from r2.
+## 2026-09-21 — raw capture recorder policy repair
+
+- `RawCaptureWriter` now loads the required generated Clock, Image,
+  PointCloud2, and TF message submodules under their canonical package names.
+  It no longer imports aggregate `sensor_msgs.msg` or CameraInfo, so the
+  dedicated capture process does not load NumPy or the blocked BLAS library.
+- Capture manifest version 2 stores `/clock`, RGB Image, PointCloud2, `/tf`, and
+  `/tf_static` in the raw SQLite bag. Camera calibration remains the separate
+  scenario-derived `camera_info.json`, explicitly labeled
+  `configured_intrinsics` and `observed_ros_message=false`.
+- A separate-process Zenoh publisher/player test delivered serialized messages
+  for every retained topic into the real writer. Persisted counts and types,
+  clean SQLite closure, `ros2 bag info`, and `numpy_loaded=false` all passed.
+  No Isaac or GPU workload was run for this repair.
+
+### Fixed-horizon completion correction
+
+- Production capture now gives the raw writer the simulator's absolute
+  trajectory end clock. A nonzero first observed clock therefore no longer
+  moves the target beyond the fixed Isaac frame horizon; relative-duration
+  mode remains available for general replay use.
+- Reaching the requested clock is required for `status=complete`. A bounded
+  post-start clock-progress timeout records an incomplete result and exits on
+  a stopped source instead of waiting for the outer production timeout.
+- The capture wrapper checks both recorder exit codes before reading metadata.
+  A Pixi/Zenoh regression reached an exact `2.1 s` horizon from a first clock
+  of `2.0 s`, retained all five raw topics, and kept NumPy unloaded. CPU-only
+  tests passed; no Isaac or GPU workload was run.
+
+### Redirected-process exit-status correction
+
+- The production wrapper no longer reads the nullable `ExitCode` property from
+  redirected `Start-Process` objects. Each RGB/raw child now runs through a
+  narrow PowerShell wrapper that atomically writes an explicit JSON exit-status
+  sentinel; the parent rejects missing, malformed, or unavailable status.
+- A real Windows `Start-Process` regression with redirected stdout/stderr proves
+  exit `0` is accepted, exit `7` propagates unchanged, and an absent sentinel is
+  rejected rather than treated as success. The functional native r2 smoke bag
+  remained valid; this correction addresses only wrapper completion reporting.
+
+### Canonical capture-manifest finalization
+
+- The production wrapper now stages the unhashed manifest outside `capture/`
+  and invokes `simulator.capture.manifest` through trusted Pixi Python. The
+  finalizer accepts PowerShell's BOM only on staging input, computes the shared
+  `capture_hash`, and writes canonical BOM-free UTF-8 before a separate verify
+  command succeeds and `CAPTURE_COMPLETE` is created.
+- Tests prove strict UTF-8 JSON readability, declared/canonical hash equality,
+  deterministic hashes across key order, and rejection after tampering. The
+  prior order-dependent inline PowerShell checksum was removed.
+
+### Strict manifest-v2 schema and atomic preservation
+
+- Finalization now validates the complete production value/type contract before
+  writing: capture identity/revisions, duration/runtime fields, the exact five
+  raw topics and ROS types, nonnegative counts and ordered time ranges,
+  configured RGB calibration provenance, evaluation-only ground-truth boundary,
+  experiment hashes, and the file inventory.
+- File entries require unique safe relative POSIX paths, SHA-256 values, and
+  nonnegative sizes; traversal, absolute paths, duplicates, and a manifest
+  self-entry are rejected. The production wrapper now carries raw topic types
+  from the bag receipt into the capture manifest.
+- The computed hash and full payload are validated before the temporary file is
+  written and revalidated from canonical temporary bytes before atomic replace.
+  Adversarial tests prove invalid staging preserves an existing output exactly
+  and leaves no temporary file.

@@ -26,8 +26,12 @@ $manifestPath = Join-Path $captureDir "capture_manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Capture manifest not found: $manifestPath" }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.status -ne "complete") { throw "Capture is not complete." }
-$required = @("/clock","/sim/camera/rgb/image_raw","/sim/camera/rgb/camera_info","/sim/lidar/points","/tf","/tf_static")
+$required = @("/clock","/sim/camera/rgb/image_raw","/sim/lidar/points","/tf","/tf_static")
 foreach ($topic in $required) { if (@($manifest.bag.topics) -notcontains $topic) { throw "Capture bag is missing required topic $topic." } }
+$cameraInfoPath = Join-Path $captureDir ([string]$manifest.rgb.camera_info)
+if ($manifest.rgb.camera_info_provenance -ne "configured_intrinsics" -or -not (Test-Path -LiteralPath $cameraInfoPath -PathType Leaf)) {
+  throw "Capture is missing its configured camera intrinsics artifact."
+}
 $bagUri = Join-Path $captureDir ([string]$manifest.bag.uri)
 if (-not (Test-Path -LiteralPath $bagUri -PathType Container)) { throw "Capture bag not found: $bagUri" }
 $duration = [double]$manifest.duration_s
