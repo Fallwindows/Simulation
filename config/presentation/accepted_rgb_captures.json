@@ -20,7 +20,7 @@
         "status": "accepted",
         "reviewer": "independent-production-capture-review",
         "reviewed_utc": "2026-09-21T12:51:13Z",
-        "verdict_path": "runs/production-20260920/reviewer-scratch/verdict-capture-20260921-053814804.md",
+        "verdict_path": "review/evidence/verdict-capture-20260921-053814804.md",
         "verdict_sha256": "bbff6fbf052b70b14d9c1f7b0014fd2788bb92077db3e5f1ad8ba26e37e85c20"
       },
       "presentation_classification": {

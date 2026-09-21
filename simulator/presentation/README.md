@@ -36,11 +36,18 @@ producer revision/blob, and required artifact hashes, before writing a
 receipt. Capture manifest v2 contains exactly five raw topics; camera_info is a
 configured calibration artifact and is never claimed as a bag topic. RGB shots
 consume source frames 0-539, so a genuine 20.5-second capture is sufficient.
-The receipt records its actual first/last simulation stamps and declares the
-reviewed `hflip` presentation transform required to correct mirrored native RGB
-text without modifying raw capture bytes. The production catalog is
-intentionally empty until a real capture passes independent review, so the command currently refuses every
-capture.
+The receipt records its actual first/last simulation stamps and copies the
+exact `presentation_transform` from the accepted catalog entry. Only the
+reviewed `none` and legacy/test `hflip` operations are supported, with exact
+reasons and an explicit statement that raw capture bytes remain unchanged.
+The accepted production capture `20260921-053814804` uses `none`: independent
+review confirmed that its FRESH MARKET sign already reads left-to-right. The
+generated presentation fixture retains `hflip` for legacy test coverage.
+
+The production catalog contains that one accepted capture. Its review record
+names a checked-in, repository-relative verdict whose bytes must match the
+cataloged SHA-256. Missing evidence, path escapes, hash mismatches, and captures
+without an exact catalog entry are rejected before a receipt is written.
 
 This mechanism is a checked-in reviewed allowlist with deterministic integrity
 checks. It is not cryptographic attestation that the producer executed. Tests

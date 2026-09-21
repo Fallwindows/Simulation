@@ -190,7 +190,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             "required_artifact_sha256": required_hashes,
             "review": {
                 "status": "accepted", "reviewer": "generated-test-fixture", "reviewed_utc": "2026-09-21T00:00:00Z",
-                "verdict_path": "tests/generated-presentation-fixture-verdict",
+                "verdict_path": "review/evidence/generated-presentation-fixture-verdict.txt",
                 "verdict_sha256": GENERATED_TEST_FIXTURE_MARKER_SHA256,
             },
             "presentation_classification": GENERATED_TEST_FIXTURE_CLASSIFICATION,

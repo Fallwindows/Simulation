@@ -17,7 +17,7 @@ import math
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from simulator.perception.provenance import (
@@ -724,6 +724,32 @@ def _git_output(repo_root: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
+def _review_evidence_path(repo_root: Path, declared_path: object) -> Path:
+    """Resolve a canonical repository-relative review artifact, rejecting escapes."""
+
+    if not isinstance(declared_path, str) or not declared_path or "\\" in declared_path:
+        raise ValueError("reviewed RGB capture entry has an invalid verdict path")
+    relative = PurePosixPath(declared_path)
+    if (
+        relative.is_absolute()
+        or relative.as_posix() != declared_path
+        or not relative.parts
+        or relative.parts[0].endswith(":")
+        or any(part in ("", ".", "..") for part in relative.parts)
+    ):
+        raise ValueError("reviewed RGB capture entry has an invalid verdict path")
+
+    root = repo_root.resolve(strict=True)
+    try:
+        evidence = root.joinpath(*relative.parts).resolve(strict=True)
+        evidence.relative_to(root)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        raise ValueError("reviewed RGB verdict must be an existing file inside the repository") from None
+    if not evidence.is_file():
+        raise ValueError("reviewed RGB verdict must be an existing regular file")
+    return evidence
+
+
 def validate_rgb_capture_acceptance(
     capture: dict[str, Any],
     artifact_hashes: dict[str, str],
@@ -779,11 +805,12 @@ def validate_rgb_capture_acceptance(
         "status", "reviewer", "reviewed_utc", "verdict_path", "verdict_sha256",
     } or review.get("status") != "accepted":
         raise ValueError("reviewed RGB capture entry has no accepted review record")
-    verdict_path = str(review.get("verdict_path", ""))
-    if not verdict_path or "\\" in verdict_path or verdict_path.startswith("/") or any(
-        part in ("", ".", "..") for part in verdict_path.split("/")
-    ) or not SHA256_PATTERN.fullmatch(str(review.get("verdict_sha256", ""))):
+    verdict_sha256 = str(review.get("verdict_sha256", ""))
+    if not SHA256_PATTERN.fullmatch(verdict_sha256):
         raise ValueError("reviewed RGB capture entry has an invalid verdict binding")
+    verdict = _review_evidence_path(repo_root, review.get("verdict_path"))
+    if sha256_path(verdict) != verdict_sha256:
+        raise ValueError("reviewed RGB verdict hash does not match the checked-in evidence")
     if not str(review.get("reviewer", "")).strip() or not str(review.get("reviewed_utc", "")).endswith("Z"):
         raise ValueError("reviewed RGB capture entry review identity/time is invalid")
     classification = validate_presentation_classification(entry.get("presentation_classification"))

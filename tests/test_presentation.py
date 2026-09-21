@@ -160,6 +160,41 @@ class PresentationTimelineTests(unittest.TestCase):
         for role in ("lidar", "map", "reconstruction"):
             self.assertFalse(catalog["roles"][role]["view_producer_available"])
 
+    def test_rgb_capture_review_evidence_is_checked_in_and_fail_closed(self):
+        catalog_path = ROOT / "config" / "presentation" / "accepted_rgb_captures.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        production = catalog["captures"][0]
+        review = production["review"]
+        evidence = ROOT / review["verdict_path"]
+        self.assertTrue(evidence.is_file())
+        self.assertEqual(_sha256(evidence), review["verdict_sha256"])
+        capture = {
+            "capture_id": production["capture_id"],
+            "capture_sha256": production["capture_sha256"],
+            "git_sha": production["git_sha"],
+        }
+
+        def rejected(mutator, message: str) -> None:
+            forged = json.loads(json.dumps(catalog))
+            mutator(forged["captures"][0]["review"])
+            with tempfile.TemporaryDirectory() as directory:
+                forged_path = Path(directory) / "accepted_rgb_captures.json"
+                forged_path.write_text(json.dumps(forged), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_rgb_capture_acceptance(
+                        capture,
+                        production["required_artifact_sha256"],
+                        ROOT,
+                        catalog_path=forged_path,
+                    )
+
+        rejected(lambda record: record.update(verdict_sha256="f" * 64), "verdict hash")
+        rejected(
+            lambda record: record.update(verdict_path="review/evidence/missing-verdict.md"),
+            "existing file inside the repository",
+        )
+        rejected(lambda record: record.update(verdict_path="../escaped-verdict.md"), "invalid verdict path")
+
     def test_existing_rgb_baseline_is_diagnostic_and_never_complete(self):
         plan = load_plan(PLAN)
         report = inspect_inputs(plan, BASELINE_INPUTS)
