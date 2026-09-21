@@ -54,7 +54,9 @@ The output shows sensor-derived estimated centers rather than SKU-level
 inventory. The accepted perception artifact has 454 `unknown_product` tracks,
 does not estimate product extents, and is incomplete. The technical shots map
 the reviewed 0.2-18.6 second estimator observation span across film shots 6-12.
-These limits are stated in the video and the final independent verdict.
+The film visibly qualifies the centers as estimated, the class as unknown, and
+the extents as unestimated. Inventory incompleteness and the estimator source
+span are documented here and in the final independent verdict.
 
 ## Preserved setup evidence
 
@@ -62,9 +64,9 @@ These limits are stated in the video and the final independent verdict.
 - [Setup evidence](setup-20260920/evidence/)
 
 The setup report is historical evidence. Its former Astra/Luna assignments are
-superseded by `EXECUTION_OVERRIDES.md`. The recorder `libcblas.dll` failure is an
-implementation repair under active work and must not be described as passed
-until a real capture succeeds.
+superseded by `EXECUTION_OVERRIDES.md`. Its recorder `libcblas.dll` failure is a
+resolved historical issue; the accepted production run completed a real native
+capture after the repair.
 
 The large runtime outputs remain local and are bound by the hashes above; the
 source, acceptance logic, verdicts, contact sheet, and test transcript are
