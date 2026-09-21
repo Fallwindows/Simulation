@@ -74,6 +74,8 @@ class RosbagCaptureTests(unittest.TestCase):
         last = {topic: 0.05 for topic in TOPIC_TYPES}
 
         writer.expected_rgb_fps = 30.0
+        writer.expected_rgb_start_s = 0.0
+        writer.max_rgb_startup_delay_s = 0.1
         with patch("simulator.capture.rosbag_capture._bag_observations", return_value=(counts, first, last, [0.05])):
             metadata = writer.close()
 
@@ -131,6 +133,8 @@ class RosbagCaptureTests(unittest.TestCase):
                         "20",
                         "--post-target-wall-seconds",
                         "0.5",
+                        "--expected-rgb-start-seconds",
+                        "2.0",
                         "--rgb-video",
                         str(rgb_path),
                         "--rgb-metadata",

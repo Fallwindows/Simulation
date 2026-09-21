@@ -198,6 +198,8 @@ class RawCaptureWriter:
         clock_stall_timeout_s: float = 30.0,
         expected_rgb_fps: float = 30.0,
         rgb_recorder=None,
+        expected_rgb_start_s: float = 0.0,
+        max_rgb_startup_delay_s: float = 0.1,
     ):
         import rclpy
         import rosbag2_py
@@ -213,6 +215,8 @@ class RawCaptureWriter:
         self.capture_end_clock_s = None if capture_end_clock_s is None else float(capture_end_clock_s)
         self.clock_stall_timeout_s = float(clock_stall_timeout_s)
         self.expected_rgb_fps = float(expected_rgb_fps)
+        self.expected_rgb_start_s = float(expected_rgb_start_s)
+        self.max_rgb_startup_delay_s = float(max_rgb_startup_delay_s)
         self.rgb_recorder = rgb_recorder
         if self.duration_s <= 0.0:
             raise ValueError("duration_s must be positive")
@@ -222,6 +226,8 @@ class RawCaptureWriter:
             raise ValueError("clock_stall_timeout_s must be positive")
         if self.expected_rgb_fps <= 0.0:
             raise ValueError("expected_rgb_fps must be positive")
+        if self.max_rgb_startup_delay_s < 0.0:
+            raise ValueError("max_rgb_startup_delay_s must be non-negative")
         self.started_wall = time.monotonic()
         self.first_clock_s: float | None = None
         self.last_clock_s: float | None = None
@@ -358,6 +364,8 @@ class RawCaptureWriter:
             rgb_stamps_s,
             self.expected_rgb_fps,
             target_stamp_s=self.target_clock_s,
+            expected_start_stamp_s=self.expected_rgb_start_s,
+            max_startup_delay_s=self.max_rgb_startup_delay_s,
         )
         rgb_cadence["stamps_s"] = rgb_stamps_s
         complete = (
@@ -407,6 +415,8 @@ def main() -> None:
     parser.add_argument("--clock-stall-timeout-seconds", type=float, default=30.0)
     parser.add_argument("--metadata", required=True)
     parser.add_argument("--expected-rgb-fps", type=float, default=30.0)
+    parser.add_argument("--expected-rgb-start-seconds", type=float, default=0.0)
+    parser.add_argument("--max-rgb-startup-delay-seconds", type=float, default=0.1)
     parser.add_argument("--rgb-video", default="")
     parser.add_argument("--rgb-metadata", default="")
     parser.add_argument("--rgb-frames-jsonl", default="")
@@ -434,6 +444,8 @@ def main() -> None:
                 args.ffmpeg_executable,
                 args.expected_rgb_fps,
                 subscribe=False,
+                expected_start_stamp_s=args.expected_rgb_start_seconds,
+                max_startup_delay_s=args.max_rgb_startup_delay_seconds,
             )
             if args.end_clock_seconds is not None:
                 rgb_recorder.target_s = float(args.end_clock_seconds)
@@ -446,6 +458,8 @@ def main() -> None:
             args.clock_stall_timeout_seconds,
             args.expected_rgb_fps,
             rgb_recorder,
+            args.expected_rgb_start_seconds,
+            args.max_rgb_startup_delay_seconds,
         )
         try:
             writer.spin_until_done()

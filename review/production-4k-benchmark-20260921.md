@@ -1,4 +1,4 @@
-# Production 4K sensor benchmark r2
+# Production 4K sensor benchmark r3
 
 Date: 2026-09-21
 
@@ -16,7 +16,7 @@ Production capture is explicit and fail closed:
   -Realtime -Headless
 ```
 
-The capture launcher limits simulation to 0.125× wall time while preserving 30 Hz simulation timestamps. Isaac publishes RGB with reliable KEEP_ALL QoS. One NumPy-free raw CDR subscription feeds independent bounded sqlite3 and FFmpeg workers, so the bag and video index receive the same source samples without duplicating each 24.9 MB message across Zenoh. Completion independently checks recorder cadence, bag cadence, target tail, and exact common-window stamp equality before creating `CAPTURE_COMPLETE`.
+The capture launcher limits simulation to 0.125× wall time while preserving 30 Hz simulation timestamps. Isaac publishes RGB with reliable KEEP_ALL QoS. One NumPy-free raw CDR subscription feeds independent bounded sqlite3 and FFmpeg workers, so the bag and video index receive the same source samples without duplicating each 24.9 MB message across Zenoh. Completion independently checks recorder cadence, bag cadence, a bounded 0.1-second startup phase from simulation time zero, target tail, and exact common-window stamp equality before creating `CAPTURE_COMPLETE`. The launcher also requires a clean tracked tree and records both its commit and tree identities.
 
 The benchmark used a local ignored scenario derived from production; only trajectory duration changed from 20.5 to 4.0 simulated seconds:
 
@@ -32,7 +32,9 @@ The original one-second run wrote 27 recorder frames with one 66.7 ms gap and on
 
 The installed FFmpeg exposes `h264_nvenc`; it was not selected because the measured bottleneck was ingress/fan-out and the accepted libx264 `fast`, CRF 18 quality contract did not need to change.
 
-## Passing four-second result
+## Earlier parent-bound four-second result
+
+The result below was captured while the working tree was based on parent commit `f81e64aa4416caffef0cd6009039693402df476b`. It diagnosed and validated the transport remedy, but it is not acceptance evidence for this corrected candidate. The fresh exact-candidate proof is intentionally produced only after the corrected source commit is frozen; its run-local evidence remains under ignored `runs/` storage so no later tracked commit invalidates its recorded identity.
 
 - Capture: `runs/20260921-033357133/capture/`
 - Wall time: 106.781 seconds, including startup, Isaac runtime, queue drains, cadence validation, hashing, and manifest finalization.
@@ -41,15 +43,15 @@ The installed FFmpeg exposes `h264_nvenc`; it was not selected because the measu
 - Bag counts are 238 clock, 118 RGB, 39 LiDAR, 240 TF, and 1 static TF. The sqlite3 writer queue high-water mark was 2 of 30 with zero overflow or writer error.
 - SQLite integrity is `ok`, journal mode is `delete`, 636 messages are present, and no WAL/SHM sidecars remain.
 - Capture bytes total 3,029,114,086. The sqlite3 DB is 3,012,268,032 bytes and the MP4 is 15,185,411 bytes.
-- GPU telemetry peaked at 51% utilization, 6,104 MiB of 12,282 MiB, and 131.66 W. Mean sampled values were 9.72%, 2,743.54 MiB, and 25.18 W.
-- Canonical manifest validation passed with capture SHA-256 `033f175269896df09c35ad9647b513168ac7bce8bad6f1eeaa8a9784629dd7427`.
+- Canonical manifest validation passed with capture SHA-256 `033f175269896df09c35ad9647b513168ac7bce8bad6f1eeaa8a9784629d7427`.
 
 Artifact SHA-256 values:
 
 - Manifest file: `f6f7956148898e4f96dae53078356ea39c74593911cdf28909744c8822dfc66c`
 - RGB MP4: `4509b00527b10591d531b24a37acd990f5e66f9e2da2e4878c9795f3116abb59`
 - Bag DB: `79d7bea1f13891e55d47f903af539467b26126d5bac5bed0a741698c882876a4`
-- GPU telemetry: `fc01cc869009fe5761373edac6db0affb1af22e0d286b8a3c248903ef3507316`
+
+No retained GPU telemetry artifact is available for this earlier run, so no resource measurements are claimed from it.
 
 ## Visual inspection
 

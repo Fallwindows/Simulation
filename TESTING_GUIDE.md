@@ -166,7 +166,7 @@ Keep `walking_baseline.yaml` at 1280×720 for previews and routine tests. The pr
 .\scripts\capture_simulation.ps1 -Scenario config/scenarios/production_walking_4k.yaml -Realtime -Headless
 ```
 
-`-Realtime` preserves 30 Hz simulation timestamps while the capture launcher limits simulation to 0.125× wall time so both independent raw 4K subscribers can drain each sample. The completed capture must report 3840×2160 in `camera_info.json` and `rgb_video.json`, and `rgb_cadence.json` must report a complete, matching 30 Hz common recorder/bag window. Verify `capture_manifest.json` before using the bag or video downstream.
+`-Realtime` preserves 30 Hz simulation timestamps while the capture launcher limits simulation to 0.125× wall time so the shared raw 4K subscriber and its bag/video workers can drain each sample. The completed capture must report 3840×2160 in `camera_info.json` and `rgb_video.json`. `rgb_cadence.json` must report a complete, matching 30 Hz recorder/bag window beginning no later than the documented 0.1-second camera startup allowance and continuing through the target tail. The launcher requires a clean tracked tree and records its exact commit and tree in provenance. Verify `capture_manifest.json` before using the bag or video downstream.
 
 ## 15. Scenario switching
 

@@ -177,6 +177,8 @@ class RgbVideoRecorderTests(unittest.TestCase):
                         str(2.0 / 30.0),
                         "--startup-timeout-seconds",
                         "20",
+                        "--expected-start-stamp-seconds",
+                        "2.0",
                     ],
                     cwd=Path(__file__).resolve().parents[1],
                     env=environment,

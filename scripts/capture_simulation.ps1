@@ -26,6 +26,8 @@ $trajectoryPath = (Resolve-Path -LiteralPath (Join-Path (Split-Path $scenarioPat
 $duration = [double](Get-Content -LiteralPath $trajectoryPath -Raw | ConvertFrom-Json).duration_s
 $sensorPath = (Resolve-Path -LiteralPath (Join-Path (Split-Path $scenarioPath -Parent) $scenarioData.sensors)).Path
 $rgbFps = [double](Get-Content -LiteralPath $sensorPath -Raw | ConvertFrom-Json).camera.fps
+$rgbExpectedStartSeconds = 0.0
+$rgbMaxStartupDelaySeconds = 0.1
 $captureId = Get-Date -Format "yyyyMMdd-HHmmssfff"
 $runDir = Join-Path $repo (Join-Path "runs" $captureId)
 $captureDir = Join-Path $runDir "capture"
@@ -60,7 +62,13 @@ try {
   Copy-Item -LiteralPath (Join-Path $repo "config\contracts.yaml") -Destination (Join-Path $captureDir "contracts.yaml")
   Copy-Item -LiteralPath $scenarioPath -Destination (Join-Path $captureDir "scenario.yaml")
   $gitSha = (& git -C $repo rev-parse HEAD).Trim()
-  [ordered]@{ capture_id=$captureId; git_sha=$gitSha; scenario=$scenarioPath; rmw=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; started_utc=(Get-Date).ToUniversalTime().ToString("o"); duration_s=$duration; realtime=[bool]$Realtime; transport_realtime_factor=$(if ($Realtime) { $TransportRealtimeFactor } else { $null }) } |
+  if ($LASTEXITCODE -ne 0) { throw "Could not resolve capture source commit." }
+  $gitTree = (& git -C $repo rev-parse "HEAD^{tree}").Trim()
+  if ($LASTEXITCODE -ne 0) { throw "Could not resolve capture source tree." }
+  $trackedStatus = @(& git -C $repo status --porcelain --untracked-files=no)
+  if ($LASTEXITCODE -ne 0) { throw "Could not inspect capture source status." }
+  if ($trackedStatus.Count -ne 0) { throw "Production capture requires a clean tracked source tree." }
+  [ordered]@{ capture_id=$captureId; git_sha=$gitSha; git_tree=$gitTree; source_tree_clean=$true; scenario=$scenarioPath; rmw=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; started_utc=(Get-Date).ToUniversalTime().ToString("o"); duration_s=$duration; realtime=[bool]$Realtime; transport_realtime_factor=$(if ($Realtime) { $TransportRealtimeFactor } else { $null }) } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $captureDir "provenance.json") -Encoding UTF8
   [ordered]@{
     isaac_sim="6.1.0"; ros_distro="jazzy"; rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID
@@ -76,7 +84,7 @@ try {
   Start-Sleep -Seconds 6
 
   $bagUri = Join-Path $captureDir "sensors_bag"
-  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--end-clock-seconds",([string]$duration),"--startup-timeout-seconds","120","--clock-stall-timeout-seconds","30","--expected-rgb-fps",([string]$rgbFps),"--rgb-video",(Join-Path $captureDir "rgb_camera.mp4"),"--rgb-metadata",(Join-Path $captureDir "rgb_video.json"),"--rgb-frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"))
+  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--end-clock-seconds",([string]$duration),"--startup-timeout-seconds","120","--clock-stall-timeout-seconds","30","--expected-rgb-fps",([string]$rgbFps),"--expected-rgb-start-seconds",([string]$rgbExpectedStartSeconds),"--max-rgb-startup-delay-seconds",([string]$rgbMaxStartupDelaySeconds),"--rgb-video",(Join-Path $captureDir "rgb_camera.mp4"),"--rgb-metadata",(Join-Path $captureDir "rgb_video.json"),"--rgb-frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"))
   $bagStatus = Join-Path $logsDir "bag.exit-status.json"
   $bag = Start-TrackedProcess -FilePath $pixi -ArgumentList $bagArgs -WorkingDirectory $repo -StatusPath $bagStatus -RedirectStandardOutput (Join-Path $logsDir "bag.out.log") -RedirectStandardError (Join-Path $logsDir "bag.err.log")
 
@@ -112,7 +120,7 @@ try {
   if ($rgb.status -ne "complete") { throw "RGB capture did not complete." }
   if ($bagMeta.status -ne "complete") { throw "Raw bag capture did not complete." }
   $cadencePath = Join-Path $captureDir "rgb_cadence.json"
-  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.rgb_cadence --recorder-frames (Join-Path $captureDir "rgb_frames.jsonl") --bag-metadata (Join-Path $captureDir "bag_metadata.json") --expected-fps ([string]$rgbFps) --target-stamp-seconds ([string]$duration) --output $cadencePath
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.rgb_cadence --recorder-frames (Join-Path $captureDir "rgb_frames.jsonl") --bag-metadata (Join-Path $captureDir "bag_metadata.json") --expected-fps ([string]$rgbFps) --target-stamp-seconds ([string]$duration) --expected-start-stamp-seconds ([string]$rgbExpectedStartSeconds) --max-startup-delay-seconds ([string]$rgbMaxStartupDelaySeconds) --output $cadencePath
   if ($LASTEXITCODE -ne 0) { throw "RGB recorder/bag cadence validation failed." }
   $rgbCadence = Get-Content -LiteralPath $cadencePath -Raw | ConvertFrom-Json
   if ($rgbCadence.status -ne "complete") { throw "RGB recorder/bag cadence validation did not complete." }
@@ -128,7 +136,7 @@ try {
   }
   $topics = @($bagMeta.topics)
   $manifest = [ordered]@{
-    manifest_version=2; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha
+    manifest_version=2; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha; git_tree=$gitTree; source_tree_clean=$true
     rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; duration_s=$duration
     bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; topic_types=$bagMeta.topic_types; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
     rgb=[ordered]@{ video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; camera_info_provenance="configured_intrinsics"; metadata="rgb_video.json"; cadence="rgb_cadence.json"; frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s }

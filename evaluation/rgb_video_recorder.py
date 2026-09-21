@@ -422,6 +422,8 @@ class RgbVideoRecorder:
         ffmpeg_executable: str = "ffmpeg",
         expected_fps: float = NOMINAL_FPS,
         subscribe: bool = True,
+        expected_start_stamp_s: float = 0.0,
+        max_startup_delay_s: float = 0.1,
     ):
         if camera_info_path is not None:
             raise RuntimeError(
@@ -436,8 +438,12 @@ class RgbVideoRecorder:
         self.startup_timeout_s = float(startup_timeout_s)
         self.ffmpeg_executable = ffmpeg_executable
         self.expected_fps = float(expected_fps)
+        self.expected_start_stamp_s = float(expected_start_stamp_s)
+        self.max_startup_delay_s = float(max_startup_delay_s)
         if self.expected_fps <= 0.0:
             raise ValueError("expected_fps must be positive")
+        if self.max_startup_delay_s < 0.0:
+            raise ValueError("max_startup_delay_s must be non-negative")
         self.started_wall = time.monotonic()
         self.target_s: float | None = None
         self.post_target_deadline: float | None = None
@@ -623,6 +629,8 @@ class RgbVideoRecorder:
             [float(record["stamp_s"]) for record in self.frame_records],
             self.expected_fps,
             target_stamp_s=self.target_s,
+            expected_start_stamp_s=self.expected_start_stamp_s,
+            max_startup_delay_s=self.max_startup_delay_s,
         )
         complete = (
             self.frames_written > 0
@@ -699,6 +707,8 @@ def main() -> None:
     parser.add_argument("--camera-info-json", default="")
     parser.add_argument("--ffmpeg-executable", default="ffmpeg")
     parser.add_argument("--expected-fps", type=float, default=NOMINAL_FPS)
+    parser.add_argument("--expected-start-stamp-seconds", type=float, default=0.0)
+    parser.add_argument("--max-startup-delay-seconds", type=float, default=0.1)
     args = parser.parse_args()
     if args.camera_info_json:
         parser.error(
@@ -718,6 +728,8 @@ def main() -> None:
             None,
             args.ffmpeg_executable,
             args.expected_fps,
+            expected_start_stamp_s=args.expected_start_stamp_seconds,
+            max_startup_delay_s=args.max_startup_delay_seconds,
         )
         try:
             recorder.spin_until_done()
