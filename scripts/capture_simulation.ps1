@@ -5,11 +5,13 @@ param(
   [string]$Scenario = "config/scenarios/walking_baseline.yaml",
   [int]$Frames = 0,
   [switch]$Realtime,
+  [double]$TransportRealtimeFactor = 0.125,
   [switch]$Gui,
   [switch]$Headless
 )
 $ErrorActionPreference = "Stop"
 if ($Gui -and $Headless) { throw "Choose either -Gui or -Headless, not both." }
+if ($TransportRealtimeFactor -le 0.0 -or $TransportRealtimeFactor -gt 1.0) { throw "TransportRealtimeFactor must be greater than zero and no more than one." }
 . (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")
 . (Join-Path $PSScriptRoot "process_status.ps1")
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -22,6 +24,8 @@ $scenarioPath = (Resolve-Path -LiteralPath $scenarioPath).Path
 $scenarioData = Get-Content -LiteralPath $scenarioPath -Raw | ConvertFrom-Json
 $trajectoryPath = (Resolve-Path -LiteralPath (Join-Path (Split-Path $scenarioPath -Parent) $scenarioData.trajectory)).Path
 $duration = [double](Get-Content -LiteralPath $trajectoryPath -Raw | ConvertFrom-Json).duration_s
+$sensorPath = (Resolve-Path -LiteralPath (Join-Path (Split-Path $scenarioPath -Parent) $scenarioData.sensors)).Path
+$rgbFps = [double](Get-Content -LiteralPath $sensorPath -Raw | ConvertFrom-Json).camera.fps
 $captureId = Get-Date -Format "yyyyMMdd-HHmmssfff"
 $runDir = Join-Path $repo (Join-Path "runs" $captureId)
 $captureDir = Join-Path $runDir "capture"
@@ -56,7 +60,7 @@ try {
   Copy-Item -LiteralPath (Join-Path $repo "config\contracts.yaml") -Destination (Join-Path $captureDir "contracts.yaml")
   Copy-Item -LiteralPath $scenarioPath -Destination (Join-Path $captureDir "scenario.yaml")
   $gitSha = (& git -C $repo rev-parse HEAD).Trim()
-  [ordered]@{ capture_id=$captureId; git_sha=$gitSha; scenario=$scenarioPath; rmw=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; started_utc=(Get-Date).ToUniversalTime().ToString("o"); duration_s=$duration } |
+  [ordered]@{ capture_id=$captureId; git_sha=$gitSha; scenario=$scenarioPath; rmw=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; started_utc=(Get-Date).ToUniversalTime().ToString("o"); duration_s=$duration; realtime=[bool]$Realtime; transport_realtime_factor=$(if ($Realtime) { $TransportRealtimeFactor } else { $null }) } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $captureDir "provenance.json") -Encoding UTF8
   [ordered]@{
     isaac_sim="6.1.0"; ros_distro="jazzy"; rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID
@@ -72,29 +76,26 @@ try {
   Start-Sleep -Seconds 6
 
   $bagUri = Join-Path $captureDir "sensors_bag"
-  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--end-clock-seconds",([string]$duration),"--startup-timeout-seconds","120","--clock-stall-timeout-seconds","30")
+  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--end-clock-seconds",([string]$duration),"--startup-timeout-seconds","120","--clock-stall-timeout-seconds","30","--expected-rgb-fps",([string]$rgbFps),"--rgb-video",(Join-Path $captureDir "rgb_camera.mp4"),"--rgb-metadata",(Join-Path $captureDir "rgb_video.json"),"--rgb-frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"))
   $bagStatus = Join-Path $logsDir "bag.exit-status.json"
   $bag = Start-TrackedProcess -FilePath $pixi -ArgumentList $bagArgs -WorkingDirectory $repo -StatusPath $bagStatus -RedirectStandardOutput (Join-Path $logsDir "bag.out.log") -RedirectStandardError (Join-Path $logsDir "bag.err.log")
 
-  $recorderArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","evaluation.rgb_video_recorder","--output",(Join-Path $captureDir "rgb_camera.mp4"),"--metadata",(Join-Path $captureDir "rgb_video.json"),"--frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
-  $recorderStatus = Join-Path $logsDir "rgb.exit-status.json"
-  $recorder = Start-TrackedProcess -FilePath $pixi -ArgumentList $recorderArgs -WorkingDirectory $repo -StatusPath $recorderStatus -RedirectStandardOutput (Join-Path $logsDir "rgb.out.log") -RedirectStandardError (Join-Path $logsDir "rgb.err.log")
   Start-Sleep -Seconds 2
 
   $simScript = Join-Path $PSScriptRoot "run_sim.ps1"
   $simStatus = Join-Path $captureDir "isaac_runtime_status.json"
   if ($Gui) {
     if ($Realtime) {
-      if ($Frames -gt 0) { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Frames $Frames -Realtime -Gui }
-      else { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Realtime -Gui }
+      if ($Frames -gt 0) { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Frames $Frames -Realtime -RealtimeFactor $TransportRealtimeFactor -Gui }
+      else { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Realtime -RealtimeFactor $TransportRealtimeFactor -Gui }
     } elseif ($Frames -gt 0) {
       & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Frames $Frames -Gui
     } else {
       & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Gui
     }
   } elseif ($Realtime) {
-    if ($Frames -gt 0) { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Frames $Frames -Realtime -Headless }
-    else { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Realtime -Headless }
+    if ($Frames -gt 0) { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Frames $Frames -Realtime -RealtimeFactor $TransportRealtimeFactor -Headless }
+    else { & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Realtime -RealtimeFactor $TransportRealtimeFactor -Headless }
   } elseif ($Frames -gt 0) {
     & $simScript -Scenario $scenarioPath -PixiPath $pixi -RosWorkspace $workspace -IsaacPython $IsaacPython -StatusPath $simStatus -Frames $Frames -Headless
   } else {
@@ -104,14 +105,17 @@ try {
   if ($isaacExit -ne 0) { throw "Isaac runtime failed with exit code $isaacExit." }
 
   $waitSeconds = [Math]::Max(180, [int]($duration * 15) + 60)
-  $recorderExit = Wait-ProcessWithTimeout -Process $recorder -TimeoutSeconds $waitSeconds -Name "RGB capture recorder" -StatusPath $recorderStatus
-  if ($recorderExit -ne 0) { throw "RGB capture recorder failed with exit code $recorderExit." }
   $bagExit = Wait-ProcessWithTimeout -Process $bag -TimeoutSeconds $waitSeconds -Name "raw ROS bag writer" -StatusPath $bagStatus
-  if ($bagExit -ne 0) { throw "Raw ROS bag writer failed with exit code $bagExit." }
+  if ($bagExit -ne 0) { throw "Combined raw bag/RGB writer failed with exit code $bagExit." }
   $rgb = Get-Content -LiteralPath (Join-Path $captureDir "rgb_video.json") -Raw | ConvertFrom-Json
   $bagMeta = Get-Content -LiteralPath (Join-Path $captureDir "bag_metadata.json") -Raw | ConvertFrom-Json
   if ($rgb.status -ne "complete") { throw "RGB capture did not complete." }
   if ($bagMeta.status -ne "complete") { throw "Raw bag capture did not complete." }
+  $cadencePath = Join-Path $captureDir "rgb_cadence.json"
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.rgb_cadence --recorder-frames (Join-Path $captureDir "rgb_frames.jsonl") --bag-metadata (Join-Path $captureDir "bag_metadata.json") --expected-fps ([string]$rgbFps) --target-stamp-seconds ([string]$duration) --output $cadencePath
+  if ($LASTEXITCODE -ne 0) { throw "RGB recorder/bag cadence validation failed." }
+  $rgbCadence = Get-Content -LiteralPath $cadencePath -Raw | ConvertFrom-Json
+  if ($rgbCadence.status -ne "complete") { throw "RGB recorder/bag cadence validation did not complete." }
   $cameraInfo = Get-Content -LiteralPath (Join-Path $captureDir "camera_info.json") -Raw | ConvertFrom-Json
   if ($cameraInfo.provenance -ne "configured_intrinsics" -or [bool]$cameraInfo.observed_ros_message) { throw "Configured camera intrinsics artifact is missing or has invalid provenance." }
 
@@ -127,7 +131,7 @@ try {
     manifest_version=2; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha
     rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; duration_s=$duration
     bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; topic_types=$bagMeta.topic_types; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
-    rgb=[ordered]@{ video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; camera_info_provenance="configured_intrinsics"; metadata="rgb_video.json"; frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s }
+    rgb=[ordered]@{ video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; camera_info_provenance="configured_intrinsics"; metadata="rgb_video.json"; cadence="rgb_cadence.json"; frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s }
     ground_truth=[ordered]@{ inventory_csv="inventory_ground_truth.csv"; inventory_json="inventory_ground_truth.json"; pose_topic="/sim/ground_truth/pose"; evaluation_only=$true }
     hashes=(Get-Content -LiteralPath (Join-Path $captureDir "experiment_hashes.json") -Raw | ConvertFrom-Json)
     software_versions="../software_versions.json"

@@ -14,6 +14,7 @@ from evaluation.rgb_video_recorder import (
     RawFrame,
     RgbVideoRecorder,
     _decode_image,
+    _decode_serialized_image,
     _load_ros_image_type,
 )
 
@@ -63,6 +64,19 @@ class RgbVideoRecorderTests(unittest.TestCase):
             bytes([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]),
         )
 
+    def test_serialized_rgb_decode_retains_cdr_buffer(self):
+        from tests.rosbag_transport_peer import _image
+
+        decoded = _decode_serialized_image(_image(2.0 + 1.0 / 30.0))
+        self.assertIsNotNone(decoded)
+        assert decoded is not None
+        stamp_s, frame_id, encoding, frame = decoded
+        self.assertAlmostEqual(stamp_s, 2.0 + 1.0 / 30.0)
+        self.assertEqual((frame_id, encoding), ("camera_optical_frame", "rgb8"))
+        self.assertEqual((frame.width, frame.height, frame.pixel_format), (4, 2, "rgb24"))
+        self.assertIsInstance(frame.data, memoryview)
+        self.assertEqual(bytes(frame.data), bytes((255, 0, 0)) * 8)
+
     def test_real_ros_recorder_constructs_without_numpy_or_camera_info_subscription(self):
         try:
             import rclpy
@@ -78,7 +92,7 @@ class RgbVideoRecorderTests(unittest.TestCase):
                 recorder = RgbVideoRecorder(
                     root / "out.mp4",
                     root / "metadata.json",
-                    duration_s=0.1,
+                    duration_s=2.0 / 30.0,
                     startup_timeout_s=1.0,
                 )
                 topics = {subscription.topic_name for subscription in recorder.node.subscriptions}
@@ -90,12 +104,14 @@ class RgbVideoRecorderTests(unittest.TestCase):
                 self.assertEqual(Image.__module__, "sensor_msgs.msg._image")
                 self.assertIs(sys.modules["sensor_msgs.msg._image"].Image, Image)
                 recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([255, 0, 0]) * 8, 0.0))
-                recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([0, 255, 0]) * 8, 0.1))
+                recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([0, 255, 0]) * 8, 1.0 / 30.0))
+                recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([0, 0, 255]) * 8, 2.0 / 30.0))
                 self.assertEqual(recorder.done_reason, "simulation_time_reached")
                 metadata = recorder.close()
                 self.assertEqual(metadata["status"], "complete")
                 self.assertEqual(metadata["completion_clock_source"], "image_header")
-                self.assertEqual(metadata["frame_count"], 2)
+                self.assertEqual(metadata["frame_count"], 3)
+                self.assertTrue(metadata["rgb_cadence"]["contiguous"])
                 self.assertEqual(metadata["encoder_returncode"], 0)
                 self.assertEqual(metadata["numpy_loaded"], numpy_was_loaded)
             finally:
@@ -158,7 +174,7 @@ class RgbVideoRecorderTests(unittest.TestCase):
                         "--metadata",
                         str(metadata_path),
                         "--duration-seconds",
-                        "0.1",
+                        str(2.0 / 30.0),
                         "--startup-timeout-seconds",
                         "20",
                     ],
@@ -188,6 +204,7 @@ class RgbVideoRecorderTests(unittest.TestCase):
                 self.assertEqual(metadata["frame_count"], 3)
                 self.assertEqual((metadata["width"], metadata["height"]), (1280, 720))
                 self.assertFalse(metadata["numpy_loaded"])
+                self.assertTrue(metadata["rgb_cadence"]["contiguous"])
                 self.assertGreater(output.stat().st_size, 0)
             finally:
                 for process in (publisher, recorder, router):

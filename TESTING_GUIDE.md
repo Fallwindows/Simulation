@@ -163,10 +163,10 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 Keep `walking_baseline.yaml` at 1280×720 for previews and routine tests. The production sensor capture uses native 3840×2160 RGB at 30 Hz with the same accepted LiDAR and 20.5-second walking trajectory:
 
 ```powershell
-.\scripts\capture_simulation.ps1 -Scenario config/scenarios/production_walking_4k.yaml -Headless
+.\scripts\capture_simulation.ps1 -Scenario config/scenarios/production_walking_4k.yaml -Realtime -Headless
 ```
 
-The completed capture must report 3840×2160 in `camera_info.json` and `rgb_video.json`; verify `capture_manifest.json` before using the bag or video downstream.
+`-Realtime` preserves 30 Hz simulation timestamps while the capture launcher limits simulation to 0.125× wall time so both independent raw 4K subscribers can drain each sample. The completed capture must report 3840×2160 in `camera_info.json` and `rgb_video.json`, and `rgb_cadence.json` must report a complete, matching 30 Hz common recorder/bag window. Verify `capture_manifest.json` before using the bag or video downstream.
 
 ## 15. Scenario switching
 

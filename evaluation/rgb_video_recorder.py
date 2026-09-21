@@ -12,11 +12,16 @@ from dataclasses import dataclass
 import importlib
 import importlib.machinery
 import json
+import queue
 from pathlib import Path
+import struct
+
+from simulator.capture.rgb_cadence import analyze_rgb_cadence
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 from typing import BinaryIO
@@ -27,6 +32,8 @@ SIM_CLOCK_START_TOLERANCE_S = 1.0
 POST_TARGET_GRACE_S = 1.0
 NOMINAL_FPS = 30.0
 FFMPEG_CLOSE_TIMEOUT_S = 30.0
+ENCODER_DRAIN_TIMEOUT_S = 120.0
+ENCODER_QUEUE_DEPTH = 30
 ENCODER_PRESET = "fast"
 ENCODER_CRF = 18
 
@@ -36,7 +43,15 @@ class RawFrame:
     width: int
     height: int
     pixel_format: str
-    data: bytes
+    data: bytes | memoryview
+
+
+@dataclass(frozen=True, slots=True)
+class QueuedFrame:
+    frame: RawFrame
+    stamp_s: float
+    frame_id: str
+    encoding: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +179,94 @@ def _decode_image(message) -> RawFrame | None:
             ]
         packed = bytes(packed_buffer)
     return RawFrame(width=width, height=height, pixel_format=pixel_format, data=packed)
+
+
+def _decode_serialized_image(payload: bytes) -> tuple[float, str, str, RawFrame] | None:
+    """Read the fixed sensor_msgs/Image CDR fields while retaining its data buffer."""
+
+    view = memoryview(payload).cast("B")
+    if len(view) < 16:
+        return None
+    representation = bytes(view[:2])
+    byte_order = "<" if representation == b"\x00\x01" else ">" if representation == b"\x00\x00" else None
+    if byte_order is None:
+        return None
+    offset = 4
+
+    def align(size: int) -> None:
+        nonlocal offset
+        offset += -offset % size
+
+    def u32() -> int:
+        nonlocal offset
+        align(4)
+        if offset + 4 > len(view):
+            raise ValueError("truncated uint32")
+        value = struct.unpack_from(f"{byte_order}I", view, offset)[0]
+        offset += 4
+        return value
+
+    def i32() -> int:
+        nonlocal offset
+        align(4)
+        if offset + 4 > len(view):
+            raise ValueError("truncated int32")
+        value = struct.unpack_from(f"{byte_order}i", view, offset)[0]
+        offset += 4
+        return value
+
+    def string() -> str:
+        nonlocal offset
+        length = u32()
+        if length < 1 or offset + length > len(view) or view[offset + length - 1] != 0:
+            raise ValueError("invalid CDR string")
+        value = bytes(view[offset : offset + length - 1]).decode("utf-8")
+        offset += length
+        return value
+
+    try:
+        seconds = i32()
+        nanoseconds = u32()
+        if nanoseconds >= 1_000_000_000:
+            return None
+        stamp_s = float(seconds) + float(nanoseconds) / 1_000_000_000.0
+        frame_id = string()
+        height = u32()
+        width = u32()
+        encoding = string()
+        if offset >= len(view):
+            return None
+        offset += 1  # is_bigendian
+        step = u32()
+        data_length = u32()
+    except (UnicodeDecodeError, ValueError, struct.error):
+        return None
+    layouts = {
+        "mono8": (1, "gray"), "8uc1": (1, "gray"),
+        "rgb8": (3, "rgb24"), "bgr8": (3, "bgr24"), "8uc3": (3, "bgr24"),
+        "rgba8": (4, "rgba"), "bgra8": (4, "bgra"), "8uc4": (4, "bgra"),
+    }
+    layout = layouts.get(encoding.strip().lower())
+    if layout is None or width <= 0 or height <= 0:
+        return None
+    channels, pixel_format = layout
+    packed_row_bytes = width * channels
+    required_bytes = step * height
+    if step < packed_row_bytes or data_length < required_bytes or offset + data_length > len(view):
+        return None
+    source = view[offset : offset + required_bytes]
+    if step == packed_row_bytes:
+        packed: bytes | memoryview = source
+    else:
+        packed_buffer = bytearray(packed_row_bytes * height)
+        for row in range(height):
+            source_start = row * step
+            target_start = row * packed_row_bytes
+            packed_buffer[target_start : target_start + packed_row_bytes] = source[
+                source_start : source_start + packed_row_bytes
+            ]
+        packed = bytes(packed_buffer)
+    return stamp_s, frame_id, encoding, RawFrame(width, height, pixel_format, packed)
 
 
 class FfmpegVideoWriter:
@@ -317,26 +420,30 @@ class RgbVideoRecorder:
         frames_path: Path | None = None,
         camera_info_path: Path | None = None,
         ffmpeg_executable: str = "ffmpeg",
+        expected_fps: float = NOMINAL_FPS,
+        subscribe: bool = True,
     ):
         if camera_info_path is not None:
             raise RuntimeError(
                 "--camera-info-json cannot subscribe under the active policy; "
                 "use the configured-intrinsics artifact produced by capture metadata export"
         )
-        import rclpy
-
-        self.rclpy = rclpy
+        self.rclpy = None
         self.output = output
         self.metadata_path = metadata_path
         self.frames_path = frames_path
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
         self.ffmpeg_executable = ffmpeg_executable
+        self.expected_fps = float(expected_fps)
+        if self.expected_fps <= 0.0:
+            raise ValueError("expected_fps must be positive")
         self.started_wall = time.monotonic()
         self.target_s: float | None = None
         self.post_target_deadline: float | None = None
         self.first_image_stamp_s: float | None = None
         self.last_image_stamp_s: float | None = None
+        self.last_received_stamp_s: float | None = None
         self.frames_written = 0
         self.invalid_frames = 0
         self.duplicate_frames = 0
@@ -351,36 +458,95 @@ class RgbVideoRecorder:
         self.encoder_returncode: int | None = None
         self.fatal_error = False
         self.frame_records: list[dict[str, object]] = []
-        Image = _load_ros_image_type()
-        self.node = _create_recorder_node()
-        try:
-            self.node.create_subscription(Image, RGB_TOPIC, self._on_image, 5)
-        except BaseException:
-            self.node.destroy_node()
-            raise
+        self.encoder_queue_overflows = 0
+        self.encoder_queue_high_watermark = 0
+        self._encoder_queue: queue.Queue[QueuedFrame | None] = queue.Queue(maxsize=ENCODER_QUEUE_DEPTH)
+        self._closed_metadata: dict[str, object] | None = None
+        self.node = None
+        if subscribe:
+            import rclpy
+            from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+            self.rclpy = rclpy
+            Image = _load_ros_image_type()
+            self.node = _create_recorder_node()
+            try:
+                qos = QoSProfile(history=HistoryPolicy.KEEP_ALL, reliability=ReliabilityPolicy.RELIABLE)
+                self.node.create_subscription(Image, RGB_TOPIC, self._on_image, qos, raw=True)
+            except BaseException:
+                self.node.destroy_node()
+                raise
+        self._encoder_thread = threading.Thread(
+            target=self._encode_frames,
+            name="rgb-ffmpeg-writer",
+            daemon=True,
+        )
+        self._encoder_thread.start()
 
     def _open_writer(self, frame: RawFrame) -> bool:
         self.width = frame.width
         self.height = frame.height
-        self.writer = FfmpegVideoWriter(self.output, self.ffmpeg_executable)
+        self.writer = FfmpegVideoWriter(self.output, self.ffmpeg_executable, self.expected_fps)
         if self.writer.open(frame):
             return True
         self.encoder_error = self.writer.error
         return False
 
+    def _encode_frames(self) -> None:
+        while True:
+            queued = self._encoder_queue.get()
+            try:
+                if queued is None:
+                    return
+                frame = queued.frame
+                if self.writer is None and not self._open_writer(frame):
+                    self.done_reason = "video_writer_unavailable"
+                    self.fatal_error = True
+                    continue
+                assert self.writer is not None
+                if not self.writer.write(frame):
+                    self.encoder_error = self.writer.error
+                    self.done_reason = "video_writer_error"
+                    self.fatal_error = True
+                    continue
+                self.last_image_stamp_s = queued.stamp_s
+                if self.first_image_stamp_s is None:
+                    self.first_image_stamp_s = queued.stamp_s
+                    self.encoding = queued.encoding
+                self.frames_written += 1
+                self.frame_records.append({
+                    "frame_index": self.frames_written - 1,
+                    "stamp_s": queued.stamp_s,
+                    "frame_id": queued.frame_id,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "encoding": queued.encoding,
+                })
+            finally:
+                self._encoder_queue.task_done()
+
     def _on_image(self, message) -> None:
-        stamp = _stamp(message)
-        if self.last_image_stamp_s is not None:
-            if stamp == self.last_image_stamp_s:
+        if isinstance(message, (bytes, bytearray, memoryview)):
+            decoded = _decode_serialized_image(message)
+            if decoded is None:
+                self.invalid_frames += 1
+                return
+            stamp, frame_id, encoding, frame = decoded
+        else:
+            stamp = _stamp(message)
+            frame = _decode_image(message)
+            if frame is None:
+                self.invalid_frames += 1
+                return
+            frame_id = str(message.header.frame_id)
+            encoding = str(message.encoding)
+        if self.last_received_stamp_s is not None:
+            if stamp == self.last_received_stamp_s:
                 self.duplicate_frames += 1
                 return
-            if stamp < self.last_image_stamp_s:
+            if stamp < self.last_received_stamp_s:
                 self.out_of_order_frames += 1
                 return
-        frame = _decode_image(message)
-        if frame is None:
-            self.invalid_frames += 1
-            return
         if self.target_s is None:
             if stamp <= SIM_CLOCK_START_TOLERANCE_S:
                 self.target_s = self.duration_s
@@ -392,34 +558,32 @@ class RgbVideoRecorder:
                 self.post_target_deadline = time.monotonic() + POST_TARGET_GRACE_S
                 self.done_reason = "simulation_time_reached"
             return
-        if self.writer is None and not self._open_writer(frame):
-            self.done_reason = "video_writer_unavailable"
+        queued = QueuedFrame(
+            frame=frame,
+            stamp_s=stamp,
+            frame_id=frame_id,
+            encoding=encoding,
+        )
+        try:
+            self._encoder_queue.put_nowait(queued)
+        except queue.Full:
+            self.encoder_queue_overflows += 1
+            self.done_reason = "encoder_queue_overflow"
             self.fatal_error = True
             return
-        assert self.writer is not None
-        if not self.writer.write(frame):
-            self.encoder_error = self.writer.error
-            self.done_reason = "video_writer_error"
-            self.fatal_error = True
-            return
-        self.last_image_stamp_s = stamp
-        if self.first_image_stamp_s is None:
-            self.first_image_stamp_s = stamp
-            self.encoding = str(message.encoding)
-        self.frames_written += 1
-        self.frame_records.append({
-            "frame_index": self.frames_written - 1,
-            "stamp_s": stamp,
-            "frame_id": str(message.header.frame_id),
-            "width": int(message.width),
-            "height": int(message.height),
-            "encoding": str(message.encoding),
-        })
-        if stamp >= self.target_s - 1e-3 and self.post_target_deadline is None:
+        self.last_received_stamp_s = stamp
+        self.encoder_queue_high_watermark = max(
+            self.encoder_queue_high_watermark,
+            self._encoder_queue.qsize(),
+        )
+        target_tail_allowance_s = 1.0 / self.expected_fps + min(0.001, 0.1 / self.expected_fps)
+        if stamp >= self.target_s - target_tail_allowance_s and self.post_target_deadline is None:
             self.post_target_deadline = time.monotonic() + POST_TARGET_GRACE_S
             self.done_reason = "simulation_time_reached"
 
     def spin_until_done(self) -> None:
+        if self.rclpy is None or self.node is None:
+            raise RuntimeError("spin_until_done requires a live ROS subscription")
         while self.rclpy.ok():
             if self.fatal_error:
                 break
@@ -432,6 +596,16 @@ class RgbVideoRecorder:
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def close(self) -> dict[str, object]:
+        if self._closed_metadata is not None:
+            if self._closed_metadata["status"] != "complete":
+                raise RuntimeError(f"RGB video recording failed: {self._closed_metadata}")
+            return self._closed_metadata
+        self._encoder_queue.put(None)
+        self._encoder_thread.join(timeout=ENCODER_DRAIN_TIMEOUT_S)
+        if self._encoder_thread.is_alive():
+            self.encoder_error = f"FFmpeg queue did not drain within {ENCODER_DRAIN_TIMEOUT_S:g} seconds"
+            self.done_reason = "encoder_drain_timeout"
+            self.fatal_error = True
         if self.writer is not None:
             encoder_result = self.writer.close()
             self.encoder_returncode = encoder_result.returncode
@@ -445,6 +619,11 @@ class RgbVideoRecorder:
             duration_s = self.last_image_stamp_s - self.first_image_stamp_s
             if duration_s > 0 and self.frames_written > 1:
                 actual_fps = (self.frames_written - 1) / duration_s
+        cadence = analyze_rgb_cadence(
+            [float(record["stamp_s"]) for record in self.frame_records],
+            self.expected_fps,
+            target_stamp_s=self.target_s,
+        )
         complete = (
             self.frames_written > 0
             and self.done_reason == "simulation_time_reached"
@@ -454,6 +633,9 @@ class RgbVideoRecorder:
             and self.encoder_error is None
             and self.encoder_returncode == 0
             and file_size > 0
+            and cadence["contiguous"]
+            and self.encoder_queue_overflows == 0
+            and not self._encoder_thread.is_alive()
         )
         metadata = {
             "status": "complete" if complete else "failed",
@@ -469,7 +651,7 @@ class RgbVideoRecorder:
             "input_pixel_format": self.writer.pixel_format if self.writer is not None else None,
             "width": self.width,
             "height": self.height,
-            "nominal_fps": NOMINAL_FPS,
+            "nominal_fps": self.expected_fps,
             "actual_fps_from_ros_timestamps": actual_fps,
             "frame_count": self.frames_written,
             "duration_s": duration_s,
@@ -478,6 +660,7 @@ class RgbVideoRecorder:
             "target_sim_time_s": self.target_s,
             "last_clock_s": None,
             "completion_clock_source": "image_header",
+            "input_source": "raw_ros_topic" if self.node is not None else "shared_raw_cdr_subscription",
             "numpy_loaded": "numpy" in sys.modules,
             "encoding": self.encoding,
             "invalid_frames": self.invalid_frames,
@@ -486,7 +669,14 @@ class RgbVideoRecorder:
             "frames_after_target": self.frames_after_target,
             "file_size_bytes": file_size,
             "completion_reason": self.done_reason,
+            "subscription_serialization": "raw_cdr",
+            "subscription_qos": "reliable_keep_all" if self.node is not None else None,
+            "encoder_queue_depth": ENCODER_QUEUE_DEPTH,
+            "encoder_queue_high_watermark": self.encoder_queue_high_watermark,
+            "encoder_queue_overflows": self.encoder_queue_overflows,
+            "rgb_cadence": cadence,
         }
+        self._closed_metadata = metadata
         self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         if self.frames_path is not None:
@@ -508,6 +698,7 @@ def main() -> None:
     parser.add_argument("--frames-jsonl", default="")
     parser.add_argument("--camera-info-json", default="")
     parser.add_argument("--ffmpeg-executable", default="ffmpeg")
+    parser.add_argument("--expected-fps", type=float, default=NOMINAL_FPS)
     args = parser.parse_args()
     if args.camera_info_json:
         parser.error(
@@ -515,7 +706,6 @@ def main() -> None:
             "capture metadata export provides configured camera intrinsics"
         )
     import rclpy
-
     rclpy.init()
     recorder = None
     try:
@@ -527,6 +717,7 @@ def main() -> None:
             Path(args.frames_jsonl) if args.frames_jsonl else None,
             None,
             args.ffmpeg_executable,
+            args.expected_fps,
         )
         try:
             recorder.spin_until_done()
@@ -541,7 +732,7 @@ def main() -> None:
             raise
         recorder.close()
     finally:
-        if recorder is not None:
+        if recorder is not None and recorder.node is not None:
             recorder.node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
