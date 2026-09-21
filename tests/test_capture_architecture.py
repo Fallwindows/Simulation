@@ -6,7 +6,14 @@ from pathlib import Path
 from evaluation.metrics import PoseSample, compute_metrics, interpolate_pose
 from simulator.capture.inventory import export_inventory
 from simulator.capture.export_metadata import export_metadata
-from simulator.capture.manifest import CAPTURE_MANIFEST_VERSION, build_experiment_hashes, validate_capture_for_slam
+from simulator.capture.manifest import (
+    CAPTURE_MANIFEST_VERSION,
+    capture_hash,
+    build_experiment_hashes,
+    finalize_capture_manifest,
+    validate_capture_for_slam,
+    validate_capture_manifest_hash,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +21,36 @@ SCENARIO = ROOT / "config/scenarios/baseline_straight.yaml"
 
 
 class CaptureArchitectureTests(unittest.TestCase):
+    def test_capture_manifest_finalizer_is_bom_free_canonical_and_tamper_evident(self):
+        manifest = {
+            "status": "complete",
+            "manifest_version": CAPTURE_MANIFEST_VERSION,
+            "capture_id": "fixture-capture",
+            "git_sha": "1" * 40,
+            "bag": {"topics": ["/clock"]},
+            "rgb": {"frame_count": 3},
+            "files": [{"path": "rgb_camera.mp4", "sha256": "2" * 64, "size_bytes": 12}],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging.json"
+            output = root / "capture_manifest.json"
+            reversed_manifest = dict(reversed(list(manifest.items())))
+            staging.write_bytes(b"\xef\xbb\xbf" + json.dumps(reversed_manifest).encode("utf-8"))
+            finalized = finalize_capture_manifest(staging, output)
+
+            self.assertFalse(output.read_bytes().startswith(b"\xef\xbb\xbf"))
+            strict = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(strict, finalized)
+            self.assertEqual(strict["capture_sha256"], capture_hash(manifest))
+            self.assertEqual(validate_capture_manifest_hash(strict), strict["capture_sha256"])
+            self.assertEqual(capture_hash(reversed_manifest), capture_hash(manifest))
+
+            tampered = dict(strict)
+            tampered["capture_id"] = "tampered"
+            self.assertNotEqual(capture_hash(tampered), strict["capture_sha256"])
+            with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                validate_capture_manifest_hash(tampered)
     def test_capture_metadata_exports_configured_camera_intrinsics_with_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

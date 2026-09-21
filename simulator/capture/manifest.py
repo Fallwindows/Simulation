@@ -152,6 +152,56 @@ def capture_hash(manifest_without_hash: dict[str, Any]) -> str:
     return sha256_json(payload)
 
 
+def validate_capture_manifest_hash(manifest: dict[str, Any]) -> str:
+    """Return the canonical capture hash or reject a malformed/mismatched manifest."""
+
+    if int(manifest.get("manifest_version", -1)) != CAPTURE_MANIFEST_VERSION:
+        raise ValueError("unsupported capture manifest version")
+    if manifest.get("status") != "complete":
+        raise ValueError("capture manifest is not complete")
+    for key in ("capture_id", "git_sha", "bag", "rgb", "files"):
+        if key not in manifest:
+            raise ValueError(f"capture manifest is missing required field: {key}")
+    declared = manifest.get("capture_sha256")
+    if not isinstance(declared, str) or len(declared) != 64:
+        raise ValueError("capture manifest lacks a full capture_sha256")
+    expected = capture_hash(manifest)
+    if declared.lower() != expected:
+        raise ValueError(f"capture manifest hash mismatch: declared {declared}, canonical {expected}")
+    return expected
+
+
+def finalize_capture_manifest(staging_path: str | Path, output_path: str | Path) -> dict[str, Any]:
+    """Canonicalize an unhashed v2 staging manifest and write BOM-free UTF-8.
+
+    PowerShell 5.1 staging files may contain a UTF-8 BOM, so only this staging
+    boundary accepts ``utf-8-sig``. The final file is emitted through
+    :func:`write_json` and is immediately re-read as strict UTF-8.
+    """
+
+    staging = Path(staging_path)
+    output = Path(output_path)
+    value = json.loads(staging.read_text(encoding="utf-8-sig"))
+    if not isinstance(value, dict):
+        raise ValueError("capture manifest staging input must be a JSON object")
+    if int(value.get("manifest_version", -1)) != CAPTURE_MANIFEST_VERSION:
+        raise ValueError("unsupported capture manifest version")
+    if value.get("status") != "complete":
+        raise ValueError("capture manifest staging input is not complete")
+    finalized = dict(value)
+    finalized.pop("capture_sha256", None)
+    finalized["capture_sha256"] = capture_hash(finalized)
+    temporary = output.with_name(f"{output.name}.tmp")
+    try:
+        write_json(temporary, finalized)
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    decoded = json.loads(output.read_text(encoding="utf-8"))
+    validate_capture_manifest_hash(decoded)
+    return decoded
+
+
 def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate the sensor-only interface required by offline SLAM.
 

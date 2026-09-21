@@ -177,3 +177,14 @@ remaining blocker: [setup report](review/setup-20260920/report.md).
   exit `0` is accepted, exit `7` propagates unchanged, and an absent sentinel is
   rejected rather than treated as success. The functional native r2 smoke bag
   remained valid; this correction addresses only wrapper completion reporting.
+
+### Canonical capture-manifest finalization
+
+- The production wrapper now stages the unhashed manifest outside `capture/`
+  and invokes `simulator.capture.manifest` through trusted Pixi Python. The
+  finalizer accepts PowerShell's BOM only on staging input, computes the shared
+  `capture_hash`, and writes canonical BOM-free UTF-8 before a separate verify
+  command succeeds and `CAPTURE_COMPLETE` is created.
+- Tests prove strict UTF-8 JSON readability, declared/canonical hash equality,
+  deterministic hashes across key order, and rejection after tampering. The
+  prior order-dependent inline PowerShell checksum was removed.

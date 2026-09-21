@@ -133,9 +133,17 @@ try {
     software_versions="../software_versions.json"
     files=$files
   }
-  $canonical = $manifest | ConvertTo-Json -Depth 20 -Compress
-  $manifest.capture_sha256 = ([System.BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace("-","")).ToLowerInvariant()
-  $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $captureDir "capture_manifest.json") -Encoding UTF8
+  $manifestPath = Join-Path $captureDir "capture_manifest.json"
+  $stagingManifest = Join-Path $runDir "capture_manifest.staging.json"
+  try {
+    $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $stagingManifest -Encoding UTF8
+    & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.finalize_manifest finalize --staging $stagingManifest --output $manifestPath
+    if ($LASTEXITCODE -ne 0) { throw "Capture manifest finalization failed." }
+    & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.finalize_manifest verify --manifest $manifestPath
+    if ($LASTEXITCODE -ne 0) { throw "Capture manifest verification failed." }
+  } finally {
+    Remove-Item -LiteralPath $stagingManifest -Force -ErrorAction SilentlyContinue
+  }
   New-Item -ItemType File -Force -Path (Join-Path $captureDir "CAPTURE_COMPLETE") | Out-Null
   Write-Host "Capture complete: $captureDir"
 } finally {

@@ -142,6 +142,10 @@ class ContractTests(unittest.TestCase):
         self.assertIn('"--end-clock-seconds",([string]$duration)', capture)
         self.assertIn('$recorderExit -ne 0', capture)
         self.assertIn('$bagExit -ne 0', capture)
+        self.assertIn("simulator.capture.finalize_manifest finalize", capture)
+        self.assertIn("simulator.capture.finalize_manifest verify", capture)
+        self.assertNotIn("Security.Cryptography.SHA256", capture)
+        self.assertLess(capture.index("finalize_manifest verify"), capture.index('New-Item -ItemType File -Force -Path (Join-Path $captureDir "CAPTURE_COMPLETE")'))
 
     def test_redirected_process_status_distinguishes_success_failure_and_unavailable(self):
         root = Path(__file__).resolve().parents[1]
