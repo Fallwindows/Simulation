@@ -24,6 +24,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+SHOPPER_CART_START_X_M = 11.5
+SHOPPER_CART_CRUISE_SPEED_MPS = 0.65
+SHOPPER_CART_DECEL_START_S = 17.75
+SHOPPER_CART_STOP_S = 20.5
+# Furthest authored local-X extent: basket-end center 1.13 m + 0.0125 m half-width.
+SHOPPER_CART_FRONT_OFFSET_M = 1.1425
+
+
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the grocery aisle Isaac Sim sensor runtime")
     parser.add_argument("--scenario", default=str(REPO_ROOT / "config/scenarios/walking_baseline.yaml"))
@@ -112,9 +120,22 @@ def shopper_cart_position_at_time(timestamp_s: float) -> tuple[float, float, flo
 
     if not math.isfinite(timestamp_s) or timestamp_s < 0.0:
         raise ValueError("timestamp_s must be finite and non-negative")
-    # The actor stays ahead of the 1 m/s sensor rig for the complete 20.5 s
-    # walk, then exits into the cross-aisle beyond the stocked shelf run.
-    return (11.5 + 0.65 * timestamp_s, 0.0, 0.0)
+    if timestamp_s <= SHOPPER_CART_DECEL_START_S:
+        x_m = SHOPPER_CART_START_X_M + SHOPPER_CART_CRUISE_SPEED_MPS * timestamp_s
+    else:
+        # Integrate a smoothstep velocity ramp from cruise speed to rest.  The
+        # clamped phase keeps the complete assembly stationary after the
+        # production horizon without a position, velocity, or acceleration
+        # discontinuity at either end of the stop.
+        stop_duration_s = SHOPPER_CART_STOP_S - SHOPPER_CART_DECEL_START_S
+        phase = min((timestamp_s - SHOPPER_CART_DECEL_START_S) / stop_duration_s, 1.0)
+        integrated_velocity = phase - phase**3 + 0.5 * phase**4
+        x_m = (
+            SHOPPER_CART_START_X_M
+            + SHOPPER_CART_CRUISE_SPEED_MPS * SHOPPER_CART_DECEL_START_S
+            + SHOPPER_CART_CRUISE_SPEED_MPS * stop_duration_s * integrated_velocity
+        )
+    return (x_m, 0.0, 0.0)
 
 
 def _preview_material(stage, path: str, color, roughness: float, metallic: float = 0.0):
