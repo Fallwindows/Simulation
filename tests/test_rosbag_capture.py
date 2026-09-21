@@ -73,7 +73,10 @@ class RosbagCaptureTests(unittest.TestCase):
         first = {topic: 0.05 for topic in TOPIC_TYPES}
         last = {topic: 0.05 for topic in TOPIC_TYPES}
 
-        with patch("simulator.capture.rosbag_capture._bag_observations", return_value=(counts, first, last)):
+        writer.expected_rgb_fps = 30.0
+        writer.expected_rgb_start_s = 0.0
+        writer.max_rgb_startup_delay_s = 0.1
+        with patch("simulator.capture.rosbag_capture._bag_observations", return_value=(counts, first, last, [0.05])):
             metadata = writer.close()
 
         self.assertEqual(metadata["status"], "incomplete")
@@ -94,6 +97,9 @@ class RosbagCaptureTests(unittest.TestCase):
             bag = root / "captured"
             source = root / "source"
             metadata_path = root / "bag_metadata.json"
+            rgb_path = root / "rgb.mp4"
+            rgb_metadata_path = root / "rgb.json"
+            rgb_frames_path = root / "rgb_frames.jsonl"
             environment = os.environ.copy()
             environment["RMW_IMPLEMENTATION"] = "rmw_zenoh_cpp"
             environment["ROS_DOMAIN_ID"] = str(200 + os.getpid() % 20)
@@ -120,13 +126,21 @@ class RosbagCaptureTests(unittest.TestCase):
                         "--metadata",
                         str(metadata_path),
                         "--duration-seconds",
-                        "2.1",
+                        str(2.0 + 2.0 / 30.0),
                         "--end-clock-seconds",
-                        "2.1",
+                        str(2.0 + 2.0 / 30.0),
                         "--startup-timeout-seconds",
                         "20",
                         "--post-target-wall-seconds",
                         "0.5",
+                        "--expected-rgb-start-seconds",
+                        "2.0",
+                        "--rgb-video",
+                        str(rgb_path),
+                        "--rgb-metadata",
+                        str(rgb_metadata_path),
+                        "--rgb-frames-jsonl",
+                        str(rgb_frames_path),
                     ],
                     cwd=Path(__file__).resolve().parents[1],
                     env=environment,
@@ -161,12 +175,24 @@ class RosbagCaptureTests(unittest.TestCase):
                 self.assertEqual(metadata["counts"]["/tf_static"], 1)
                 self.assertEqual(metadata["missing_topics"], [])
                 self.assertAlmostEqual(metadata["first_clock_s"], 2.0)
-                self.assertAlmostEqual(metadata["last_clock_s"], 2.1)
-                self.assertEqual(metadata["target_clock_s"], 2.1)
+                self.assertAlmostEqual(metadata["last_clock_s"], 2.0 + 2.0 / 30.0)
+                self.assertAlmostEqual(metadata["target_clock_s"], 2.0 + 2.0 / 30.0)
                 self.assertTrue(metadata["target_reached"])
                 self.assertEqual(metadata["capture_window_mode"], "absolute_simulation_horizon")
                 self.assertIsNone(metadata["failure_reason"])
                 self.assertFalse(metadata["numpy_loaded"])
+                self.assertEqual(metadata["subscription_serialization"], "raw_cdr")
+                self.assertTrue(metadata["rgb_cadence"]["contiguous"])
+                rgb_metadata = json.loads(rgb_metadata_path.read_text(encoding="utf-8"))
+                self.assertEqual(rgb_metadata["status"], "complete")
+                self.assertEqual(rgb_metadata["input_source"], "shared_raw_cdr_subscription")
+                self.assertEqual(rgb_metadata["frame_count"], metadata["counts"]["/sim/camera/rgb/image_raw"])
+                bag_stamps = metadata["rgb_cadence"]["stamps_s"]
+                video_stamps = [
+                    json.loads(line)["stamp_s"]
+                    for line in rgb_frames_path.read_text(encoding="utf-8").splitlines()
+                ]
+                self.assertEqual(video_stamps, bag_stamps)
                 self.assertNotIn("/sim/camera/rgb/camera_info", metadata["topics"])
 
                 bag_info = subprocess.run(

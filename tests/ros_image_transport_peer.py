@@ -23,7 +23,7 @@ def publish(topic: str) -> None:
                 raise RuntimeError("publisher did not discover the recorder subscription")
             rclpy.spin_once(node, timeout_sec=0.1)
 
-        for index, stamp_s in enumerate((2.0, 2.05, 2.1)):
+        for index, stamp_s in enumerate((2.0, 2.0 + 1.0 / 30.0, 2.0 + 2.0 / 30.0)):
             message = Image()
             message.header.stamp.sec = int(stamp_s)
             message.header.stamp.nanosec = int(round((stamp_s - int(stamp_s)) * 1_000_000_000))

@@ -30,6 +30,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--frames", type=int, default=0, help="Simulation frames; 0 derives the count from the trajectory duration")
     parser.add_argument("--headless", action="store_true", help="Run without the Isaac Sim viewport")
     parser.add_argument("--realtime", action="store_true", help="Pace the simulation at 60 Hz for external ROS/dashboard consumers")
+    parser.add_argument("--realtime-factor", type=float, default=1.0, help="Maximum simulation/wall-time ratio when --realtime is enabled")
     parser.add_argument("--renderer", default="RaytracedLighting")
     parser.add_argument("--status-path", default=str(REPO_ROOT / "runs/isaac_runtime_status.json"))
     return parser.parse_args()
@@ -205,6 +206,17 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
 
     keys = og.Controller.Keys
     step = max(1, round(60.0 / float(fps)))
+    publisher_queue_size = 120
+    rgb_qos_profile = json.dumps({
+        "history": "keepAll",
+        "depth": 0,
+        "reliability": "reliable",
+        "durability": "volatile",
+        "deadline": 0.0,
+        "lifespan": 0.0,
+        "liveliness": "systemDefault",
+        "leaseDuration": 0.0,
+    }, separators=(",", ":"))
     graph_path = "/GroceryCameraGraph"
     graph, _, _, _ = og.Controller.edit(
         {
@@ -234,6 +246,8 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
                 ("Rgb.inputs:topicName", "/sim/camera/rgb/image_raw"),
                 ("Rgb.inputs:type", "rgb"),
                 ("Rgb.inputs:frameSkipCount", step - 1),
+                ("Rgb.inputs:queueSize", publisher_queue_size),
+                ("Rgb.inputs:qosProfile", rgb_qos_profile),
                 ("CameraInfo.inputs:frameId", "camera_optical_frame"),
                 ("CameraInfo.inputs:topicName", "/sim/camera/rgb/camera_info"),
                 ("CameraInfo.inputs:frameSkipCount", step - 1),
@@ -241,7 +255,14 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
         },
     )
     og.Controller.evaluate_sync(graph)
-    return {"requested_fps": float(fps), "frame_skip_count": step - 1, "effective_fps": 60.0 / step, "mode": "ros2_camera_helper_frameSkipCount"}
+    return {
+        "requested_fps": float(fps),
+        "frame_skip_count": step - 1,
+        "effective_fps": 60.0 / step,
+        "publisher_queue_size": publisher_queue_size,
+        "publisher_qos": "reliable_keep_all",
+        "mode": "ros2_camera_helper_frameSkipCount",
+    }
 
 
 def _create_lidar(lidar_path: str, lidar_config, topic: str):
@@ -471,7 +492,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             _publish_tf(tf_pub, sample, timestamp_s)
             last_timestamp_s = timestamp_s
             if args.realtime:
-                time.sleep(max(0.0, (1.0 / 60.0) - (time.perf_counter() - wall_start)))
+                time.sleep(max(0.0, (simulation_dt_s / args.realtime_factor) - (time.perf_counter() - wall_start)))
 
         runtime_ok = True
         print("[grocery-runtime] simulation completed", flush=True)
@@ -495,6 +516,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "observed_rgb_frames": len(rgb_stamps),
             "observed_rgb_hz": (len(rgb_stamps) - 1) / (rgb_stamps[-1] - rgb_stamps[0]) if len(rgb_stamps) > 1 and rgb_stamps[-1] > rgb_stamps[0] else None,
             "clock_source": "Isaac timeline current_time",
+            "realtime_factor_limit": args.realtime_factor if args.realtime else None,
             "ros_callback_service": "MultiThreadedExecutor background thread",
             "timestamp_phase": {
                 "clock_reference": TOPICS["clock"],
@@ -579,6 +601,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
 def main() -> None:
     args = _args()
+    if not math.isfinite(args.realtime_factor) or not 0.0 < args.realtime_factor <= 1.0:
+        raise ValueError("--realtime-factor must be greater than zero and no more than one")
     status_path = Path(args.status_path)
     status_path.parent.mkdir(parents=True, exist_ok=True)
     result = run(args)

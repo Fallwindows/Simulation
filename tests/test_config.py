@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from simulator.config.loader import load_contracts, load_scenario
@@ -19,6 +20,26 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(scenario.camera.width_px, 1280)
         self.assertGreater(scenario.environment.length_m, scenario.environment.bay_width_m)
         self.assertEqual(scenario.trajectory.name, "straight")
+
+    def test_production_walking_uses_4k_rgb_with_accepted_lidar_and_motion(self):
+        preview = load_scenario(ROOT / "config/scenarios/walking_baseline.yaml")
+        production = load_scenario(ROOT / "config/scenarios/production_walking_4k.yaml")
+
+        self.assertEqual(
+            (preview.camera.width_px, preview.camera.height_px, preview.camera.fps),
+            (1280, 720, 30.0),
+        )
+        self.assertEqual(
+            (production.camera.width_px, production.camera.height_px, production.camera.fps),
+            (3840, 2160, 30.0),
+        )
+        self.assertEqual(
+            production.camera,
+            replace(preview.camera, width_px=3840, height_px=2160),
+        )
+        self.assertEqual(production.lidar, preview.lidar)
+        self.assertEqual(production.trajectory, preview.trajectory)
+        self.assertEqual(production.trajectory.duration_s, 20.5)
 
     def test_invalid_density_is_rejected(self):
         import tempfile

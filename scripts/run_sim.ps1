@@ -5,6 +5,7 @@ param(
   [string]$RosWorkspace = "",
   [int]$Frames = 0,
   [switch]$Realtime,
+  [double]$RealtimeFactor = 1.0,
   [string]$StatusPath = "",
   [switch]$PreflightOnly,
   [switch]$StartZenohRouter,
@@ -13,6 +14,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 if ($Gui -and $Headless) { throw "Choose either -Gui or -Headless, not both." }
+if ($RealtimeFactor -le 0.0 -or $RealtimeFactor -gt 1.0) { throw "RealtimeFactor must be greater than zero and no more than one." }
 $pathHelper = Join-Path $PSScriptRoot "resolve_runtime_paths.ps1"
 . $pathHelper
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
@@ -53,7 +55,7 @@ $status = if ($StatusPath) { $StatusPath } else { Join-Path $repo "runs\isaac_ru
 $arguments = @($runtime, "--scenario", $scenarioPath, "--status-path", $status)
 if ($Frames -gt 0) { $arguments += @("--frames", $Frames) }
 if ($Headless) { $arguments += "--headless" }
-if ($Realtime) { $arguments += "--realtime" }
+if ($Realtime) { $arguments += @("--realtime", "--realtime-factor", ([string]$RealtimeFactor)) }
 Push-Location $repo
 try {
   & $IsaacPython @arguments

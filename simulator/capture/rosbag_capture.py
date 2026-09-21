@@ -12,11 +12,15 @@ import argparse
 import importlib
 import importlib.machinery
 import json
+import queue
 import struct
 import sys
+import threading
 import time
 import types
 from pathlib import Path
+
+from simulator.capture.rgb_cadence import analyze_rgb_cadence
 
 
 TOPIC_TYPES = {
@@ -154,11 +158,12 @@ def _serialized_stamp_s(topic: str, payload: bytes, last_clock_s: float | None) 
 def _bag_observations(
     output: Path,
     rosbag2_py,
-) -> tuple[dict[str, int], dict[str, float | None], dict[str, float | None]]:
+) -> tuple[dict[str, int], dict[str, float | None], dict[str, float | None], list[float]]:
     counts = {topic: 0 for topic in TOPIC_TYPES}
     first_stamps = {topic: None for topic in TOPIC_TYPES}
     last_stamps = {topic: None for topic in TOPIC_TYPES}
     last_clock_s: float | None = None
+    rgb_stamps_s: list[float] = []
     reader = rosbag2_py.SequentialReader()
     reader.open(
         rosbag2_py.StorageOptions(uri=str(output), storage_id="sqlite3"),
@@ -177,7 +182,9 @@ def _bag_observations(
             first_stamps[topic] = stamp_s
         if stamp_s is not None:
             last_stamps[topic] = stamp_s
-    return counts, first_stamps, last_stamps
+            if topic == "/sim/camera/rgb/image_raw":
+                rgb_stamps_s.append(stamp_s)
+    return counts, first_stamps, last_stamps, rgb_stamps_s
 
 
 class RawCaptureWriter:
@@ -189,27 +196,38 @@ class RawCaptureWriter:
         post_target_wall_s: float = 2.0,
         capture_end_clock_s: float | None = None,
         clock_stall_timeout_s: float = 30.0,
+        expected_rgb_fps: float = 30.0,
+        rgb_recorder=None,
+        expected_rgb_start_s: float = 0.0,
+        max_rgb_startup_delay_s: float = 0.1,
     ):
         import rclpy
         import rosbag2_py
-        from rclpy.serialization import serialize_message
+        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
         message_types = _load_ros_message_types()
         self.rclpy = rclpy
         self.rosbag2_py = rosbag2_py
-        self.serialize_message = serialize_message
         self.output = Path(output)
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
         self.post_target_wall_s = float(post_target_wall_s)
         self.capture_end_clock_s = None if capture_end_clock_s is None else float(capture_end_clock_s)
         self.clock_stall_timeout_s = float(clock_stall_timeout_s)
+        self.expected_rgb_fps = float(expected_rgb_fps)
+        self.expected_rgb_start_s = float(expected_rgb_start_s)
+        self.max_rgb_startup_delay_s = float(max_rgb_startup_delay_s)
+        self.rgb_recorder = rgb_recorder
         if self.duration_s <= 0.0:
             raise ValueError("duration_s must be positive")
         if self.capture_end_clock_s is not None and self.capture_end_clock_s <= 0.0:
             raise ValueError("capture_end_clock_s must be positive")
         if self.clock_stall_timeout_s <= 0.0:
             raise ValueError("clock_stall_timeout_s must be positive")
+        if self.expected_rgb_fps <= 0.0:
+            raise ValueError("expected_rgb_fps must be positive")
+        if self.max_rgb_startup_delay_s < 0.0:
+            raise ValueError("max_rgb_startup_delay_s must be non-negative")
         self.started_wall = time.monotonic()
         self.first_clock_s: float | None = None
         self.last_clock_s: float | None = None
@@ -218,6 +236,10 @@ class RawCaptureWriter:
         self.target_wall_deadline: float | None = None
         self.target_reached = False
         self.failure_reason: str | None = None
+        self.bag_queue_overflows = 0
+        self.bag_queue_high_watermark = 0
+        self.bag_writer_error: str | None = None
+        self._bag_queue: queue.Queue[tuple[str, bytes, int] | None] = queue.Queue(maxsize=30)
         self._closed_result: dict[str, object] | None = None
 
         self.output.parent.mkdir(parents=True, exist_ok=True)
@@ -228,18 +250,43 @@ class RawCaptureWriter:
         )
         for topic_id, (topic, type_name) in enumerate(TOPIC_TYPES.items()):
             self.writer.create_topic(rosbag2_py.TopicMetadata(topic_id, topic, type_name, "cdr", []))
+        self._writer_thread = threading.Thread(target=self._write_records, name="sqlite3-bag-writer", daemon=True)
+        self._writer_thread.start()
 
         self.node = _create_observer_node()
         self.subscriptions = []
         for topic, message_type in message_types.items():
-            qos = 100 if topic in ("/clock", "/tf", "/tf_static") else 10
-            self.subscriptions.append(
-                self.node.create_subscription(message_type, topic, self._callback(topic), qos)
+            qos = (
+                QoSProfile(history=HistoryPolicy.KEEP_ALL, reliability=ReliabilityPolicy.RELIABLE)
+                if topic == "/sim/camera/rgb/image_raw"
+                else QoSProfile(
+                    history=HistoryPolicy.KEEP_LAST,
+                    depth=100 if topic in ("/clock", "/tf", "/tf_static") else 30,
+                    reliability=ReliabilityPolicy.RELIABLE,
+                )
             )
+            self.subscriptions.append(
+                self.node.create_subscription(message_type, topic, self._callback(topic), qos, raw=True)
+            )
+
+    def _write_records(self) -> None:
+        while True:
+            record = self._bag_queue.get()
+            try:
+                if record is None:
+                    return
+                topic, payload, timestamp_ns = record
+                self.writer.write(topic, payload, timestamp_ns)
+            except BaseException as exc:
+                self.bag_writer_error = f"{type(exc).__name__}: {exc}"
+                self.failure_reason = "bag_writer_error"
+            finally:
+                self._bag_queue.task_done()
 
     def _callback(self, topic: str):
         def receive(message) -> None:
-            stamp_s = _stamp_s(message)
+            payload = bytes(message)
+            stamp_s = _serialized_stamp_s(topic, payload, self.last_clock_s)
             if stamp_s is None:
                 stamp_s = self.last_clock_s or 0.0
             if topic == "/clock":
@@ -256,13 +303,22 @@ class RawCaptureWriter:
                 if self.target_clock_s is not None and stamp_s >= self.target_clock_s and self.target_wall_deadline is None:
                     self.target_reached = True
                     self.target_wall_deadline = time.monotonic() + self.post_target_wall_s
-            self.writer.write(topic, self.serialize_message(message), int(round(stamp_s * 1_000_000_000.0)))
+            if topic == "/sim/camera/rgb/image_raw" and self.rgb_recorder is not None:
+                self.rgb_recorder._on_image(payload)
+            try:
+                self._bag_queue.put_nowait((topic, payload, int(round(stamp_s * 1_000_000_000.0))))
+                self.bag_queue_high_watermark = max(self.bag_queue_high_watermark, self._bag_queue.qsize())
+            except queue.Full:
+                self.bag_queue_overflows += 1
+                self.failure_reason = "bag_queue_overflow"
 
         return receive
 
     def spin_until_done(self) -> None:
         while self.rclpy.ok():
             now = time.monotonic()
+            if self.failure_reason in ("bag_queue_overflow", "bag_writer_error"):
+                raise RuntimeError(f"raw capture failed: {self.failure_reason}")
             if self.target_wall_deadline is not None and now >= self.target_wall_deadline:
                 return
             if self.first_clock_s is None and now - self.started_wall >= self.startup_timeout_s:
@@ -290,15 +346,36 @@ class RawCaptureWriter:
         if getattr(self, "node", None) is not None:
             self.node.destroy_node()
             self.node = None
+        writer_thread = getattr(self, "_writer_thread", None)
+        if writer_thread is not None:
+            self._bag_queue.put(None)
+            writer_thread.join(timeout=120.0)
+            if writer_thread.is_alive():
+                self.failure_reason = "bag_writer_drain_timeout"
         if getattr(self, "writer", None) is not None:
             close_method = getattr(self.writer, "close", None)
             if callable(close_method):
                 close_method()
             self.writer = None
 
-        counts, first_stamps, last_stamps = _bag_observations(self.output, self.rosbag2_py)
+        counts, first_stamps, last_stamps, rgb_stamps_s = _bag_observations(self.output, self.rosbag2_py)
         missing = [topic for topic, count in counts.items() if count == 0]
-        complete = not missing and self.target_reached
+        rgb_cadence = analyze_rgb_cadence(
+            rgb_stamps_s,
+            self.expected_rgb_fps,
+            target_stamp_s=self.target_clock_s,
+            expected_start_stamp_s=self.expected_rgb_start_s,
+            max_startup_delay_s=self.max_rgb_startup_delay_s,
+        )
+        rgb_cadence["stamps_s"] = rgb_stamps_s
+        complete = (
+            not missing
+            and self.target_reached
+            and rgb_cadence["contiguous"]
+            and getattr(self, "bag_queue_overflows", 0) == 0
+            and getattr(self, "bag_writer_error", None) is None
+            and not (writer_thread is not None and writer_thread.is_alive())
+        )
         self._closed_result = {
             "status": "complete" if complete else "incomplete",
             "uri": self.output.name,
@@ -317,6 +394,13 @@ class RawCaptureWriter:
             "missing_topics": missing,
             "failure_reason": self.failure_reason,
             "numpy_loaded": "numpy" in sys.modules,
+            "subscription_serialization": "raw_cdr",
+            "subscription_qos": "reliable_keep_all_rgb_keep_last_depth_30_lidar_100_control",
+            "rgb_cadence": rgb_cadence,
+            "writer_queue_depth": 30,
+            "writer_queue_high_watermark": getattr(self, "bag_queue_high_watermark", 0),
+            "writer_queue_overflows": getattr(self, "bag_queue_overflows", 0),
+            "writer_error": getattr(self, "bag_writer_error", None),
         }
         return self._closed_result
 
@@ -330,12 +414,41 @@ def main() -> None:
     parser.add_argument("--end-clock-seconds", type=float)
     parser.add_argument("--clock-stall-timeout-seconds", type=float, default=30.0)
     parser.add_argument("--metadata", required=True)
+    parser.add_argument("--expected-rgb-fps", type=float, default=30.0)
+    parser.add_argument("--expected-rgb-start-seconds", type=float, default=0.0)
+    parser.add_argument("--max-rgb-startup-delay-seconds", type=float, default=0.1)
+    parser.add_argument("--rgb-video", default="")
+    parser.add_argument("--rgb-metadata", default="")
+    parser.add_argument("--rgb-frames-jsonl", default="")
+    parser.add_argument("--ffmpeg-executable", default="ffmpeg")
     args = parser.parse_args()
+    rgb_outputs = (args.rgb_video, args.rgb_metadata, args.rgb_frames_jsonl)
+    if any(rgb_outputs) and not all(rgb_outputs):
+        parser.error("--rgb-video, --rgb-metadata, and --rgb-frames-jsonl must be supplied together")
     import rclpy
 
     writer = None
+    rgb_recorder = None
     rclpy.init()
     try:
+        if args.rgb_video:
+            from evaluation.rgb_video_recorder import RgbVideoRecorder
+
+            rgb_recorder = RgbVideoRecorder(
+                Path(args.rgb_video),
+                Path(args.rgb_metadata),
+                args.duration_seconds,
+                args.startup_timeout_seconds,
+                Path(args.rgb_frames_jsonl),
+                None,
+                args.ffmpeg_executable,
+                args.expected_rgb_fps,
+                subscribe=False,
+                expected_start_stamp_s=args.expected_rgb_start_seconds,
+                max_startup_delay_s=args.max_rgb_startup_delay_seconds,
+            )
+            if args.end_clock_seconds is not None:
+                rgb_recorder.target_s = float(args.end_clock_seconds)
         writer = RawCaptureWriter(
             Path(args.output),
             args.duration_seconds,
@@ -343,6 +456,10 @@ def main() -> None:
             args.post_target_wall_seconds,
             args.end_clock_seconds,
             args.clock_stall_timeout_seconds,
+            args.expected_rgb_fps,
+            rgb_recorder,
+            args.expected_rgb_start_seconds,
+            args.max_rgb_startup_delay_seconds,
         )
         try:
             writer.spin_until_done()
@@ -352,15 +469,23 @@ def main() -> None:
             raise
         result = writer.close()
         Path(args.metadata).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if rgb_recorder is not None:
+            rgb_recorder.close()
         if result["status"] != "complete":
             raise RuntimeError(
                 "raw capture is incomplete: "
                 f"target_reached={result['target_reached']}, "
-                f"missing_topics={result['missing_topics']}"
+                f"missing_topics={result['missing_topics']}, "
+                f"rgb_cadence={result['rgb_cadence']['status']}"
             )
     finally:
         if writer is not None:
             writer.close()
+        if rgb_recorder is not None:
+            try:
+                rgb_recorder.close()
+            except RuntimeError:
+                pass
         if rclpy.ok():
             rclpy.shutdown()
 

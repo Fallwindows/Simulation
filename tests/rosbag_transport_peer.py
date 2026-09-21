@@ -96,8 +96,8 @@ def play(source: Path) -> None:
     for topic_id, (topic, type_name) in enumerate(TOPIC_TYPES.items()):
         writer.create_topic(rosbag2_py.TopicMetadata(topic_id, topic, type_name, "cdr", []))
     base_ns = 2_000_000_000
-    for index, stamp_s in enumerate((2.0, 2.05, 2.1)):
-        record_ns = base_ns + index * 50_000_000
+    for index, stamp_s in enumerate((2.0, 2.0 + 1.0 / 30.0, 2.0 + 2.0 / 30.0)):
+        record_ns = base_ns + index * 33_333_333
         writer.write("/clock", _clock(stamp_s), record_ns)
         writer.write("/sim/camera/rgb/image_raw", _image(stamp_s), record_ns + 1)
         writer.write("/sim/lidar/points", _point_cloud(stamp_s), record_ns + 2)
