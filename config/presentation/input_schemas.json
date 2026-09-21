@@ -1,6 +1,11 @@
 {
   "schema_version": 1,
   "input_manifest_schema_version": 2,
+  "rgb_capture_acceptance": {
+    "mechanism": "reviewed_exact_capture_allowlist",
+    "catalog_path": "config/presentation/accepted_rgb_captures.json",
+    "cryptographic_execution_attestation": false
+  },
   "diagnostic_baseline": {
     "schema_id": "simulation.presentation.diagnostic_baseline.v1",
     "producer_id": "repository.demo.baseline.v1",

@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ REQUIRED_CAPTURE_TOPICS = {
     "/tf",
     "/tf_static",
 }
+DEFAULT_RGB_CAPTURE_CATALOG = "config/presentation/accepted_rgb_captures.json"
 
 DIAGNOSTIC_BASELINE_IDENTITY = {
     "plan_path": "config/presentation/storyboard.yaml",
@@ -142,6 +144,11 @@ def schema_catalog() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "input_manifest_schema_version": 2,
+        "rgb_capture_acceptance": {
+            "mechanism": "reviewed_exact_capture_allowlist",
+            "catalog_path": DEFAULT_RGB_CAPTURE_CATALOG,
+            "cryptographic_execution_attestation": False,
+        },
         "diagnostic_baseline": {
             "schema_id": "simulation.presentation.diagnostic_baseline.v1",
             "producer_id": "repository.demo.baseline.v1",
@@ -349,8 +356,14 @@ def _validate_capture_manifest(path: Path) -> None:
         raise ValueError("capture manifest is incomplete")
     if float(data.get("duration_s", 0.0)) < 45.0:
         raise ValueError("capture duration is shorter than 45 seconds")
-    if not SHA256_PATTERN.fullmatch(str(data.get("capture_sha256", "")).lower()):
+    declared_capture_hash = str(data.get("capture_sha256", "")).lower()
+    if not SHA256_PATTERN.fullmatch(declared_capture_hash):
         raise ValueError("capture_sha256 is invalid")
+    from simulator.capture.manifest import capture_hash
+
+    actual_capture_hash = capture_hash(data)
+    if declared_capture_hash != actual_capture_hash:
+        raise ValueError(f"capture_sha256 does not match canonical capture_hash ({actual_capture_hash})")
     bag = data.get("bag")
     if not isinstance(bag, dict) or not REQUIRED_CAPTURE_TOPICS.issubset(set(bag.get("topics", []))):
         raise ValueError("capture manifest is missing required sensor topics")
@@ -523,6 +536,72 @@ CONTENT_VALIDATORS = {
 }
 
 
+def _git_output(repo_root: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), *arguments],
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode:
+        raise ValueError(f"capture git revision validation failed: {' '.join(arguments)}")
+    return completed.stdout.strip()
+
+
+def validate_rgb_capture_acceptance(
+    capture: dict[str, Any],
+    artifact_hashes: dict[str, str],
+    repo_root: Path,
+    catalog_path: Path | None = None,
+) -> dict[str, Any]:
+    """Require exact membership in the reviewed production-capture catalog."""
+
+    git_sha = str(capture.get("git_sha", "")).lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", git_sha):
+        raise ValueError("capture git_sha must be a full 40-character commit hash")
+    resolved = _git_output(repo_root, "rev-parse", "--verify", f"{git_sha}^{{commit}}")
+    if resolved.lower() != git_sha:
+        raise ValueError("capture git_sha does not resolve to the declared commit")
+    producer_path = ROLE_SPECS["rgb"].producer_source_path
+    producer_blob = _git_output(repo_root, "rev-parse", f"{git_sha}:{producer_path}").lower()
+    current_blob = _git_output(repo_root, "hash-object", producer_path).lower()
+    if producer_blob != current_blob:
+        raise ValueError("capture producer blob differs from the current validated producer source")
+
+    source = catalog_path.resolve() if catalog_path else (repo_root / DEFAULT_RGB_CAPTURE_CATALOG).resolve()
+    catalog = _json(source)
+    if catalog.get("schema_version") != 1 or catalog.get("mechanism") != "reviewed_exact_capture_allowlist":
+        raise ValueError("RGB capture acceptance catalog schema/mechanism is invalid")
+    entries = catalog.get("captures")
+    if not isinstance(entries, list):
+        raise ValueError("RGB capture acceptance catalog must contain a captures list")
+    matches = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and entry.get("capture_sha256") == capture.get("capture_sha256")
+        and entry.get("git_sha") == git_sha
+    ]
+    if len(matches) != 1:
+        raise ValueError("capture is not present exactly once in the reviewed RGB capture allowlist")
+    entry = matches[0]
+    expected_keys = {
+        "capture_id", "capture_sha256", "git_sha", "producer_source_path",
+        "producer_blob_sha1", "required_artifact_sha256", "review",
+    }
+    if set(entry) != expected_keys:
+        raise ValueError("reviewed RGB capture entry fields are invalid")
+    if entry.get("capture_id") != capture.get("capture_id"):
+        raise ValueError("reviewed RGB capture_id does not match")
+    if entry.get("producer_source_path") != producer_path or entry.get("producer_blob_sha1") != producer_blob:
+        raise ValueError("reviewed RGB producer source/blob identity does not match")
+    if entry.get("required_artifact_sha256") != artifact_hashes:
+        raise ValueError("reviewed RGB artifact hashes do not match the capture bundle")
+    review = entry.get("review")
+    if not isinstance(review, dict) or set(review) != {"status", "reviewer", "reviewed_utc"} or review.get("status") != "accepted":
+        raise ValueError("reviewed RGB capture entry has no accepted review record")
+    return {"catalog_path": str(source), "catalog_sha256": sha256_path(source), "entry": entry}
+
+
 def _artifact_inventory(capture_manifest: dict[str, Any]) -> dict[str, str]:
     return {str(item["path"]): str(item["sha256"]).lower() for item in capture_manifest.get("files", [])}
 
@@ -661,6 +740,7 @@ def validate_role(
     manifest_path: Path,
     repo_root: Path,
     known_storyboard_hashes: frozenset[str],
+    rgb_capture_catalog: Path | None = None,
 ) -> ValidatedRole:
     contract = str(item.get("contract", ""))
     status = str(item.get("status", ""))
@@ -771,6 +851,24 @@ def validate_role(
                 _validate_view_manifest(contract, item, artifacts, spec, repo_root)
             except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
                 errors.append(str(exc))
+            if contract == "rgb":
+                try:
+                    capture = _json(artifacts["capture_manifest"].path)
+                    camera_info = _json(artifacts["camera_info"].path)
+                    sensor_transforms = (artifacts["camera_info"].path.parent / str(camera_info.get("source", ""))).resolve()
+                    acceptance_hashes = {
+                        name: artifacts[name].sha256
+                        for name in ("view_video", "frame_index", "camera_info", "rgb_metadata", "capture_manifest")
+                    }
+                    acceptance_hashes["sensor_transforms"] = sha256_path(sensor_transforms)
+                    validate_rgb_capture_acceptance(
+                        capture,
+                        acceptance_hashes,
+                        repo_root,
+                        rgb_capture_catalog,
+                    )
+                except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                    errors.append(str(exc))
     return ValidatedRole(
         role_name,
         contract,

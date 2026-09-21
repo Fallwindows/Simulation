@@ -262,7 +262,11 @@ def load_plan(path: str | Path) -> PresentationPlan:
     return PresentationPlan(source, fps, duration, frame_count, profiles, contracts, tuple(shots))
 
 
-def inspect_inputs(plan: PresentationPlan, path: str | Path) -> InputReport:
+def inspect_inputs(
+    plan: PresentationPlan,
+    path: str | Path,
+    rgb_capture_catalog: str | Path | None = None,
+) -> InputReport:
     source = Path(path).resolve()
     data = _mapping(source)
     if int(data.get("schema_version", -1)) != 2:
@@ -285,7 +289,12 @@ def inspect_inputs(plan: PresentationPlan, path: str | Path) -> InputReport:
         if contract_name not in plan.role_contracts:
             raise ValueError(f"input role {role_name} uses unknown contract {contract_name}")
         validated_roles[str(role_name)] = validate_role(
-            str(role_name), item, source, repo_root, known_storyboard_hashes
+            str(role_name),
+            item,
+            source,
+            repo_root,
+            known_storyboard_hashes,
+            Path(rgb_capture_catalog).resolve() if rgb_capture_catalog else None,
         )
 
     coherence = coherence_errors(validated_roles)

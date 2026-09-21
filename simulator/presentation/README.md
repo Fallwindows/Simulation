@@ -27,8 +27,20 @@ C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\python.exe `
 
 The emitter checks the recorder video, all 1,350 timestamp rows, recorder
 metadata, configured camera intrinsics against `sensor_transforms.json`, and
-the capture manifest's per-file hashes before writing anything. Its receipt
-then binds the video to those exact source hashes.
+the capture manifest's per-file hashes before writing anything. It recomputes
+the repository's canonical `capture_hash`, resolves the capture's full Git
+commit, and verifies the capture-producer blob at that revision. It then
+requires exact membership in
+`config/presentation/accepted_rgb_captures.json`, including capture hash,
+producer revision/blob, and required artifact hashes, before writing a
+receipt. The production catalog is intentionally empty until a real 45-second
+capture passes independent review, so the command currently refuses every
+capture.
+
+This mechanism is a checked-in reviewed allowlist with deterministic integrity
+checks. It is not cryptographic attestation that the producer executed. Tests
+may inject an isolated temporary catalog for generated fixtures; normal
+inspection and rendering always use the checked-in production catalog.
 
 Known storyboard hashes from `references/manifest.json` are rejected regardless
 of an artifact's current filename or directory. Reusing one view across roles,

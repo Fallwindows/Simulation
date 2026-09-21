@@ -8,7 +8,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .provenance import CONTENT_VALIDATORS, ROLE_SPECS, sha256_path, storyboard_hashes
+from .provenance import (
+    CONTENT_VALIDATORS,
+    ROLE_SPECS,
+    sha256_path,
+    storyboard_hashes,
+    validate_rgb_capture_acceptance,
+)
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -100,6 +106,7 @@ def emit_rgb_bundle(
     view_manifest_path: str | Path | None = None,
     repo_root: str | Path | None = None,
     ffprobe: str = "ffprobe",
+    acceptance_catalog_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate capture outputs, then emit their role bundle and view receipt."""
 
@@ -163,6 +170,17 @@ def emit_rgb_bundle(
     ):
         raise ValueError("RGB video stream does not match the capture dimensions, 30 fps, and frame count")
 
+    camera_info = _json(source_paths["camera_info"])
+    sensor_transforms = (capture_dir / str(camera_info["source"])).resolve()
+    acceptance_hashes = {name: sha256_path(path) for name, path in source_paths.items()}
+    acceptance_hashes["sensor_transforms"] = sha256_path(sensor_transforms)
+    acceptance = validate_rgb_capture_acceptance(
+        capture,
+        acceptance_hashes,
+        root,
+        Path(acceptance_catalog_path).resolve() if acceptance_catalog_path else None,
+    )
+
     spec = ROLE_SPECS["rgb"]
     assert spec.view_producer_id is not None and spec.view_producer_source_path is not None
     source_hashes = {
@@ -181,6 +199,11 @@ def emit_rgb_bundle(
         "source_time_range_s": [0.0, 45.0],
         "map_version": None,
         "object_state_version": None,
+        "capture_acceptance": {
+            "mechanism": "reviewed_exact_capture_allowlist",
+            "catalog_sha256": acceptance["catalog_sha256"],
+            "cryptographic_execution_attestation": False,
+        },
     }
     _write_json_atomic(receipt, view_receipt)
 
@@ -199,11 +222,16 @@ def emit_rgb_bundle(
         "capture_id": str(capture["capture_id"]),
         "map_version": None,
         "object_state_version": None,
+        "acceptance": {
+            "mechanism": "reviewed_exact_capture_allowlist",
+            "catalog_sha256": acceptance["catalog_sha256"],
+            "cryptographic_execution_attestation": False,
+        },
         "artifacts": artifacts,
     }
     result = {
         "schema_version": 2,
-        "label": f"validated RGB presentation bundle for capture {capture['capture_id']}",
+        "label": f"reviewed-allowlist RGB presentation bundle for capture {capture['capture_id']}",
         "ground_truth_consumed": False,
         "roles": {"rgb": role},
     }
@@ -211,7 +239,11 @@ def emit_rgb_bundle(
 
     from .timeline import inspect_inputs, load_plan
 
-    report = inspect_inputs(load_plan(root / "config" / "presentation" / "storyboard.yaml"), output_manifest)
+    report = inspect_inputs(
+        load_plan(root / "config" / "presentation" / "storyboard.yaml"),
+        output_manifest,
+        rgb_capture_catalog=acceptance_catalog_path,
+    )
     if "rgb" not in report.ready_genuine_roles:
         raise RuntimeError(f"emitted RGB bundle did not validate: {report.role_errors.get('rgb', ())}")
     return result

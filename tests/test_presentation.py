@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from simulator.capture.export_metadata import export_metadata
+from simulator.capture.manifest import capture_hash
 from simulator.presentation.rgb_bundle import emit_rgb_bundle
 from simulator.presentation.render_video import plan_segments, render_presentation
 from simulator.presentation.provenance import DIAGNOSTIC_BASELINE_IDENTITY, ROLE_SPECS, schema_catalog
@@ -145,6 +146,9 @@ class PresentationTimelineTests(unittest.TestCase):
     def test_checked_in_role_schema_catalog_matches_validator(self):
         catalog = json.loads((ROOT / "config" / "presentation" / "input_schemas.json").read_text(encoding="utf-8"))
         self.assertEqual(catalog, schema_catalog())
+        accepted = json.loads((ROOT / "config" / "presentation" / "accepted_rgb_captures.json").read_text(encoding="utf-8"))
+        self.assertEqual(accepted["mechanism"], "reviewed_exact_capture_allowlist")
+        self.assertEqual(accepted["captures"], [])
         self.assertTrue(catalog["roles"]["rgb"]["view_producer_available"])
         for role in ("lidar", "map", "reconstruction"):
             self.assertFalse(catalog["roles"][role]["view_producer_available"])
@@ -463,45 +467,117 @@ class PresentationTimelineTests(unittest.TestCase):
                     }
                 )
             capture_manifest = capture / "capture_manifest.json"
-            capture_manifest.write_text(
+            capture_data = {
+                "manifest_version": 1,
+                "status": "complete",
+                "capture_id": "manual-black-capture",
+                "duration_s": 45.0,
+                "capture_sha256": "a" * 64,
+                "git_sha": "not-a-real-producer-revision",
+                "bag": {
+                    "uri": "sensors_bag",
+                    "topics": [
+                        "/clock", "/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info",
+                        "/sim/lidar/points", "/tf", "/tf_static",
+                    ],
+                },
+                "rgb": {
+                    "video": video.name,
+                    "timestamp_index": frames.name,
+                    "camera_info": "camera_info.json",
+                    "camera_info_provenance": "configured_intrinsics",
+                    "metadata": metadata.name,
+                    "frame_count": 1350,
+                    "first_stamp_s": 0.0,
+                    "last_stamp_s": 1349 / 30.0,
+                },
+                "files": files,
+            }
+
+            def write_capture_manifest() -> None:
+                capture_manifest.write_text(json.dumps(capture_data, indent=2) + "\n", encoding="utf-8")
+
+            write_capture_manifest()
+            inputs = run / "presentation_rgb_inputs.json"
+            receipt_path = capture / "rgb_presentation_view_manifest.json"
+            with self.assertRaisesRegex(ValueError, "does not match canonical capture_hash"):
+                emit_rgb_bundle(capture_manifest, inputs, repo_root=ROOT, ffprobe=str(FFPROBE))
+            self.assertFalse(inputs.exists())
+            self.assertFalse(receipt_path.exists())
+
+            capture_data["capture_sha256"] = capture_hash(capture_data)
+            write_capture_manifest()
+            with self.assertRaisesRegex(ValueError, "full 40-character commit hash"):
+                emit_rgb_bundle(capture_manifest, inputs, repo_root=ROOT, ffprobe=str(FFPROBE))
+            self.assertFalse(inputs.exists())
+            self.assertFalse(receipt_path.exists())
+
+            git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+            capture_data["git_sha"] = git_sha
+            capture_data["capture_sha256"] = capture_hash(capture_data)
+            write_capture_manifest()
+            with self.assertRaisesRegex(ValueError, "not present exactly once"):
+                emit_rgb_bundle(capture_manifest, inputs, repo_root=ROOT, ffprobe=str(FFPROBE))
+            self.assertFalse(inputs.exists())
+            self.assertFalse(receipt_path.exists())
+
+            producer_blob = subprocess.check_output(
+                ["git", "rev-parse", f"{git_sha}:scripts/capture_simulation.ps1"],
+                cwd=ROOT,
+                text=True,
+            ).strip()
+            catalog = run / "fixture_rgb_capture_catalog.json"
+            catalog.write_text(
                 json.dumps(
                     {
-                        "manifest_version": 1,
-                        "status": "complete",
-                        "capture_id": "emitter-fixture",
-                        "duration_s": 45.0,
-                        "capture_sha256": "a" * 64,
-                        "bag": {
-                            "uri": "sensors_bag",
-                            "topics": [
-                                "/clock", "/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info",
-                                "/sim/lidar/points", "/tf", "/tf_static",
-                            ],
-                        },
-                        "rgb": {
-                            "video": video.name,
-                            "timestamp_index": frames.name,
-                            "camera_info": "camera_info.json",
-                            "camera_info_provenance": "configured_intrinsics",
-                            "metadata": metadata.name,
-                            "frame_count": 1350,
-                            "first_stamp_s": 0.0,
-                            "last_stamp_s": 1349 / 30.0,
-                        },
-                        "files": files,
-                    }
-                ),
+                        "schema_version": 1,
+                        "mechanism": "reviewed_exact_capture_allowlist",
+                        "captures": [
+                            {
+                                "capture_id": capture_data["capture_id"],
+                                "capture_sha256": capture_data["capture_sha256"],
+                                "git_sha": git_sha,
+                                "producer_source_path": "scripts/capture_simulation.ps1",
+                                "producer_blob_sha1": producer_blob,
+                                "required_artifact_sha256": {
+                                    "view_video": _sha256(video),
+                                    "frame_index": _sha256(frames),
+                                    "camera_info": _sha256(capture / "camera_info.json"),
+                                    "rgb_metadata": _sha256(metadata),
+                                    "capture_manifest": _sha256(capture_manifest),
+                                    "sensor_transforms": _sha256(capture / "sensor_transforms.json"),
+                                },
+                                "review": {
+                                    "status": "accepted",
+                                    "reviewer": "test-fixture-reviewer",
+                                    "reviewed_utc": "2026-09-21T00:00:00Z",
+                                },
+                            }
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
                 encoding="utf-8",
             )
-            inputs = run / "presentation_rgb_inputs.json"
-            emit_rgb_bundle(capture_manifest, inputs, repo_root=ROOT, ffprobe=str(FFPROBE))
-            report = inspect_inputs(load_plan(PLAN), inputs)
+            emit_rgb_bundle(
+                capture_manifest,
+                inputs,
+                repo_root=ROOT,
+                ffprobe=str(FFPROBE),
+                acceptance_catalog_path=catalog,
+            )
+            production_report = inspect_inputs(load_plan(PLAN), inputs)
+            self.assertNotIn("rgb", production_report.ready_genuine_roles)
+            self.assertTrue(any("reviewed RGB capture allowlist" in error for error in production_report.role_errors["rgb"]))
+            report = inspect_inputs(load_plan(PLAN), inputs, rgb_capture_catalog=catalog)
             self.assertEqual(report.ready_genuine_roles, frozenset({"rgb"}))
             self.assertEqual(report.role_errors["rgb"], ())
-            receipt = json.loads((capture / "rgb_presentation_view_manifest.json").read_text(encoding="utf-8"))
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             self.assertEqual(receipt["producer_id"], "simulator.presentation.rgb_bundle_emitter.v1")
             self.assertEqual(receipt["output_video_sha256"], _sha256(video))
             self.assertEqual(set(receipt["source_artifact_sha256"]), {"frame_index", "camera_info", "rgb_metadata", "capture_manifest"})
+            self.assertFalse(receipt["capture_acceptance"]["cryptographic_execution_attestation"])
 
     def test_diagnostic_mode_cannot_write_delivery_profile(self):
         with tempfile.TemporaryDirectory() as directory:
