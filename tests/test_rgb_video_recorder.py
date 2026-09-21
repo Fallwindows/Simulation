@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +19,9 @@ from evaluation.rgb_video_recorder import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class _Image:
     def __init__(self, encoding, width, height, step, data, stamp_s=0.0):
         self.encoding = encoding
@@ -31,6 +35,51 @@ class _Image:
             stamp=SimpleNamespace(sec=sec, nanosec=nanosec),
             frame_id="camera_optical_frame",
         )
+
+
+def _exercise_real_ros_recorder_contract():
+    """Exercise the native ROS recorder inside its caller's fresh interpreter."""
+
+    if "numpy" in sys.modules:
+        raise AssertionError("NumPy was loaded before the recorder scenario")
+    import rclpy
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        root = Path(temporary_directory)
+        recorder = None
+        rclpy.init()
+        try:
+            recorder = RgbVideoRecorder(
+                root / "out.mp4",
+                root / "metadata.json",
+                duration_s=0.1,
+                startup_timeout_s=1.0,
+            )
+            topics = {subscription.topic_name for subscription in recorder.node.subscriptions}
+            if topics != {"/sim/camera/rgb/image_raw"}:
+                raise AssertionError(f"unexpected recorder subscriptions: {sorted(topics)}")
+            if "numpy" in sys.modules:
+                raise AssertionError("recorder construction loaded NumPy")
+            Image = _load_ros_image_type()
+            if Image.__module__ != "sensor_msgs.msg._image":
+                raise AssertionError(f"unexpected ROS Image type: {Image!r}")
+            if sys.modules["sensor_msgs.msg._image"].Image is not Image:
+                raise AssertionError("ROS Image type is not the installed message class")
+            recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([255, 0, 0]) * 8, 0.0))
+            recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([0, 255, 0]) * 8, 0.1))
+            if recorder.done_reason != "simulation_time_reached":
+                raise AssertionError(f"unexpected recorder completion: {recorder.done_reason}")
+            metadata = recorder.close()
+            return {"topics": sorted(topics), "metadata": metadata, "numpy_loaded": "numpy" in sys.modules}
+        finally:
+            if recorder is not None:
+                for subscription in list(recorder.node.subscriptions):
+                    recorder.node.destroy_subscription(subscription)
+                if list(recorder.node.subscriptions):
+                    raise AssertionError("recorder subscriptions were not destroyed")
+                recorder.node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
 
 
 class RgbVideoRecorderTests(unittest.TestCase):
@@ -63,48 +112,42 @@ class RgbVideoRecorderTests(unittest.TestCase):
             bytes([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]),
         )
 
-    def test_real_ros_recorder_constructs_without_numpy_or_camera_info_subscription(self):
-        try:
-            import rclpy
-        except ImportError:
+    def test_real_ros_recorder_contract_uses_fresh_process_after_parent_numpy_import(self):
+        if importlib.util.find_spec("rclpy") is None:
             self.skipTest("rclpy is not installed")
-
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            recorder = None
-            rclpy.init()
-            try:
-                recorder = RgbVideoRecorder(
-                    root / "out.mp4",
-                    root / "metadata.json",
-                    duration_s=0.1,
-                    startup_timeout_s=1.0,
-                )
-                topics = {subscription.topic_name for subscription in recorder.node.subscriptions}
-                self.assertIn("/sim/camera/rgb/image_raw", topics)
-                self.assertNotIn("/sim/camera/rgb/camera_info", topics)
-                self.assertEqual(topics, {"/sim/camera/rgb/image_raw"})
-                self.assertNotIn("numpy", sys.modules)
-                Image = _load_ros_image_type()
-                self.assertEqual(Image.__module__, "sensor_msgs.msg._image")
-                self.assertIs(sys.modules["sensor_msgs.msg._image"].Image, Image)
-                recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([255, 0, 0]) * 8, 0.0))
-                recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([0, 255, 0]) * 8, 0.1))
-                self.assertEqual(recorder.done_reason, "simulation_time_reached")
-                metadata = recorder.close()
-                self.assertEqual(metadata["status"], "complete")
-                self.assertEqual(metadata["completion_clock_source"], "image_header")
-                self.assertEqual(metadata["frame_count"], 2)
-                self.assertEqual(metadata["encoder_returncode"], 0)
-                self.assertFalse(metadata["numpy_loaded"])
-            finally:
-                if recorder is not None:
-                    for subscription in list(recorder.node.subscriptions):
-                        recorder.node.destroy_subscription(subscription)
-                    self.assertEqual(list(recorder.node.subscriptions), [])
-                    recorder.node.destroy_node()
-                if rclpy.ok():
-                    rclpy.shutdown()
+        marker = object()
+        previous_numpy = sys.modules.get("numpy")
+        sys.modules["numpy"] = marker
+        try:
+            command = (
+                "import json; "
+                "from tests.test_rgb_video_recorder import _exercise_real_ros_recorder_contract; "
+                "print('FRESH_RESULT=' + json.dumps(_exercise_real_ros_recorder_contract(), sort_keys=True))"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", command],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        finally:
+            if previous_numpy is None:
+                sys.modules.pop("numpy", None)
+            else:
+                sys.modules["numpy"] = previous_numpy
+        self.assertEqual(result.returncode, 0, f"stdout={result.stdout}\nstderr={result.stderr}")
+        result_lines = [line for line in result.stdout.splitlines() if line.startswith("FRESH_RESULT=")]
+        self.assertEqual(len(result_lines), 1, result.stdout)
+        payload = json.loads(result_lines[0].removeprefix("FRESH_RESULT="))
+        self.assertEqual(payload["topics"], ["/sim/camera/rgb/image_raw"])
+        self.assertFalse(payload["numpy_loaded"])
+        metadata = payload["metadata"]
+        self.assertEqual(metadata["status"], "complete")
+        self.assertEqual(metadata["completion_clock_source"], "image_header")
+        self.assertEqual(metadata["frame_count"], 2)
+        self.assertEqual(metadata["encoder_returncode"], 0)
+        self.assertFalse(metadata["numpy_loaded"])
 
     def test_programmatic_camera_info_request_fails_before_ros_imports(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
