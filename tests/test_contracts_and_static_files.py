@@ -164,4 +164,18 @@ class ContractTests(unittest.TestCase):
             text=True,
             timeout=30,
         )
-        self.assertIn("zero=0 nonzero=7 unavailable=rejected", result.stdout)
+        self.assertIn("zero=0 nonzero=7 unavailable=rejected timeout=tree-killed", result.stdout)
+
+    def test_offline_slam_cli_probes_are_bounded_and_replay_is_lidar_only(self):
+        root = Path(__file__).resolve().parents[1]
+        launcher = (root / "scripts/run_slam_offline.ps1").read_text(encoding="utf-8")
+        self.assertIn("Invoke-BoundedProcess", launcher)
+        self.assertIn('@("node","list","--no-daemon","--spin-time","2")', launcher)
+        self.assertIn('$replayTopics = @("/clock","/sim/lidar/points","/tf","/tf_static")', launcher)
+        self.assertIn('$required = @("/clock","/sim/camera/rgb/image_raw","/sim/lidar/points","/tf","/tf_static")', launcher)
+        self.assertNotIn('& $pixi @baseArgs node list', launcher)
+        self.assertNotIn("simulator.capture.slam_observer", launcher)
+        self.assertIn('@("service","call","/rtabmap/backup","std_srvs/srv/Empty")', launcher)
+        self.assertIn('@("--poses","--poses_format","10","--opt","0","--save_in_db"', launcher)
+        self.assertIn('@("--cloud","--scan","--poses","--poses_format","10","--ascii","--opt","2"', launcher)
+        self.assertIn('producer_mode="rtabmap_database_export"', launcher)

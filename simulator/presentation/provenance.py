@@ -482,6 +482,34 @@ def _validate_slam_manifest(path: Path) -> None:
         raise ValueError("SLAM manifest is incomplete")
     if not SHA256_PATTERN.fullmatch(str(data.get("capture_sha256", "")).lower()):
         raise ValueError("SLAM capture_sha256 is invalid")
+    if data.get("producer_mode") == "rtabmap_database_export":
+        producer = data.get("producer", {})
+        if not isinstance(producer, dict) or producer.get("status") != "complete":
+            raise ValueError("SLAM database-export producer metadata is incomplete")
+        if producer.get("producer_mode") != "rtabmap_database_export":
+            raise ValueError("SLAM database-export producer mode is inconsistent")
+        if producer.get("ground_truth_subscribed") is not False or producer.get("ground_truth_consumed") is not False:
+            raise ValueError("SLAM database export ground-truth provenance is invalid")
+        if int(producer.get("pose_count", 0)) < 2 or int(producer.get("map_point_count", 0)) <= 0:
+            raise ValueError("SLAM database export is empty")
+        database = producer.get("database", {})
+        if not isinstance(database, dict) or not SHA256_PATTERN.fullmatch(str(database.get("sha256", "")).lower()):
+            raise ValueError("SLAM database export database hash is invalid")
+        artifacts = producer.get("artifacts", {})
+        for name in ("slam_poses.csv", "slam_map.ply", "slam_map.pcd"):
+            artifact = artifacts.get(name, {}) if isinstance(artifacts, dict) else {}
+            if artifact.get("path") != name or not SHA256_PATTERN.fullmatch(str(artifact.get("sha256", "")).lower()):
+                raise ValueError(f"SLAM database export {name} provenance is invalid")
+        optimize_command = producer.get("optimization", {}).get("command", [])
+        export_command = producer.get("map_export", {}).get("command", [])
+        if "--save_in_db" not in optimize_command or "--opt" not in optimize_command:
+            raise ValueError("SLAM database optimization provenance is invalid")
+        if "--cloud" not in export_command or "--scan" not in export_command or "--opt" not in export_command:
+            raise ValueError("SLAM database map-export provenance is invalid")
+        tool = producer.get("tool", {})
+        if tool.get("name") != "rtabmap-export" or not str(tool.get("version", "")):
+            raise ValueError("SLAM database export tool provenance is invalid")
+        return
     observer = data.get("observer", {})
     if not observer.get("fresh_odom") or not observer.get("fresh_map") or observer.get("ground_truth_subscribed") is not False:
         raise ValueError("SLAM observer provenance is invalid")

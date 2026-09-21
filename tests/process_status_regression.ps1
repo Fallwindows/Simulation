@@ -34,7 +34,38 @@ exit $Code
     $unavailableRejected = $_.Exception.Message -match "unavailable"
   }
   if (-not $unavailableRejected) { throw "Unavailable status was not rejected." }
-  Write-Output "process status regression passed: zero=0 nonzero=7 unavailable=rejected"
+
+  $marker = Join-Path $temporary "grandchild-finished.txt"
+  $grandchild = Join-Path $temporary "grandchild.ps1"
+  @'
+param([string]$Marker)
+Start-Sleep -Seconds 4
+Set-Content -LiteralPath $Marker -Value "should not exist" -Encoding UTF8
+'@ | Set-Content -LiteralPath $grandchild -Encoding UTF8
+  $parent = Join-Path $temporary "parent.ps1"
+  @'
+param([string]$Grandchild, [string]$Marker)
+$child = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-File", $Grandchild, "-Marker", $Marker) -PassThru -WindowStyle Hidden
+$child.WaitForExit()
+'@ | Set-Content -LiteralPath $parent -Encoding UTF8
+  $timeoutRejected = $false
+  $timer = [Diagnostics.Stopwatch]::StartNew()
+  try {
+    Invoke-BoundedProcess -FilePath "powershell.exe" `
+      -ArgumentList @("-NoProfile", "-File", $parent, "-Grandchild", $grandchild, "-Marker", $marker) `
+      -WorkingDirectory $temporary -TimeoutSeconds 1 -Name "hanging process tree fixture" `
+      -RedirectStandardOutput (Join-Path $temporary "timeout.out.txt") `
+      -RedirectStandardError (Join-Path $temporary "timeout.err.txt") | Out-Null
+  } catch {
+    $timeoutRejected = $_.Exception.Message -match "timed out after 1 seconds"
+  }
+  $timer.Stop()
+  if (-not $timeoutRejected) { throw "Bounded process timeout was not reported." }
+  if ($timer.Elapsed.TotalSeconds -gt 4.0) { throw "Bounded process exceeded its fail-closed deadline." }
+  Start-Sleep -Seconds 4
+  if (Test-Path -LiteralPath $marker) { throw "Timed-out descendant process was not cleaned up." }
+
+  Write-Output "process status regression passed: zero=0 nonzero=7 unavailable=rejected timeout=tree-killed"
 } finally {
   Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }
