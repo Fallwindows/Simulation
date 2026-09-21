@@ -174,3 +174,11 @@ renderer inside child processes so repository discovery order cannot contaminate
 the recorder's NumPy-free import assertion. The object-detail card now measures
 and fits every variable label; start/mid/end frames were inspected at 720p and
 1080p before regenerating the complete evidence set.
+
+Technical-view r3 makes the recorder's NumPy-free import assertion independent
+of unittest discovery order. The native ROS recorder scenario now runs in a
+fresh Python child process while the parent deliberately contains a `numpy`
+module marker. The exact default discovery order therefore retains the original
+recorder construction, subscription, encoding, cleanup, and metadata checks
+without inheriting NumPy loaded earlier by perception tests. Renderer code,
+source bindings, receipts, and generated media are unchanged from r2.
