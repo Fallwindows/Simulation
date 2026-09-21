@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any
 
@@ -111,11 +111,16 @@ def _capture_bag_bindings(
     inventoried_files = sorted(relative for relative in inventory if relative.startswith(f"{bag_uri}/"))
     if sorted(actual_files) != inventoried_files:
         raise ValueError("capture raw LiDAR bag files do not exactly match the capture manifest inventory")
+    bag_path = PurePosixPath(bag_uri)
+    if any(PurePosixPath(relative).parent != bag_path for relative in inventoried_files):
+        raise ValueError("capture raw LiDAR bag cannot contain nested storage files")
+    metadata_path = f"{bag_uri}/metadata.yaml"
+    database_paths = [relative for relative in inventoried_files if PurePosixPath(relative).suffix.casefold() == ".db3"]
+    if metadata_path not in inventoried_files or not database_paths:
+        raise ValueError("capture manifest must bind root-level bag metadata and SQLite storage")
+    if set(inventoried_files) != {metadata_path, *database_paths}:
+        raise ValueError("capture raw LiDAR bag can contain only root metadata.yaml and SQLite .db3 storage")
     bag_files = [_capture_file_binding(capture_root, inventory, relative) for relative in inventoried_files]
-    if not bag_files or not any(str(item["path"]).lower().endswith(".db3") for item in bag_files):
-        raise ValueError("capture manifest does not bind raw SQLite bag storage")
-    if not any(str(item["path"]).lower().endswith("/metadata.yaml") for item in bag_files):
-        raise ValueError("capture manifest does not bind raw bag metadata")
     return bag_files
 
 

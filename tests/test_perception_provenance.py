@@ -11,12 +11,48 @@ from simulator.perception.provenance import (
     validate_perception_manifest_bindings,
 )
 from simulator.perception.rgb_tracking import run_rgb_tracking
-from simulator.capture.manifest import sha256_file
+from simulator.capture.manifest import capture_hash, sha256_file, write_json
 from simulator.presentation.provenance import Artifact, _role_associations, _validate_perception_manifest
 from tests.perception_provenance_fixture import create_perception_run, refresh_perception_manifest
 
 
 class PerceptionProvenanceTests(unittest.TestCase):
+    def test_bag_layout_accepts_root_storage_and_rejects_nested_relocation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            valid = create_perception_run(root / "valid", frame_count=540, capture_id="root-bag")
+            binding = build_perception_input_bindings(valid["capture"], valid["slam"], valid["perception"])
+            self.assertEqual(
+                [item["path"] for item in binding["raw_lidar"]["bag"]["files"]],
+                ["../capture/sensors_bag/capture_0.db3", "../capture/sensors_bag/metadata.yaml"],
+            )
+
+            fixture = create_perception_run(root / "nested", frame_count=540, capture_id="nested-bag")
+            capture = Path(fixture["capture"])
+            nested = capture / "sensors_bag/nested"
+            nested.mkdir()
+            for name in ("capture_0.db3", "metadata.yaml"):
+                (capture / "sensors_bag" / name).replace(nested / name)
+            capture_manifest_path = capture / "capture_manifest.json"
+            capture_manifest = json.loads(capture_manifest_path.read_text(encoding="utf-8"))
+            for item in capture_manifest["files"]:
+                if item["path"].startswith("sensors_bag/"):
+                    name = Path(item["path"]).name
+                    relocated = nested / name
+                    item.update(
+                        path=f"sensors_bag/nested/{name}",
+                        sha256=sha256_file(relocated),
+                        size_bytes=relocated.stat().st_size,
+                    )
+            capture_manifest["capture_sha256"] = capture_hash(capture_manifest)
+            write_json(capture_manifest_path, capture_manifest)
+            slam_manifest_path = Path(fixture["slam"]) / "slam_manifest.json"
+            slam_manifest = json.loads(slam_manifest_path.read_text(encoding="utf-8"))
+            slam_manifest["capture_sha256"] = capture_manifest["capture_sha256"]
+            write_json(slam_manifest_path, slam_manifest)
+            with self.assertRaisesRegex(ValueError, "cannot contain nested storage files"):
+                build_perception_input_bindings(fixture["capture"], fixture["slam"], fixture["perception"])
+
     def test_preflight_ignores_removed_and_mutated_evaluation_truth(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = create_perception_run(Path(temporary), frame_count=540)
