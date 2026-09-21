@@ -57,6 +57,65 @@
         "legacy_capture_id_omitted": true,
         "ground_truth_consumed": false
       }
+    },
+    {
+      "source_id": "production-20260921-053814804-v1",
+      "capture_id": "20260921-053814804",
+      "presentation_classification": {
+        "kind": "reviewed_production"
+      },
+      "run_directory_name": "20260921-053814804",
+      "capture_sha256": "ab84ccc1f71790f896bab1375062ed1db9f40bf9a1531d582f7cd0e589121eba",
+      "producer_revisions": {
+        "capture": "c9bf2be24bed11f5581dcfff448a4f15efff91b7",
+        "slam": "7183a32215f4404677c8aadbaab32421f1d4c7b6",
+        "perception": "def059bbfb06449648f5a7411e36b333823d6c7c"
+      },
+      "producer_manifests": {
+        "capture": {
+          "path": "capture/capture_manifest.json",
+          "sha256": "3d82955332e326376b1f3e683a34ff589e4f0324cf17015682d336f282db3599"
+        },
+        "slam": {
+          "path": "slam/slam_manifest.json",
+          "sha256": "bb79ed9155f40d27621512f6b3309aabe80aed1ab88e3783478aaf518c02ed3e"
+        },
+        "perception": {
+          "path": "perception/perception_manifest.json",
+          "sha256": "0fef77178e555286b2570695df2674e2b833a15592c05f735834b3571c294aab"
+        }
+      },
+      "artifacts": {
+        "map": {
+          "path": "slam/slam_map.ply",
+          "sha256": "587043f3f84c7dfc4449379a2bd96ca801a63f2a12b432d4d3816c73c08b0452",
+          "version": "offline-slam-map/20260921-053814804/587043f3f84c7dfc"
+        },
+        "trajectory": {
+          "path": "slam/slam_poses.csv",
+          "sha256": "46e144e0519b7320096ba2735cca1395068c116124e4ca58f5f750cd58205160",
+          "version": "offline-slam-trajectory/20260921-053814804/46e144e0519b7320"
+        },
+        "inventory": {
+          "path": "perception/estimated_inventory.csv",
+          "sha256": "3247c4d5dbcab08f166c8da495243aca8723725bc89b457bfedc6e0948bb8cbe",
+          "version": "estimated-object-state/20260921-053814804/3247c4d5dbcab08f"
+        }
+      },
+      "simulation_time": {
+        "source": "slam/slam_poses.csv:timestamp_s",
+        "start_s": 0.2,
+        "end_s": 18.6
+      },
+      "perception_contract": {
+        "allowed_depth_sources": [
+          "lidar_projected_with_slam_pose"
+        ],
+        "estimated_inventory": "estimated_inventory.csv",
+        "slam_trajectory": "../slam/slam_poses.csv",
+        "legacy_capture_id_omitted": false,
+        "ground_truth_consumed": false
+      }
     }
   ]
 }
