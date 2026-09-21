@@ -10,7 +10,12 @@ from fractions import Fraction
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .provenance import SHA256_PATTERN, sha256_path, storyboard_hashes
+from .provenance import (
+    SHA256_PATTERN,
+    sha256_path,
+    storyboard_hashes,
+    validate_presentation_classification,
+)
 
 
 TECHNICAL_PRODUCER_ID = "grocery_sim.technical_views.cpu.v1"
@@ -46,6 +51,7 @@ class ValidatedTechnicalDelivery:
     capture_sha256: str
     source_id: str
     source: dict[str, Any]
+    presentation_classification: dict[str, str]
     shots: tuple[TechnicalShotSource, ...]
 
 
@@ -238,6 +244,12 @@ def validate_technical_delivery(
     catalog_hash = _sha256_lf_text(catalog_path)
     catalog_source = _catalog_source(catalog_path, capture_id, source_id)
     _validate_source_binding(source, manifest, catalog_source, catalog_hash, root)
+    presentation_classification = validate_presentation_classification(
+        catalog_source.get("presentation_classification"),
+        allow_legacy_production=True,
+    )
+    if source.get("presentation_classification", {"kind": "reviewed_production"}) != presentation_classification:
+        raise ValueError("technical source presentation classification does not match the reviewed catalog")
     outputs = manifest.get("outputs")
     if not isinstance(outputs, list) or len(outputs) != len(TECHNICAL_VIEWS):
         raise ValueError("technical delivery must contain seven output entries")
@@ -308,5 +320,6 @@ def validate_technical_delivery(
         str(catalog_source.get("capture_sha256", "")),
         source_id,
         source,
+        presentation_classification,
         tuple(shots),
     )

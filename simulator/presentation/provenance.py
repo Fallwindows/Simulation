@@ -33,6 +33,16 @@ RGB_PRESENTATION_FRAME_COUNT = 540
 RGB_TIMESTAMP_PERIOD_S = 1.0 / 30.0
 RGB_TIMESTAMP_TOLERANCE_S = 0.002
 DEFAULT_RGB_CAPTURE_CATALOG = "config/presentation/accepted_rgb_captures.json"
+GENERATED_TEST_FIXTURE_MARKER_ID = "simulator.presentation.generated-test-fixture.v1"
+GENERATED_TEST_FIXTURE_MARKER_SHA256 = hashlib.sha256(
+    (GENERATED_TEST_FIXTURE_MARKER_ID + "\n").encode("utf-8")
+).hexdigest()
+REVIEWED_PRODUCTION_CLASSIFICATION = {"kind": "reviewed_production"}
+GENERATED_TEST_FIXTURE_CLASSIFICATION = {
+    "kind": "generated_test_fixture",
+    "marker_id": GENERATED_TEST_FIXTURE_MARKER_ID,
+    "marker_sha256": GENERATED_TEST_FIXTURE_MARKER_SHA256,
+}
 
 DIAGNOSTIC_BASELINE_IDENTITY = {
     "plan_path": "config/presentation/storyboard.yaml",
@@ -153,6 +163,10 @@ def schema_catalog() -> dict[str, Any]:
             "mechanism": "reviewed_exact_capture_allowlist",
             "catalog_path": DEFAULT_RGB_CAPTURE_CATALOG,
             "cryptographic_execution_attestation": False,
+            "presentation_classifications": [
+                REVIEWED_PRODUCTION_CLASSIFICATION,
+                GENERATED_TEST_FIXTURE_CLASSIFICATION,
+            ],
         },
         "diagnostic_baseline": {
             "schema_id": "simulation.presentation.diagnostic_baseline.v1",
@@ -243,6 +257,22 @@ def sha256_path(path: Path) -> str:
 def source_text_sha256(path: Path) -> str:
     normalized = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def validate_presentation_classification(
+    value: object,
+    *,
+    allow_legacy_production: bool = False,
+) -> dict[str, str]:
+    """Return the exact classification carried by a reviewed source catalog."""
+
+    if value is None and allow_legacy_production:
+        return dict(REVIEWED_PRODUCTION_CLASSIFICATION)
+    if value == REVIEWED_PRODUCTION_CLASSIFICATION:
+        return dict(REVIEWED_PRODUCTION_CLASSIFICATION)
+    if value == GENERATED_TEST_FIXTURE_CLASSIFICATION:
+        return dict(GENERATED_TEST_FIXTURE_CLASSIFICATION)
+    raise ValueError("reviewed source presentation_classification is invalid")
 
 
 def _git_blob_oid(path: Path) -> str:
@@ -596,6 +626,7 @@ def validate_rgb_capture_acceptance(
     expected_keys = {
         "capture_id", "capture_sha256", "git_sha", "producer_source_path",
         "producer_blob_sha1", "required_artifact_sha256", "review",
+        "presentation_classification",
     }
     if set(entry) != expected_keys:
         raise ValueError("reviewed RGB capture entry fields are invalid")
@@ -608,7 +639,13 @@ def validate_rgb_capture_acceptance(
     review = entry.get("review")
     if not isinstance(review, dict) or set(review) != {"status", "reviewer", "reviewed_utc"} or review.get("status") != "accepted":
         raise ValueError("reviewed RGB capture entry has no accepted review record")
-    return {"catalog_path": str(source), "catalog_sha256": sha256_path(source), "entry": entry}
+    classification = validate_presentation_classification(entry.get("presentation_classification"))
+    return {
+        "catalog_path": str(source),
+        "catalog_sha256": sha256_path(source),
+        "entry": entry,
+        "presentation_classification": classification,
+    }
 
 
 def _artifact_inventory(capture_manifest: dict[str, Any]) -> dict[str, str]:
@@ -881,12 +918,23 @@ def validate_role(
                         for name in ("view_video", "frame_index", "camera_info", "rgb_metadata", "capture_manifest")
                     }
                     acceptance_hashes["sensor_transforms"] = sha256_path(sensor_transforms)
-                    validate_rgb_capture_acceptance(
+                    acceptance = validate_rgb_capture_acceptance(
                         capture,
                         acceptance_hashes,
                         repo_root,
                         rgb_capture_catalog,
                     )
+                    expected_acceptance = {
+                        "mechanism": "reviewed_exact_capture_allowlist",
+                        "catalog_sha256": acceptance["catalog_sha256"],
+                        "presentation_classification": acceptance["presentation_classification"],
+                        "cryptographic_execution_attestation": False,
+                    }
+                    if item.get("acceptance") != expected_acceptance:
+                        raise ValueError("RGB role acceptance does not match its reviewed catalog")
+                    receipt = _json(artifacts["view_manifest"].path)
+                    if receipt.get("capture_acceptance") != expected_acceptance:
+                        raise ValueError("RGB view receipt acceptance does not match its reviewed catalog")
                 except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
                     errors.append(str(exc))
     return ValidatedRole(

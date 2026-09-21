@@ -36,6 +36,7 @@ class ValidatedCompleteBundle:
     manifest_path: Path
     capture_id: str
     capture_sha256: str
+    presentation_classification: dict[str, str]
     shots: tuple[CompleteShotSource, ...]
     source_bindings: dict[str, Any]
 
@@ -117,6 +118,7 @@ def _rgb_sources(
             "source_time_range_s": receipt["source_time_range_s"],
             "presentation_transform": receipt["presentation_transform"],
             "acceptance": receipt["capture_acceptance"],
+            "presentation_classification": receipt["capture_acceptance"]["presentation_classification"],
         },
     )
 
@@ -162,7 +164,7 @@ def _validate_sources(
     ffprobe: str,
     rgb_capture_catalog: Path | None,
     technical_source_catalog: Path | None,
-) -> tuple[str, str, tuple[CompleteShotSource, ...], dict[str, Any]]:
+) -> tuple[str, str, dict[str, str], tuple[CompleteShotSource, ...], dict[str, Any]]:
     capture_id, capture_sha256, rgb_shots, rgb_binding = _rgb_sources(
         plan, rgb_bundle_path, rgb_capture_catalog
     )
@@ -174,12 +176,16 @@ def _validate_sources(
     )
     if technical.capture_id != capture_id or technical.capture_sha256 != capture_sha256:
         raise ValueError("RGB and technical inputs do not share one reviewed capture identity")
+    presentation_classification = rgb_binding["presentation_classification"]
+    if technical.presentation_classification != presentation_classification:
+        raise ValueError("RGB and technical inputs do not share one reviewed presentation classification")
     shots = tuple(rgb_shots + _technical_sources(technical))
     if [source.shot_number for source in shots] != list(range(1, 13)):
         raise ValueError("combined presentation inputs do not cover shots 1-12 in order")
     bindings = {
         "capture_id": capture_id,
         "capture_sha256": capture_sha256,
+        "presentation_classification": presentation_classification,
         "rgb": rgb_binding,
         "technical": {
             "delivery_manifest_sha256": technical.manifest_sha256,
@@ -187,7 +193,7 @@ def _validate_sources(
             "source": technical.source,
         },
     }
-    return capture_id, capture_sha256, shots, bindings
+    return capture_id, capture_sha256, presentation_classification, shots, bindings
 
 
 def emit_complete_bundle(
@@ -208,7 +214,7 @@ def emit_complete_bundle(
     from .timeline import load_plan
 
     plan = load_plan(root / "config" / "presentation" / "storyboard.yaml")
-    capture_id, capture_sha256, shots, bindings = _validate_sources(
+    capture_id, capture_sha256, presentation_classification, shots, bindings = _validate_sources(
         plan,
         rgb_path,
         technical_path,
@@ -226,6 +232,7 @@ def emit_complete_bundle(
         "ground_truth_consumed": False,
         "capture_id": capture_id,
         "capture_sha256": capture_sha256,
+        "presentation_classification": presentation_classification,
         "rgb_bundle": _descriptor(rgb_path, output),
         "technical_delivery": _descriptor(technical_path, output),
         "source_bindings": bindings,
@@ -260,7 +267,7 @@ def validate_complete_bundle(
     expected_keys = {
         "schema_version", "status", "label", "producer_id", "producer_source_sha256",
         "ground_truth_consumed", "capture_id", "capture_sha256", "rgb_bundle",
-        "technical_delivery", "source_bindings", "shots",
+        "technical_delivery", "presentation_classification", "source_bindings", "shots",
     }
     if set(data) != expected_keys or data.get("schema_version") != 3 or data.get("status") != "complete":
         raise ValueError("complete presentation input manifest schema is invalid")
@@ -270,7 +277,7 @@ def validate_complete_bundle(
         raise ValueError("complete presentation inputs must be ground-truth-free")
     rgb_path = _safe_descriptor(path, data.get("rgb_bundle"), "rgb_bundle")
     technical_path = _safe_descriptor(path, data.get("technical_delivery"), "technical_delivery")
-    capture_id, capture_sha256, shots, bindings = _validate_sources(
+    capture_id, capture_sha256, presentation_classification, shots, bindings = _validate_sources(
         plan,
         rgb_path,
         technical_path,
@@ -281,12 +288,21 @@ def validate_complete_bundle(
     )
     if data.get("capture_id") != capture_id or data.get("capture_sha256") != capture_sha256:
         raise ValueError("complete presentation capture identity is forged")
+    if data.get("presentation_classification") != presentation_classification:
+        raise ValueError("complete presentation classification is forged")
     if data.get("source_bindings") != bindings:
         raise ValueError("complete presentation source bindings are forged")
     expected_shots = [_shot_value(source, path) for source in shots]
     if data.get("shots") != expected_shots:
         raise ValueError("complete presentation shot mapping is forged or incomplete")
-    return ValidatedCompleteBundle(path, capture_id, capture_sha256, shots, bindings)
+    return ValidatedCompleteBundle(
+        path,
+        capture_id,
+        capture_sha256,
+        presentation_classification,
+        shots,
+        bindings,
+    )
 
 
 def main() -> None:

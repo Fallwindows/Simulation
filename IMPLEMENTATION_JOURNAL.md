@@ -277,3 +277,18 @@ source bindings, receipts, and generated media are unchanged from r2.
   explicit test catalogs; their renders are visibly and structurally labeled
   as non-production demonstrations. Diagnostic rendering remains pinned to the
   immutable pre-storyboard baseline and rejects storyboard pixels by identity.
+
+### Presentation r6 provenance classification and atomic publication
+
+- Complete-render status now comes from the exact presentation classification
+  in both reviewed source catalogs. Generated fixtures carry a fixed marker ID
+  and marker SHA-256 through the catalog hashes, RGB receipt, technical source
+  receipt, and complete bundle. A mutable display label has no effect on the
+  output claim or fixture watermark; mismatched or forged classifications fail
+  validation.
+- Rendering now builds every video, audio file, contact sheet, representative
+  frame, hash, and completion manifest in a fresh sibling staging directory.
+  Only a fully validated generation is published. Publication swaps the whole
+  directory on the same volume and restores the prior directory if the swap
+  fails. Encode or later evidence-generation failures remove staging and leave
+  a prior completed package byte-for-byte unchanged.

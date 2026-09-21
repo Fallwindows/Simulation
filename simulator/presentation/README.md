@@ -70,7 +70,10 @@ python -m simulator.presentation.complete_bundle `
 
 The production CLI uses only checked-in catalogs. Tests may inject temporary
 reviewed catalogs for generated fixtures; those outputs must stay labelled as
-test evidence.
+test evidence. Fixture classification comes from an exact marker ID and SHA-256
+inside both reviewed source catalogs, and those catalog hashes are bound into
+the producer receipts and complete bundle. Display labels never control output
+status, claims, or the visible fixture watermark.
 
 The checked-in `diagnostic_baseline_inputs.json` intentionally supplies only
 `demo/walking_aisle_final_hifi.mp4`. Diagnostic mode accepts that exact
@@ -107,3 +110,8 @@ genuine role is present. Native delivery rejects source views smaller than
 1920x1080 and writes an FFV1 lossless local master, high-quality silent H.264
 MP4, deterministic self-created ambience/footstep/cart WAV, audio-muxed final
 MP4, 720p review MP4, contact sheet, and start/mid/end frames for every shot.
+Every artifact and the completion manifest are first written and validated in
+a unique sibling staging directory. The renderer publishes the package with a
+directory-generation swap only after all checks pass; a failed encode, probe,
+hash, contact sheet, or representative-frame step removes staging and leaves
+the prior completed generation byte-for-byte unchanged.

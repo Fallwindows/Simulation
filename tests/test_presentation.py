@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from simulator.presentation.complete_bundle import emit_complete_bundle
 from simulator.presentation.render_video import plan_segments, render_presentation
@@ -502,11 +503,24 @@ class CompletePresentationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "capture identity is forged"):
             self._report(forged_complete)
 
+        complete_value = json.loads(self.fixture["complete_inputs"].read_text(encoding="utf-8"))
+        complete_value["presentation_classification"] = {"kind": "reviewed_production"}
+        forged_classification = self.fixture["complete_inputs"].with_name("forged_classification_inputs.json")
+        forged_classification.write_text(json.dumps(complete_value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "classification is forged"):
+            self._report(forged_classification)
+
     def test_complete_preview_is_exact_and_applies_declared_rgb_hflip(self):
         output = self.root / "preview"
+        mutated_inputs = self.fixture["complete_inputs"].with_name("label_mutated_complete_inputs.json")
+        mutated_value = json.loads(self.fixture["complete_inputs"].read_text(encoding="utf-8"))
+        mutated_value["label"] = "validated complete presentation inputs"
+        mutated_inputs.write_text(json.dumps(mutated_value), encoding="utf-8")
+        report = self._report(mutated_inputs)
+        self.assertEqual(report.presentation_classification["kind"], "generated_test_fixture")
         manifest = render_presentation(
             PLAN,
-            self.fixture["complete_inputs"],
+            mutated_inputs,
             output,
             "preview",
             "complete",
@@ -529,6 +543,92 @@ class CompletePresentationTests(unittest.TestCase):
         right = frame.getpixel((1200, 360))
         self.assertGreater(left[2], left[0], "hflip must move the blue raw right half to presentation left")
         self.assertGreater(right[0], right[2], "hflip must move the red raw left half to presentation right")
+
+    def test_delivery_failures_leave_prior_generation_byte_exact_and_remove_staging(self):
+        expected_probe = {
+            "width": 1920, "height": 1080, "fps_num": 30, "fps_den": 1,
+            "real_fps_num": 30, "real_fps_den": 1, "frame_count": 1350,
+            "video_stream_count": 1, "audio_stream_count": 0,
+            "video_codec": "ffv1", "duration_seconds": 45.0,
+        }
+
+        def seed_prior(target: Path) -> dict[str, bytes]:
+            target.mkdir()
+            (target / "presentation_delivery_manifest.json").write_text(
+                '{"status":"complete","generation":"prior"}\n', encoding="utf-8"
+            )
+            (target / "presentation_final.mp4").write_bytes(b"prior-final")
+            prior_frames = target / "presentation_delivery_representative_frames"
+            prior_frames.mkdir()
+            (prior_frames / "prior.png").write_bytes(b"prior-frame")
+            return {
+                path.relative_to(target).as_posix(): path.read_bytes()
+                for path in target.rglob("*") if path.is_file()
+            }
+
+        def assert_prior_unchanged(target: Path, expected: dict[str, bytes]) -> None:
+            observed = {
+                path.relative_to(target).as_posix(): path.read_bytes()
+                for path in target.rglob("*") if path.is_file()
+            }
+            self.assertEqual(observed, expected)
+            leftovers = [
+                path.name for path in target.parent.iterdir()
+                if path.name.startswith(f".{target.name}.staging-")
+                or path.name.startswith(f".{target.name}.previous-")
+            ]
+            self.assertEqual(leftovers, [])
+
+        second_encode = self.root / "atomic_second_encode"
+        prior = seed_prior(second_encode)
+        calls = []
+
+        def fail_second_run(command):
+            calls.append(command)
+            output = Path(command[-1])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"new-partial")
+            if len(calls) == 2:
+                raise RuntimeError("injected second encode failure")
+
+        with patch("simulator.presentation.render_video._run", fail_second_run), patch(
+            "simulator.presentation.render_video._validate_output", return_value=expected_probe
+        ):
+            with self.assertRaisesRegex(RuntimeError, "second encode"):
+                render_presentation(
+                    PLAN, self.fixture["complete_inputs"], second_encode, "delivery", "complete",
+                    str(FFMPEG), str(FFPROBE), self.fixture["rgb_catalog"], self.fixture["technical_catalog"],
+                )
+        assert_prior_unchanged(second_encode, prior)
+
+        late_failure = self.root / "atomic_late_failure"
+        prior = seed_prior(late_failure)
+
+        def fake_run(command):
+            output = Path(command[-1])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"new-output")
+
+        def fake_audio(path, _duration):
+            Path(path).write_bytes(b"new-audio")
+
+        def fake_contact(_video, path, _ffmpeg, _plan):
+            Path(path).write_bytes(b"new-contact")
+
+        with patch("simulator.presentation.render_video._run", fake_run), patch(
+            "simulator.presentation.render_video._validate_output", return_value=expected_probe
+        ), patch("simulator.presentation.render_video._write_deterministic_ambience", fake_audio), patch(
+            "simulator.presentation.render_video._contact_sheet", fake_contact
+        ), patch(
+            "simulator.presentation.render_video._representative_frames",
+            side_effect=RuntimeError("injected representative-frame failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "representative-frame"):
+                render_presentation(
+                    PLAN, self.fixture["complete_inputs"], late_failure, "delivery", "complete",
+                    str(FFMPEG), str(FFPROBE), self.fixture["rgb_catalog"], self.fixture["technical_catalog"],
+                )
+        assert_prior_unchanged(late_failure, prior)
 
     def test_delivery_package_has_lossless_silent_audio_final_and_review_outputs(self):
         output = self.root / "delivery"

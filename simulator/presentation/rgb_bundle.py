@@ -211,6 +211,7 @@ def emit_rgb_bundle(
         "capture_acceptance": {
             "mechanism": "reviewed_exact_capture_allowlist",
             "catalog_sha256": acceptance["catalog_sha256"],
+            "presentation_classification": acceptance["presentation_classification"],
             "cryptographic_execution_attestation": False,
         },
     }
@@ -234,6 +235,7 @@ def emit_rgb_bundle(
         "acceptance": {
             "mechanism": "reviewed_exact_capture_allowlist",
             "catalog_sha256": acceptance["catalog_sha256"],
+            "presentation_classification": acceptance["presentation_classification"],
             "cryptographic_execution_attestation": False,
         },
         "artifacts": artifacts,

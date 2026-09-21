@@ -11,6 +11,7 @@ from typing import Any
 
 from simulator.capture.manifest import capture_hash, write_json
 from simulator.presentation.complete_bundle import emit_complete_bundle
+from simulator.presentation.provenance import GENERATED_TEST_FIXTURE_CLASSIFICATION
 from simulator.presentation.rgb_bundle import emit_rgb_bundle
 
 
@@ -66,6 +67,7 @@ def _source_receipt(capture_id: str, revision: str, catalog: dict[str, Any], cat
     return {
         "source_id": source["source_id"],
         "capture_id": capture_id,
+        "presentation_classification": source["presentation_classification"],
         "producer_revisions": {"capture": revision, "slam": revision, "perception": revision},
         "simulation_time": {"basis": "slam/slam_poses.csv:timestamp_s", "start_s": 0.2, "end_s": 20.4},
         "map_state": {
@@ -183,6 +185,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             "producer_source_path": "scripts/capture_simulation.ps1", "producer_blob_sha1": producer_blob,
             "required_artifact_sha256": required_hashes,
             "review": {"status": "accepted", "reviewer": "generated-test-fixture", "reviewed_utc": "2026-09-21T00:00:00Z"},
+            "presentation_classification": GENERATED_TEST_FIXTURE_CLASSIFICATION,
         }],
     })
     rgb_bundle = root / "rgb_bundle.json"
@@ -195,6 +198,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     technical_catalog_value = {
         "schema_version": 1, "status": "reviewed_source_catalog", "sources": [{
             "source_id": "generated-complete-presentation-fixture-v1", "capture_id": capture_id,
+            "presentation_classification": GENERATED_TEST_FIXTURE_CLASSIFICATION,
             "run_directory_name": capture_id, "capture_sha256": capture_value["capture_sha256"],
             "producer_revisions": {"capture": revision, "slam": revision, "perception": revision},
             "producer_manifests": {

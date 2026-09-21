@@ -14,7 +14,9 @@ import hashlib
 import json
 import os
 import math
+import shutil
 import subprocess
+import uuid
 import wave
 from dataclasses import dataclass
 from fractions import Fraction
@@ -399,7 +401,7 @@ def _representative_frames(video: Path, output_dir: Path, ffmpeg: str, plan: Pre
     return result
 
 
-def render_presentation(
+def _render_presentation_generation(
     plan_path: str | Path,
     inputs_path: str | Path,
     output_dir: str | Path,
@@ -436,7 +438,10 @@ def render_presentation(
     target_dir = Path(output_dir).resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     stem = "diagnostic_preview" if mode == "diagnostic" else f"presentation_{profile_name}"
-    test_fixture = mode == "complete" and "generated" in report.label.lower()
+    test_fixture = (
+        mode == "complete"
+        and report.presentation_classification.get("kind") == "generated_test_fixture"
+    )
     inputs, filter_graph = _build_filter(plan, profile_name, segments, test_fixture)
     outputs: dict[str, dict[str, Any]] = {}
     if mode == "complete" and profile_name == "delivery":
@@ -592,6 +597,72 @@ def render_presentation(
     temporary_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temporary_manifest, manifest_path)
     return manifest
+
+
+def _remove_generation(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def _publish_generation(staging: Path, target: Path) -> None:
+    """Publish one validated directory generation, restoring the old one on swap failure."""
+
+    backup = target.parent / f".{target.name}.previous-{uuid.uuid4().hex}"
+    had_previous = target.exists()
+    if had_previous and not target.is_dir():
+        raise ValueError("presentation output path exists and is not a directory")
+    try:
+        if had_previous:
+            os.replace(target, backup)
+        os.replace(staging, target)
+    except BaseException:
+        if had_previous and backup.exists():
+            if target.exists():
+                _remove_generation(target)
+            os.replace(backup, target)
+        raise
+    if backup.exists():
+        _remove_generation(backup)
+
+
+def render_presentation(
+    plan_path: str | Path,
+    inputs_path: str | Path,
+    output_dir: str | Path,
+    profile_name: str,
+    mode: str,
+    ffmpeg: str,
+    ffprobe: str,
+    rgb_capture_catalog: str | Path | None = None,
+    technical_source_catalog: str | Path | None = None,
+) -> dict[str, Any]:
+    """Render and validate a full package before publishing one directory generation."""
+
+    target = Path(output_dir).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not target.is_dir():
+        raise ValueError("presentation output path exists and is not a directory")
+    staging = target.parent / f".{target.name}.staging-{uuid.uuid4().hex}"
+    try:
+        result = _render_presentation_generation(
+            plan_path,
+            inputs_path,
+            staging,
+            profile_name,
+            mode,
+            ffmpeg,
+            ffprobe,
+            rgb_capture_catalog,
+            technical_source_catalog,
+        )
+        _publish_generation(staging, target)
+        return result
+    except BaseException:
+        if staging.exists():
+            _remove_generation(staging)
+        raise
 
 
 def main() -> None:

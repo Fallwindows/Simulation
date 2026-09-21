@@ -7,7 +7,17 @@
   "rgb_capture_acceptance": {
     "mechanism": "reviewed_exact_capture_allowlist",
     "catalog_path": "config/presentation/accepted_rgb_captures.json",
-    "cryptographic_execution_attestation": false
+    "cryptographic_execution_attestation": false,
+    "presentation_classifications": [
+      {
+        "kind": "reviewed_production"
+      },
+      {
+        "kind": "generated_test_fixture",
+        "marker_id": "simulator.presentation.generated-test-fixture.v1",
+        "marker_sha256": "5ac77eb627c557f5f95ca9d9241960beddaf190084aa375f62d893c88ac6825e"
+      }
+    ]
   },
   "diagnostic_baseline": {
     "schema_id": "simulation.presentation.diagnostic_baseline.v1",

@@ -149,6 +149,7 @@ class ShotRenderInput:
 class InputReport:
     manifest_path: Path
     label: str
+    presentation_classification: dict[str, str]
     roles: dict[str, RoleInput]
     ready_genuine_roles: frozenset[str]
     role_errors: dict[str, tuple[str, ...]]
@@ -321,6 +322,7 @@ def inspect_inputs(
         return InputReport(
             source,
             str(data.get("label", "")),
+            validated.presentation_classification,
             {},
             frozenset(plan.role_contracts),
             {},
@@ -386,6 +388,7 @@ def inspect_inputs(
     return InputReport(
         source,
         str(data.get("label", "")),
+        {"kind": "diagnostic_or_incomplete"},
         roles,
         frozenset(ready),
         errors,
