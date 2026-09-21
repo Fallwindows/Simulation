@@ -24,6 +24,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+SHOPPER_CART_START_X_M = 11.5
+SHOPPER_CART_CRUISE_SPEED_MPS = 0.65
+SHOPPER_CART_DECEL_START_S = 17.75
+SHOPPER_CART_STOP_S = 20.5
+# Furthest authored local-X extent: basket-end center 1.13 m + 0.0125 m half-width.
+SHOPPER_CART_FRONT_OFFSET_M = 1.1425
+
+
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the grocery aisle Isaac Sim sensor runtime")
     parser.add_argument("--scenario", default=str(REPO_ROOT / "config/scenarios/walking_baseline.yaml"))
@@ -108,6 +116,116 @@ def _define_xform(stage, path: str, frame_name: str):
     return prim
 
 
+def shopper_cart_position_at_time(timestamp_s: float) -> tuple[float, float, float]:
+    """Deterministic aisle-space pose for the contextual shopper and cart."""
+
+    if not math.isfinite(timestamp_s) or timestamp_s < 0.0:
+        raise ValueError("timestamp_s must be finite and non-negative")
+    if timestamp_s <= SHOPPER_CART_DECEL_START_S:
+        x_m = SHOPPER_CART_START_X_M + SHOPPER_CART_CRUISE_SPEED_MPS * timestamp_s
+    else:
+        # Integrate a smoothstep velocity ramp from cruise speed to rest.  The
+        # clamped phase keeps the complete assembly stationary after the
+        # production horizon without a position, velocity, or acceleration
+        # discontinuity at either end of the stop.
+        stop_duration_s = SHOPPER_CART_STOP_S - SHOPPER_CART_DECEL_START_S
+        phase = min((timestamp_s - SHOPPER_CART_DECEL_START_S) / stop_duration_s, 1.0)
+        integrated_velocity = phase - phase**3 + 0.5 * phase**4
+        x_m = (
+            SHOPPER_CART_START_X_M
+            + SHOPPER_CART_CRUISE_SPEED_MPS * SHOPPER_CART_DECEL_START_S
+            + SHOPPER_CART_CRUISE_SPEED_MPS * stop_duration_s * integrated_velocity
+        )
+    return (x_m, 0.0, 0.0)
+
+
+def _preview_material(stage, path: str, color, roughness: float, metallic: float = 0.0):
+    from pxr import Gf, Sdf, UsdShade
+
+    material = UsdShade.Material.Define(stage, path)
+    shader = UsdShade.Shader.Define(stage, path + "/surface")
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(roughness))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(metallic))
+    material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    return material
+
+
+def _build_shopper_cart(stage):
+    """Author one restrained code-native shopper/cart depth cue."""
+
+    from pxr import Gf, Sdf, UsdGeom, UsdShade
+
+    root_path = "/World/GroceryAisle/dynamic/shopper_cart"
+    root = UsdGeom.Xform.Define(stage, root_path).GetPrim()
+    root.CreateAttribute("grocery:dynamic", Sdf.ValueTypeNames.Bool).Set(True)
+    root.CreateAttribute("grocery:semantic_id", Sdf.ValueTypeNames.String).Set("context/shopper_cart/primary")
+    root_api = UsdGeom.XformCommonAPI(root)
+    root_api.SetTranslate(Gf.Vec3d(*shopper_cart_position_at_time(0.0)))
+
+    clothing = _preview_material(stage, "/World/GroceryAisle/looks/shopper_clothing", (0.035, 0.085, 0.13), 0.62)
+    denim = _preview_material(stage, "/World/GroceryAisle/looks/shopper_denim", (0.055, 0.11, 0.20), 0.68)
+    skin = _preview_material(stage, "/World/GroceryAisle/looks/shopper_skin", (0.46, 0.27, 0.18), 0.72)
+    cart_metal = _preview_material(stage, "/World/GroceryAisle/looks/cart_metal", (0.12, 0.17, 0.18), 0.24, 0.72)
+    wheel_material = _preview_material(stage, "/World/GroceryAisle/looks/cart_wheel", (0.018, 0.021, 0.024), 0.70)
+
+    def bind(prim, material) -> None:
+        UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
+
+    def cube(name: str, center, size, material) -> None:
+        prim = UsdGeom.Cube.Define(stage, f"{root_path}/{name}").GetPrim()
+        UsdGeom.Cube(prim).GetSizeAttr().Set(1.0)
+        api = UsdGeom.XformCommonAPI(prim)
+        api.SetTranslate(Gf.Vec3d(*center))
+        api.SetScale(Gf.Vec3f(*size))
+        bind(prim, material)
+
+    def capsule(name: str, center, radius: float, height: float, material) -> None:
+        geometry = UsdGeom.Capsule.Define(stage, f"{root_path}/{name}")
+        geometry.GetRadiusAttr().Set(radius)
+        geometry.GetHeightAttr().Set(height)
+        geometry.GetAxisAttr().Set(UsdGeom.Tokens.z)
+        UsdGeom.XformCommonAPI(geometry.GetPrim()).SetTranslate(Gf.Vec3d(*center))
+        bind(geometry.GetPrim(), material)
+
+    def sphere(name: str, center, radius: float, material) -> None:
+        geometry = UsdGeom.Sphere.Define(stage, f"{root_path}/{name}")
+        geometry.GetRadiusAttr().Set(radius)
+        UsdGeom.XformCommonAPI(geometry.GetPrim()).SetTranslate(Gf.Vec3d(*center))
+        bind(geometry.GetPrim(), material)
+
+    def wheel(name: str, center) -> None:
+        geometry = UsdGeom.Cylinder.Define(stage, f"{root_path}/{name}")
+        geometry.GetRadiusAttr().Set(0.09)
+        geometry.GetHeightAttr().Set(0.055)
+        geometry.GetAxisAttr().Set(UsdGeom.Tokens.y)
+        UsdGeom.XformCommonAPI(geometry.GetPrim()).SetTranslate(Gf.Vec3d(*center))
+        bind(geometry.GetPrim(), wheel_material)
+
+    # Human silhouette, facing +X with hands resting at the cart handle.
+    capsule("torso", (0.0, 0.0, 1.28), 0.20, 0.56, clothing)
+    sphere("head", (0.0, 0.0, 1.78), 0.16, skin)
+    capsule("leg_left", (-0.02, -0.115, 0.55), 0.075, 0.67, denim)
+    capsule("leg_right", (0.02, 0.115, 0.55), 0.075, 0.67, denim)
+    capsule("arm_left", (0.20, -0.24, 1.20), 0.055, 0.48, clothing)
+    capsule("arm_right", (0.20, 0.24, 1.20), 0.055, 0.48, clothing)
+
+    # Open cart rails preserve sightlines and read better than a solid box.
+    for rail_index, z in enumerate((0.68, 1.02)):
+        cube(f"basket_side_l_{rail_index}", (0.72, -0.32, z), (0.82, 0.025, 0.035), cart_metal)
+        cube(f"basket_side_r_{rail_index}", (0.72, 0.32, z), (0.82, 0.025, 0.035), cart_metal)
+        cube(f"basket_end_f_{rail_index}", (1.13, 0.0, z), (0.025, 0.64, 0.035), cart_metal)
+        cube(f"basket_end_b_{rail_index}", (0.31, 0.0, z), (0.025, 0.64, 0.035), cart_metal)
+    for corner_index, (x, y) in enumerate(((0.31, -0.32), (0.31, 0.32), (1.13, -0.32), (1.13, 0.32))):
+        cube(f"basket_post_{corner_index}", (x, y, 0.85), (0.025, 0.025, 0.36), cart_metal)
+    cube("cart_base", (0.78, 0.0, 0.37), (0.76, 0.50, 0.035), cart_metal)
+    cube("cart_handle", (0.20, 0.0, 1.10), (0.035, 0.76, 0.045), cart_metal)
+    for wheel_index, (x, y) in enumerate(((0.46, -0.28), (0.46, 0.28), (1.04, -0.28), (1.04, 0.28))):
+        wheel(f"wheel_{wheel_index}", (x, y, 0.19))
+    return root_api
+
+
 def _build_world(stage, scenario):
     from pxr import Gf, UsdGeom, UsdLux
 
@@ -125,14 +243,30 @@ def _build_world(stage, scenario):
     primitive_count = IsaacAisleBuilder(stage=stage).build(layout, "/World/GroceryAisle")
 
     dome = UsdLux.DomeLight.Define(stage, "/World/DomeLight")
-    dome.GetIntensityAttr().Set(float(scenario.environment.lighting_lux))
-    dome.GetColorAttr().Set(Gf.Vec3f(1.0, 0.96, 0.9))
-    distant = UsdLux.DistantLight.Define(stage, "/World/DistantLight")
-    distant.GetIntensityAttr().Set(2500.0)
-    distant.GetAngleAttr().Set(0.5)
-    UsdGeom.XformCommonAPI(distant).SetRotate(Gf.Vec3f(-35.0, -25.0, 25.0))
+    dome.GetIntensityAttr().Set(float(scenario.environment.lighting_lux) * 0.35)
+    dome.GetColorAttr().Set(Gf.Vec3f(0.78, 0.82, 0.86))
+    for panel_index, x in enumerate((2.2, 5.2, 8.2, 11.2, 14.2, 17.2, 20.2, 23.2)):
+        for side_index, y in enumerate((-0.95, 0.95)):
+            light = UsdLux.RectLight.Define(stage, f"/World/GroceryAisle/lighting/panel_{panel_index:02d}_{side_index}")
+            light.GetWidthAttr().Set(0.84)
+            light.GetHeightAttr().Set(0.30)
+            light.GetIntensityAttr().Set(float(scenario.environment.lighting_lux) * 8.0)
+            light.GetColorAttr().Set(Gf.Vec3f(1.0, 0.91, 0.76))
+            light.GetNormalizeAttr().Set(True)
+            UsdGeom.XformCommonAPI(light).SetTranslate(Gf.Vec3d(x, y, 2.94))
+        # RaytracedLighting has limited indirect bounce in this capture path.
+        # A small invisible all-direction fixture at each ceiling bay supplies
+        # the neutral shelf-face fill that the physical ceiling would reflect.
+        fill = UsdLux.SphereLight.Define(stage, f"/World/GroceryAisle/lighting/fill_{panel_index:02d}")
+        fill.GetRadiusAttr().Set(0.16)
+        fill.GetIntensityAttr().Set(float(scenario.environment.lighting_lux) * 5.5)
+        fill.GetColorAttr().Set(Gf.Vec3f(0.82, 0.88, 1.0))
+        fill.GetNormalizeAttr().Set(True)
+        UsdGeom.XformCommonAPI(fill).SetTranslate(Gf.Vec3d(x, 0.0, 2.72))
 
-    return layout, primitive_count
+    shopper_cart = _build_shopper_cart(stage)
+
+    return layout, primitive_count, shopper_cart
 
 
 def _build_sensor_rig(stage, scenario):
@@ -387,7 +521,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         stage = omni.usd.get_context().get_stage()
 
         print("[grocery-runtime] building aisle USD", flush=True)
-        layout, primitive_count = _build_world(stage, scenario)
+        layout, primitive_count, shopper_cart_api = _build_world(stage, scenario)
         print("[grocery-runtime] building sensor rig USD", flush=True)
         _, camera_path, lidar_path = _build_sensor_rig(stage, scenario)
         print("[grocery-runtime] creating camera ROS graph", flush=True)
@@ -482,6 +616,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
             sampled_rpy_deg = rpy_deg_from_quaternion(commanded_sample.orientation_xyzw)
             rig_api.SetRotate(Gf.Vec3f(*sampled_rpy_deg), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+            shopper_cart_api.SetTranslate(Gf.Vec3d(*shopper_cart_position_at_time(commanded_timestamp_s)))
             simulation_app.update()
             timestamp_s = float(timeline.get_current_time())
             if last_timestamp_s is not None and timestamp_s <= last_timestamp_s:
@@ -547,6 +682,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "rig_orientation_source": "trajectory.sample.orientation_xyzw",
             "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
             "ground_truth_odometry_leakage": False,
+            "dynamic_context": {
+                "shopper_cart": True,
+                "motion_source": "deterministic_presentation_scene_time",
+                "semantic_id": "context/shopper_cart/primary",
+                "last_position_m": list(shopper_cart_position_at_time(timestamp_s)),
+            },
         }
         # Persist before SimulationApp teardown.  Isaac's shutdown sequence
         # can terminate the embedded Python process before the caller regains

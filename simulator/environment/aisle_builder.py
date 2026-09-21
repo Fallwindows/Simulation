@@ -14,6 +14,8 @@ from simulator.environment.retail_catalog import RetailAsset, RetailAssetCatalog
 SHELF_THICKNESS_M = 0.06
 SHELF_BOTTOM_CENTER_OFFSET_M = 0.30
 SHELF_TOP_CENTER_MARGIN_M = 0.05
+CEILING_HEIGHT_M = 3.05
+OVERHEAD_SIGN_X_M = 9.6
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ class AisleLayout:
     assets: tuple[AssetInstance, ...]
     seed: int
     asset_manifest_path: str = ""
+    fixtures: tuple[AssetInstance, ...] = ()
 
     @property
     def products(self) -> tuple[AssetInstance, ...]:
@@ -279,6 +282,31 @@ def build_aisle_layout(config: AisleConfig) -> AisleLayout:
     assets: list[AssetInstance] = []
     floor_z = config.floor_z_m - 0.05
     primitives.append(Box("floor", (config.length_m / 2.0, 0.0, floor_z), (config.length_m + 2.0, config.width_m + 2.0, 0.1), "floor"))
+    # Close the retail volume around the authored aisle.  The earlier open
+    # stage left the upper half of the camera frame as a featureless dome and
+    # made the sun-like key light visually dominate the store.  These pieces
+    # are ordinary scene geometry, so RGB and range sensors observe the same
+    # ceiling, walls, and fixtures.
+    shell_length = config.length_m + 3.0
+    shell_center_x = config.length_m / 2.0 + 0.5
+    wall_height = CEILING_HEIGHT_M
+    primitives.extend((
+        Box("ceiling", (shell_center_x, 0.0, CEILING_HEIGHT_M), (shell_length, config.width_m + 2.0, 0.10), "ceiling"),
+        Box("end_wall", (config.length_m + 1.45, 0.0, wall_height / 2.0), (0.12, config.width_m + 2.0, wall_height), "wall"),
+        Box("side_wall_left", (shell_center_x, -(config.width_m / 2.0 + 0.85), wall_height / 2.0), (shell_length, 0.12, wall_height), "wall"),
+        Box("side_wall_right", (shell_center_x, config.width_m / 2.0 + 0.85, wall_height / 2.0), (shell_length, 0.12, wall_height), "wall"),
+    ))
+    # A shallow ceiling grid and repeated luminous panels provide scale and
+    # converging lines without introducing image textures or external assets.
+    for grid_index in range(-2, 3):
+        y = grid_index * 1.2
+        primitives.append(Box(f"ceiling_rail_y{grid_index + 2}", (shell_center_x, y, CEILING_HEIGHT_M - 0.065), (shell_length, 0.025, 0.025), "ceiling_grid"))
+    for grid_index in range(22):
+        x = 0.6 + grid_index * 1.2
+        primitives.append(Box(f"ceiling_rail_x{grid_index:02d}", (x, 0.0, CEILING_HEIGHT_M - 0.065), (0.025, config.width_m + 1.7, 0.025), "ceiling_grid"))
+    for panel_index, x in enumerate((2.2, 5.2, 8.2, 11.2, 14.2, 17.2, 20.2, 23.2)):
+        for side_index, y in enumerate((-0.95, 0.95)):
+            primitives.append(Box(f"light_panel_{panel_index:02d}_{side_index}", (x, y, CEILING_HEIGHT_M - 0.085), (0.88, 0.34, 0.025), "light_panel"))
     bay_count = max(1, int(config.length_m // config.bay_width_m))
     shelf_positions: dict[tuple[int, int], tuple[float, ...]] = {}
     for row_index, row_y in enumerate(config.shelf_rows_y_m):
@@ -318,4 +346,19 @@ def build_aisle_layout(config: AisleConfig) -> AisleLayout:
             fruit_category,
             bin_index,
         )
-    return AisleLayout(tuple(primitives), tuple(assets), config.seed, config.asset_manifest_path)
+    sign_record = catalog.by_key("promo_market_sign")
+    fixtures = (
+        AssetInstance(
+            name="overhead_market_sign",
+            asset_key=sign_record.asset_key,
+            category=sign_record.category,
+            position_m=(OVERHEAD_SIGN_X_M, 0.0, 2.52),
+            # The textured front is local +Y. +90 degrees points that normal
+            # toward the approaching camera (-X); the negative local-X scale
+            # preserves readable left-to-right texture U in camera space.
+            rotation_rpy_deg=(0.0, 0.0, 90.0),
+            scale_xyz=(-1.65, 1.0, 1.0),
+            semantic_id="fixture/promo_market_sign/overhead_01",
+        ),
+    )
+    return AisleLayout(tuple(primitives), tuple(assets), config.seed, config.asset_manifest_path, fixtures)

@@ -1,4 +1,5 @@
 import re
+import math
 import unittest
 from collections import Counter
 from pathlib import Path
@@ -132,6 +133,29 @@ class RetailAssetTests(unittest.TestCase):
             else:
                 self.assertLess(abs(yaw - 180.0), 5.0)
             self.assertGreater(abs(asset.position_m[1]), 1.0)
+
+    def test_overhead_sign_uses_textured_front_with_readable_camera_basis(self):
+        self.assertEqual(len(self.layout.fixtures), 1)
+        sign = self.layout.fixtures[0]
+        record = self.catalog_by_key[sign.asset_key]
+        self.assertEqual(record.asset_key, "promo_market_sign")
+        self.assertTrue(record.texture_path.is_file())
+        usd_source = record.usd_path.read_text(encoding="utf-8")
+        self.assertIn('def Mesh "FrontPanel"', usd_source)
+        self.assertIn('uniform token info:id = "UsdUVTexture"', usd_source)
+        self.assertIn("promo_market_sign.png", usd_source)
+
+        yaw = math.radians(sign.rotation_rpy_deg[2])
+        # Local textured-front normal +Y must point toward an approaching
+        # +X-facing camera, whose view direction from sign to camera is -X.
+        front_world = (-math.sin(yaw) * sign.scale_xyz[1], math.cos(yaw) * sign.scale_xyz[1])
+        self.assertLess(front_world[0], -0.999)
+        self.assertAlmostEqual(front_world[1], 0.0, places=12)
+        # Camera image-right is world -Y. Texture U (local +X) must increase
+        # in that direction or otherwise the readable source appears mirrored.
+        texture_u_world = (math.cos(yaw) * sign.scale_xyz[0], math.sin(yaw) * sign.scale_xyz[0])
+        camera_screen_right = (0.0, -1.0)
+        self.assertGreater(sum(a * b for a, b in zip(texture_u_world, camera_screen_right)), 1.0)
 
 
 if __name__ == "__main__":
