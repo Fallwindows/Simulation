@@ -42,6 +42,16 @@ def export_metadata(scenario_path: str | Path, capture_dir: str | Path, repo_roo
         "topics": rig.topics,
         "frames": rig.frames,
     }
+    configured_camera_info = {
+        "schema_version": 1,
+        "provenance": "configured_intrinsics",
+        "observed_ros_message": False,
+        "source": "sensor_transforms.json",
+        "topic": rig.topics["rgb_camera_info"],
+        "frame_id": rig.frames["camera_optical"],
+        "model": "ideal_pinhole",
+        **dataclasses.asdict(rig.camera_intrinsics),
+    }
     effective = {
         "scenario": scenario.name,
         "environment": dataclasses.asdict(scenario.environment),
@@ -53,6 +63,7 @@ def export_metadata(scenario_path: str | Path, capture_dir: str | Path, repo_roo
     }
     write_json(target / "scene_manifest.json", scene)
     write_json(target / "sensor_transforms.json", transforms)
+    write_json(target / "camera_info.json", configured_camera_info)
     write_json(target / "effective_config.json", effective)
     write_json(target / "experiment_hashes.json", hashes)
     return {"status": "complete", "scenario": scenario.name, "asset_count": len(layout.assets), "hashes": hashes}

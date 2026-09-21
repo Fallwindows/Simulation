@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -19,7 +20,6 @@ from typing import BinaryIO
 
 
 RGB_TOPIC = "/sim/camera/rgb/image_raw"
-CLOCK_TOPIC = "/clock"
 SIM_CLOCK_START_TOLERANCE_S = 1.0
 POST_TARGET_GRACE_S = 1.0
 NOMINAL_FPS = 30.0
@@ -42,12 +42,48 @@ class EncoderResult:
     error: str | None
 
 
+class _DisabledTypeDescriptionService:
+    """No-op for an optional rclpy service whose generated type needs NumPy."""
+
+    def __init__(self, _node):
+        pass
+
+    def destroy(self) -> None:
+        pass
+
+
+def _load_ros_image_type():
+    """Load only the generated Image type, bypassing sensor_msgs.msg imports."""
+
+    import sensor_msgs
+
+    module_path = Path(sensor_msgs.__file__).resolve().parent / "msg" / "_image.py"
+    spec = importlib.util.spec_from_file_location("_grocery_sim_sensor_msgs_image", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load generated ROS Image type from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.Image
+
+
+def _create_recorder_node():
+    """Create the narrow recorder node without NumPy-dependent ROS services."""
+
+    import rclpy.node as node_module
+
+    original_service = node_module.TypeDescriptionService
+    node_module.TypeDescriptionService = _DisabledTypeDescriptionService
+    try:
+        return node_module.Node(
+            "grocery_sim_rgb_video_recorder",
+            start_parameter_services=False,
+        )
+    finally:
+        node_module.TypeDescriptionService = original_service
+
+
 def _stamp(message) -> float:
     return float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0
-
-
-def _clock_stamp(message) -> float:
-    return float(message.clock.sec) + float(message.clock.nanosec) / 1_000_000_000.0
 
 
 def _decode_image(message) -> RawFrame | None:
@@ -260,28 +296,25 @@ class RgbVideoRecorder:
         camera_info_path: Path | None = None,
         ffmpeg_executable: str = "ffmpeg",
     ):
+        if camera_info_path is not None:
+            raise RuntimeError(
+                "--camera-info-json cannot subscribe under the active policy; "
+                "use the configured-intrinsics artifact produced by capture metadata export"
+        )
         import rclpy
-        from rclpy.node import Node
-        from rosgraph_msgs.msg import Clock
-        from sensor_msgs.msg import CameraInfo
-        from sensor_msgs.msg import Image
 
         self.rclpy = rclpy
-        self.node = Node("grocery_sim_rgb_video_recorder")
         self.output = output
         self.metadata_path = metadata_path
         self.frames_path = frames_path
-        self.camera_info_path = camera_info_path
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
         self.ffmpeg_executable = ffmpeg_executable
         self.started_wall = time.monotonic()
-        self.first_clock_s: float | None = None
         self.target_s: float | None = None
         self.post_target_deadline: float | None = None
         self.first_image_stamp_s: float | None = None
         self.last_image_stamp_s: float | None = None
-        self.last_clock_s: float | None = None
         self.frames_written = 0
         self.invalid_frames = 0
         self.duplicate_frames = 0
@@ -296,22 +329,13 @@ class RgbVideoRecorder:
         self.encoder_returncode: int | None = None
         self.fatal_error = False
         self.frame_records: list[dict[str, object]] = []
-        self.camera_info_record: dict[str, object] | None = None
-        self.node.create_subscription(Image, RGB_TOPIC, self._on_image, 5)
-        self.node.create_subscription(CameraInfo, "/sim/camera/rgb/camera_info", self._on_camera_info, 10)
-        self.node.create_subscription(Clock, CLOCK_TOPIC, self._on_clock, 20)
-
-    def _on_clock(self, message) -> None:
-        self.last_clock_s = _clock_stamp(message)
-        if self.first_clock_s is None:
-            self.first_clock_s = self.last_clock_s
-            if self.first_clock_s <= SIM_CLOCK_START_TOLERANCE_S:
-                self.target_s = self.duration_s
-            else:
-                self.target_s = self.first_clock_s + self.duration_s
-        if self.target_s is not None and self.last_clock_s >= self.target_s - 1e-3 and self.post_target_deadline is None:
-            self.post_target_deadline = time.monotonic() + POST_TARGET_GRACE_S
-            self.done_reason = "simulation_time_reached"
+        Image = _load_ros_image_type()
+        self.node = _create_recorder_node()
+        try:
+            self.node.create_subscription(Image, RGB_TOPIC, self._on_image, 5)
+        except BaseException:
+            self.node.destroy_node()
+            raise
 
     def _open_writer(self, frame: RawFrame) -> bool:
         self.width = frame.width
@@ -322,23 +346,6 @@ class RgbVideoRecorder:
         self.encoder_error = self.writer.error
         return False
 
-    def _on_camera_info(self, message) -> None:
-        if self.camera_info_record is not None:
-            return
-        stamp = _stamp(message)
-        self.camera_info_record = {
-            "topic": "/sim/camera/rgb/camera_info",
-            "stamp_s": stamp,
-            "frame_id": str(message.header.frame_id),
-            "width": int(message.width),
-            "height": int(message.height),
-            "distortion_model": str(message.distortion_model),
-            "d": [float(value) for value in message.d],
-            "k": [float(value) for value in message.k],
-            "r": [float(value) for value in message.r],
-            "p": [float(value) for value in message.p],
-        }
-
     def _on_image(self, message) -> None:
         stamp = _stamp(message)
         if self.last_image_stamp_s is not None:
@@ -348,12 +355,20 @@ class RgbVideoRecorder:
             if stamp < self.last_image_stamp_s:
                 self.out_of_order_frames += 1
                 return
-        if self.target_s is not None and stamp > self.target_s + 0.05:
-            self.frames_after_target += 1
-            return
         frame = _decode_image(message)
         if frame is None:
             self.invalid_frames += 1
+            return
+        if self.target_s is None:
+            if stamp <= SIM_CLOCK_START_TOLERANCE_S:
+                self.target_s = self.duration_s
+            else:
+                self.target_s = stamp + self.duration_s
+        if stamp > self.target_s + 0.05:
+            self.frames_after_target += 1
+            if self.frames_written > 0 and self.post_target_deadline is None:
+                self.post_target_deadline = time.monotonic() + POST_TARGET_GRACE_S
+                self.done_reason = "simulation_time_reached"
             return
         if self.writer is None and not self._open_writer(frame):
             self.done_reason = "video_writer_unavailable"
@@ -378,6 +393,9 @@ class RgbVideoRecorder:
             "height": int(message.height),
             "encoding": str(message.encoding),
         })
+        if stamp >= self.target_s - 1e-3 and self.post_target_deadline is None:
+            self.post_target_deadline = time.monotonic() + POST_TARGET_GRACE_S
+            self.done_reason = "simulation_time_reached"
 
     def spin_until_done(self) -> None:
         while self.rclpy.ok():
@@ -436,7 +454,8 @@ class RgbVideoRecorder:
             "first_image_stamp_s": self.first_image_stamp_s,
             "last_image_stamp_s": self.last_image_stamp_s,
             "target_sim_time_s": self.target_s,
-            "last_clock_s": self.last_clock_s,
+            "last_clock_s": None,
+            "completion_clock_source": "image_header",
             "encoding": self.encoding,
             "invalid_frames": self.invalid_frames,
             "duplicate_frames": self.duplicate_frames,
@@ -452,9 +471,6 @@ class RgbVideoRecorder:
             with self.frames_path.open("w", encoding="utf-8", newline="\n") as handle:
                 for record in self.frame_records:
                     handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
-        if self.camera_info_path is not None and self.camera_info_record is not None:
-            self.camera_info_path.parent.mkdir(parents=True, exist_ok=True)
-            self.camera_info_path.write_text(json.dumps(self.camera_info_record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         if not complete:
             raise RuntimeError(f"RGB video recording failed: {metadata}")
         return metadata
@@ -470,19 +486,25 @@ def main() -> None:
     parser.add_argument("--camera-info-json", default="")
     parser.add_argument("--ffmpeg-executable", default="ffmpeg")
     args = parser.parse_args()
+    if args.camera_info_json:
+        parser.error(
+            "--camera-info-json is unavailable under the active policy; "
+            "capture metadata export provides configured camera intrinsics"
+        )
     import rclpy
 
     rclpy.init()
-    recorder = RgbVideoRecorder(
-        Path(args.output),
-        Path(args.metadata),
-        args.duration_seconds,
-        args.startup_timeout_seconds,
-        Path(args.frames_jsonl) if args.frames_jsonl else None,
-        Path(args.camera_info_json) if args.camera_info_json else None,
-        args.ffmpeg_executable,
-    )
+    recorder = None
     try:
+        recorder = RgbVideoRecorder(
+            Path(args.output),
+            Path(args.metadata),
+            args.duration_seconds,
+            args.startup_timeout_seconds,
+            Path(args.frames_jsonl) if args.frames_jsonl else None,
+            None,
+            args.ffmpeg_executable,
+        )
         try:
             recorder.spin_until_done()
         except BaseException as exc:
@@ -496,7 +518,8 @@ def main() -> None:
             raise
         recorder.close()
     finally:
-        recorder.node.destroy_node()
+        if recorder is not None:
+            recorder.node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 

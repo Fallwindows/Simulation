@@ -81,7 +81,7 @@ try {
   $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
   $bag = Start-Process -FilePath $pixi -ArgumentList $bagArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "bag.out.log") -RedirectStandardError (Join-Path $logsDir "bag.err.log")
 
-  $recorderArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","evaluation.rgb_video_recorder","--output",(Join-Path $captureDir "rgb_camera.mp4"),"--metadata",(Join-Path $captureDir "rgb_video.json"),"--frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"),"--camera-info-json",(Join-Path $captureDir "camera_info.json"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
+  $recorderArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","evaluation.rgb_video_recorder","--output",(Join-Path $captureDir "rgb_camera.mp4"),"--metadata",(Join-Path $captureDir "rgb_video.json"),"--frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
   $recorder = Start-Process -FilePath $pixi -ArgumentList $recorderArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "rgb.out.log") -RedirectStandardError (Join-Path $logsDir "rgb.err.log")
   Start-Sleep -Seconds 2
 
@@ -114,7 +114,8 @@ try {
   $bagMeta = Get-Content -LiteralPath (Join-Path $captureDir "bag_metadata.json") -Raw | ConvertFrom-Json
   if ($rgb.status -ne "complete") { throw "RGB capture did not complete." }
   if ($bagMeta.status -ne "complete") { throw "Raw bag capture did not complete." }
-  if (-not (Test-Path -LiteralPath (Join-Path $captureDir "camera_info.json"))) { throw "CameraInfo was not captured." }
+  $cameraInfo = Get-Content -LiteralPath (Join-Path $captureDir "camera_info.json") -Raw | ConvertFrom-Json
+  if ($cameraInfo.provenance -ne "configured_intrinsics" -or [bool]$cameraInfo.observed_ros_message) { throw "Configured camera intrinsics artifact is missing or has invalid provenance." }
 
   & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") ros2 bag info $bagUri | Set-Content -LiteralPath (Join-Path $captureDir "bag_info.txt") -Encoding UTF8
   if ($LASTEXITCODE -ne 0) { throw "ros2 bag info failed for $bagUri." }
@@ -128,7 +129,7 @@ try {
     manifest_version=1; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha
     rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; duration_s=$duration
     bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
-    rgb=[ordered]@{ video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; metadata="rgb_video.json"; frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s }
+    rgb=[ordered]@{ video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; camera_info_provenance="configured_intrinsics"; metadata="rgb_video.json"; frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s }
     ground_truth=[ordered]@{ inventory_csv="inventory_ground_truth.csv"; inventory_json="inventory_ground_truth.json"; pose_topic="/sim/ground_truth/pose"; evaluation_only=$true }
     hashes=(Get-Content -LiteralPath (Join-Path $captureDir "experiment_hashes.json") -Raw | ConvertFrom-Json)
     software_versions="../software_versions.json"

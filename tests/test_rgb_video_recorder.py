@@ -2,19 +2,27 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
-from evaluation.rgb_video_recorder import FfmpegVideoWriter, RawFrame, _decode_image
+from evaluation.rgb_video_recorder import FfmpegVideoWriter, RawFrame, RgbVideoRecorder, _decode_image
 
 
 class _Image:
-    def __init__(self, encoding, width, height, step, data):
+    def __init__(self, encoding, width, height, step, data, stamp_s=0.0):
         self.encoding = encoding
         self.width = width
         self.height = height
         self.step = step
         self.data = data
+        sec = int(stamp_s)
+        nanosec = int(round((stamp_s - sec) * 1_000_000_000))
+        self.header = SimpleNamespace(
+            stamp=SimpleNamespace(sec=sec, nanosec=nanosec),
+            frame_id="camera_optical_frame",
+        )
 
 
 class RgbVideoRecorderTests(unittest.TestCase):
@@ -46,6 +54,57 @@ class RgbVideoRecorderTests(unittest.TestCase):
             decoded.data,
             bytes([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]),
         )
+
+    def test_real_ros_recorder_constructs_without_numpy_or_camera_info_subscription(self):
+        try:
+            import rclpy
+        except ImportError:
+            self.skipTest("rclpy is not installed")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            recorder = None
+            rclpy.init()
+            try:
+                recorder = RgbVideoRecorder(
+                    root / "out.mp4",
+                    root / "metadata.json",
+                    duration_s=0.1,
+                    startup_timeout_s=1.0,
+                )
+                topics = {subscription.topic_name for subscription in recorder.node.subscriptions}
+                self.assertIn("/sim/camera/rgb/image_raw", topics)
+                self.assertNotIn("/sim/camera/rgb/camera_info", topics)
+                self.assertEqual(topics, {"/sim/camera/rgb/image_raw"})
+                self.assertNotIn("numpy", sys.modules)
+                recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([255, 0, 0]) * 8, 0.0))
+                recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([0, 255, 0]) * 8, 0.1))
+                self.assertEqual(recorder.done_reason, "simulation_time_reached")
+                metadata = recorder.close()
+                self.assertEqual(metadata["status"], "complete")
+                self.assertEqual(metadata["completion_clock_source"], "image_header")
+                self.assertEqual(metadata["frame_count"], 2)
+                self.assertEqual(metadata["encoder_returncode"], 0)
+            finally:
+                if recorder is not None:
+                    for subscription in list(recorder.node.subscriptions):
+                        recorder.node.destroy_subscription(subscription)
+                    self.assertEqual(list(recorder.node.subscriptions), [])
+                    recorder.node.destroy_node()
+                if rclpy.ok():
+                    rclpy.shutdown()
+
+    def test_programmatic_camera_info_request_fails_before_ros_imports(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            with self.assertRaisesRegex(RuntimeError, "configured-intrinsics artifact"):
+                RgbVideoRecorder(
+                    root / "out.mp4",
+                    root / "metadata.json",
+                    duration_s=1.0,
+                    startup_timeout_s=1.0,
+                    camera_info_path=root / "camera_info.json",
+                )
 
     def test_supported_encodings_map_to_ffmpeg_raw_pixel_formats(self):
         cases = {
