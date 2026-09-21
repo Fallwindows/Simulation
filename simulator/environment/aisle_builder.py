@@ -353,10 +353,11 @@ def build_aisle_layout(config: AisleConfig) -> AisleLayout:
             asset_key=sign_record.asset_key,
             category=sign_record.category,
             position_m=(OVERHEAD_SIGN_X_M, 0.0, 2.52),
-            # The asset front is +Y. This orientation was verified against
-            # the rendered texture so lettering faces the approaching camera.
-            rotation_rpy_deg=(0.0, 0.0, -90.0),
-            scale_xyz=(1.65, 1.0, 1.0),
+            # The textured front is local +Y. +90 degrees points that normal
+            # toward the approaching camera (-X); the negative local-X scale
+            # preserves readable left-to-right texture U in camera space.
+            rotation_rpy_deg=(0.0, 0.0, 90.0),
+            scale_xyz=(-1.65, 1.0, 1.0),
             semantic_id="fixture/promo_market_sign/overhead_01",
         ),
     )

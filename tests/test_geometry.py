@@ -38,7 +38,8 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(sign.asset_key, "promo_market_sign")
         self.assertEqual(sign.semantic_id, "fixture/promo_market_sign/overhead_01")
         self.assertEqual(sign.position_m, (OVERHEAD_SIGN_X_M, 0.0, 2.52))
-        self.assertEqual(sign.rotation_rpy_deg, (0.0, 0.0, -90.0))
+        self.assertEqual(sign.rotation_rpy_deg, (0.0, 0.0, 90.0))
+        self.assertEqual(sign.scale_xyz, (-1.65, 1.0, 1.0))
         self.assertNotIn(sign, layout.products)
 
     def test_shopper_cart_motion_is_deterministic_and_stays_ahead(self):
