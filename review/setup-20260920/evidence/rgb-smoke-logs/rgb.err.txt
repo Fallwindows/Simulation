@@ -1,0 +1,47 @@
+Traceback (most recent call last):
+  File "C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Lib\site-packages\numpy\_core\__init__.py", line 24, in <module>
+    from . import multiarray
+  File "C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Lib\site-packages\numpy\_core\multiarray.py", line 11, in <module>
+    from . import _multiarray_umath, overrides
+ImportError: DLL load failed while importing _multiarray_umath: An Application Control policy has blocked this file.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\suyog\OneDrive\Documents\ChatGPT\Simulation\evaluation\rgb_video_recorder.py", line 10, in <module>
+    import cv2
+  File "C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Lib\site-packages\cv2\__init__.py", line 11, in <module>
+    import numpy
+  File "C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Lib\site-packages\numpy\__init__.py", line 109, in <module>
+    from numpy.__config__ import show_config
+  File "C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Lib\site-packages\numpy\__config__.py", line 4, in <module>
+    from numpy._core._multiarray_umath import (
+  File "C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Lib\site-packages\numpy\_core\__init__.py", line 85, in <module>
+    raise ImportError(msg) from exc
+ImportError: 
+
+IMPORTANT: PLEASE READ THIS FOR ADVICE ON HOW TO SOLVE THIS ISSUE!
+
+Importing the numpy C-extensions failed. This error can happen for
+many reasons, often due to issues with your setup or how NumPy was
+installed.
+
+We have compiled some common reasons and troubleshooting tips at:
+
+    https://numpy.org/devdocs/user/troubleshooting-importerror.html
+
+Please note and check the following:
+
+  * The Python version is: Python 3.12 from "C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\python.exe"
+  * The NumPy version is: "2.5.1"
+
+and make sure that they are the versions you expect.
+
+Please carefully study the information and documentation linked above.
+This is unlikely to be a NumPy issue but will be caused by a bad install
+or environment on your machine.
+
+Original error was: DLL load failed while importing _multiarray_umath: An Application Control policy has blocked this file.
+

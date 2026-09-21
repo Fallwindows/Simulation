@@ -24,13 +24,15 @@ reviewer technically sandboxed read-only.
 
 ## Fresh worktree bootstrap
 
-The supplied specification/handoff and new setup files are intentionally left
-uncommitted for owner review. Git worktrees from the original base omit them.
-Before using one, either launch the agent from this root with absolute paths to
-the role/spec files and an explicit assigned worktree, or copy `AGENTS.md`,
-`SIMULATION_VIDEO_IMPLEMENTATION_SPEC.md`, `agent_roles/`, `references/`, and
-`.codex/` into the worktree. Copy only absent files; compare SHA-256 for existing
-files and stop on a mismatch. Revalidate all manifest image hashes. Never
+Commit `d315aa9c21fa1bfb3aec284687c6ed4a49151941` made the canonical
+specification, roles, references, and setup files part of the production
+baseline. Worktrees created at that commit or any descendant must use their
+committed copies directly.
+
+Only worktrees based before `d315aa9c21fa1bfb3aec284687c6ed4a49151941`, or
+worktrees where a required canonical file is missing, need the original
+bootstrap procedure: copy only absent files, compare SHA-256 for existing files
+and stop on a mismatch, then revalidate all manifest image hashes. Never
 overwrite, auto-stage, or auto-commit pre-existing owner files during bootstrap.
 
 Keep review snapshots detached at their submitted SHA. Setup instructions read

@@ -6,7 +6,8 @@ evidence for the 45-second simulation video.
 ## Current production run
 
 - Branch: `codex/storyboard-video`
-- Base: `d5e825c8f6dab77aa6a1007c9731c226b588dfcf`
+- Current baseline/checkpoint: `d315aa9c21fa1bfb3aec284687c6ed4a49151941`
+- Original source base: `d5e825c8f6dab77aa6a1007c9731c226b588dfcf`
 - Run window: 2026-09-20 23:21:35 PDT through approximately 2026-09-21
   11:21:35 PDT
 - Requirements authority: [`../EXECUTION_OVERRIDES.md`](../EXECUTION_OVERRIDES.md)
