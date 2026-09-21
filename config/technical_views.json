@@ -1,0 +1,58 @@
+{
+  "fps": 30,
+  "profiles": {
+    "preview": {"width": 1280, "height": 720, "crf": 23, "preset": "veryfast"},
+    "delivery": {"width": 1920, "height": 1080, "crf": 18, "preset": "fast"}
+  },
+  "views": [
+    {
+      "id": "sensor_activation",
+      "presentation_role": "lidar",
+      "frames": 120,
+      "title": "SENSOR GEOMETRY",
+      "subtitle": "OFFLINE MAP-POINT RAY EXPLANATION · NOT A CURRENT SCAN"
+    },
+    {
+      "id": "lidar_environment",
+      "presentation_role": "lidar",
+      "frames": 90,
+      "title": "AISLE GEOMETRY",
+      "subtitle": "OFFLINE LIDAR-SLAM MAP CLOUD · POINTS ONLY"
+    },
+    {
+      "id": "persistent_map",
+      "presentation_role": "map",
+      "frames": 90,
+      "title": "PERSISTENT MAP",
+      "subtitle": "FINALIZED OFFLINE SLAM SNAPSHOT · ESTIMATED PATH"
+    },
+    {
+      "id": "object_association",
+      "presentation_role": "reconstruction",
+      "frames": 120,
+      "title": "OBJECT ASSOCIATION",
+      "subtitle": "ESTIMATED CENTERS · EXTENTS NOT ESTIMATED"
+    },
+    {
+      "id": "object_detail",
+      "presentation_role": "reconstruction",
+      "frames": 120,
+      "title": "PERSISTENT ITEM RECORD",
+      "subtitle": "LIDAR-LOCALIZED CENTER · OBSERVATION SUPPORT"
+    },
+    {
+      "id": "observed_aisle_overview",
+      "presentation_role": "reconstruction",
+      "frames": 120,
+      "title": "OBSERVED AISLE",
+      "subtitle": "MAP + PATH + PERSISTENT ESTIMATED CENTERS"
+    },
+    {
+      "id": "final_technical_view",
+      "presentation_role": "reconstruction",
+      "frames": 150,
+      "title": "SENSOR-DERIVED MAP",
+      "subtitle": "SIMULATED ENVIRONMENT · PERSISTENT ITEM LOCATIONS"
+    }
+  ]
+}
