@@ -41,6 +41,8 @@ On a supported ROS 2 + Isaac Sim environment, use the PowerShell scripts in `scr
 
 The baseline mapping contract is LiDAR-only (`subscribe_scan_cloud=true`, `subscribe_rgb=false`, `subscribe_depth=false`, `subscribe_odom_info=true`, `Reg/Strategy=1`). RGB remains a real ROS camera stream for dashboard and manual sensor validation.
 
+Capture manifest version 2 stores `/clock`, RGB `Image`, LiDAR `PointCloud2`, `/tf`, and `/tf_static` in the raw bag. Camera calibration is stored separately in `camera_info.json` with `configured_intrinsics` provenance and `observed_ros_message=false`; it is generated from the versioned scenario sensor metadata and is not presented as a captured `CameraInfo` sample.
+
 ## Configuration
 
 The `.yaml` files are JSON-compatible YAML so the core loader remains usable without a third-party parser. If PyYAML is installed, ordinary YAML is also accepted. Begin with `config/contracts.yaml` and `config/scenarios/baseline_straight.yaml`.

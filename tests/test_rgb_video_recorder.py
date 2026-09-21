@@ -72,6 +72,7 @@ class RgbVideoRecorderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             recorder = None
+            numpy_was_loaded = "numpy" in sys.modules
             rclpy.init()
             try:
                 recorder = RgbVideoRecorder(
@@ -84,7 +85,7 @@ class RgbVideoRecorderTests(unittest.TestCase):
                 self.assertIn("/sim/camera/rgb/image_raw", topics)
                 self.assertNotIn("/sim/camera/rgb/camera_info", topics)
                 self.assertEqual(topics, {"/sim/camera/rgb/image_raw"})
-                self.assertNotIn("numpy", sys.modules)
+                self.assertEqual("numpy" in sys.modules, numpy_was_loaded)
                 Image = _load_ros_image_type()
                 self.assertEqual(Image.__module__, "sensor_msgs.msg._image")
                 self.assertIs(sys.modules["sensor_msgs.msg._image"].Image, Image)
@@ -96,7 +97,7 @@ class RgbVideoRecorderTests(unittest.TestCase):
                 self.assertEqual(metadata["completion_clock_source"], "image_header")
                 self.assertEqual(metadata["frame_count"], 2)
                 self.assertEqual(metadata["encoder_returncode"], 0)
-                self.assertFalse(metadata["numpy_loaded"])
+                self.assertEqual(metadata["numpy_loaded"], numpy_was_loaded)
             finally:
                 if recorder is not None:
                     for subscription in list(recorder.node.subscriptions):

@@ -10,19 +10,37 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
 import os
+from pathlib import Path, PurePosixPath
+import re
 import subprocess
-from pathlib import Path
 from typing import Any, Iterable
 
-CAPTURE_MANIFEST_VERSION = 1
+CAPTURE_MANIFEST_VERSION = 2
 REQUIRED_CAPTURE_TOPICS = (
     "/clock",
     "/sim/camera/rgb/image_raw",
-    "/sim/camera/rgb/camera_info",
     "/sim/lidar/points",
     "/tf",
     "/tf_static",
+)
+REQUIRED_CAPTURE_TOPIC_TYPES = {
+    "/clock": "rosgraph_msgs/msg/Clock",
+    "/sim/camera/rgb/image_raw": "sensor_msgs/msg/Image",
+    "/sim/lidar/points": "sensor_msgs/msg/PointCloud2",
+    "/tf": "tf2_msgs/msg/TFMessage",
+    "/tf_static": "tf2_msgs/msg/TFMessage",
+}
+_HEX_40 = re.compile(r"^[0-9a-fA-F]{40}$")
+_HEX_64 = re.compile(r"^[0-9a-fA-F]{64}$")
+_WINDOWS_INVALID_CHARS = frozenset('<>:"\\|?*')
+_WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"con", "prn", "aux", "nul", "conin$", "conout$"}
+    | {f"com{index}" for index in range(1, 10)}
+    | {f"lpt{index}" for index in range(1, 10)}
+    | {f"com{index}" for index in "¹²³"}
+    | {f"lpt{index}" for index in "¹²³"}
 )
 
 
@@ -153,6 +171,391 @@ def capture_hash(manifest_without_hash: dict[str, Any]) -> str:
     return sha256_json(payload)
 
 
+def _mapping(value: object, field: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"capture manifest {field} must be a mapping")
+    return value
+
+
+def _nonempty_string(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"capture manifest {field} must be a nonempty string")
+    return value
+
+
+def _finite_number(value: object, field: str, *, positive: bool = False, nonnegative: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise ValueError(f"capture manifest {field} must be a finite number")
+    number = float(value)
+    if positive and number <= 0.0:
+        raise ValueError(f"capture manifest {field} must be positive")
+    if nonnegative and number < 0.0:
+        raise ValueError(f"capture manifest {field} must be nonnegative")
+    return number
+
+
+def _nonnegative_integer(value: object, field: str, *, positive: bool = False) -> int:
+    if type(value) is not int or value < (1 if positive else 0):
+        qualifier = "positive" if positive else "nonnegative"
+        raise ValueError(f"capture manifest {field} must be a {qualifier} integer")
+    return value
+
+
+def _safe_relative_path(value: object, field: str) -> str:
+    path_text = _nonempty_string(value, field)
+    raw_parts = path_text.split("/")
+    path = PurePosixPath(path_text)
+    canonical = path.as_posix()
+    if (
+        "\\" in path_text
+        or path.is_absolute()
+        or ":" in path_text
+        or any(part in ("", ".", "..") for part in raw_parts)
+        or path_text != canonical
+    ):
+        raise ValueError(f"capture manifest {field} must be a safe POSIX relative path")
+    for component in raw_parts:
+        device_basename = component.split(".", 1)[0].rstrip(" .").casefold()
+        if (
+            component.endswith((".", " "))
+            or any(character in _WINDOWS_INVALID_CHARS or ord(character) < 32 for character in component)
+            or device_basename in _WINDOWS_RESERVED_BASENAMES
+            or len(component) > 255
+        ):
+            raise ValueError(f"capture manifest {field} must use Windows-canonical path components")
+    return canonical
+
+
+def _windows_long_path(path: Path) -> Path:
+    """Return the existing path's long Windows spelling, or fail closed."""
+
+    if os.name != "nt":
+        return path
+
+    import ctypes
+    from ctypes import wintypes
+
+    get_long_path_name = ctypes.WinDLL("kernel32", use_last_error=True).GetLongPathNameW
+    get_long_path_name.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    get_long_path_name.restype = wintypes.DWORD
+
+    path_text = os.path.abspath(os.fspath(path))
+    if path_text.startswith("\\\\?\\"):
+        api_path = path_text
+    elif path_text.startswith("\\\\"):
+        api_path = "\\\\?\\UNC\\" + path_text[2:]
+    else:
+        api_path = "\\\\?\\" + path_text
+
+    size = 260
+    while True:
+        buffer = ctypes.create_unicode_buffer(size)
+        ctypes.set_last_error(0)
+        result = get_long_path_name(api_path, buffer, size)
+        if result == 0:
+            error_code = ctypes.get_last_error()
+            raise OSError(error_code, ctypes.FormatError(error_code), path_text)
+        if result < size:
+            long_path = buffer.value
+            if long_path.startswith("\\\\?\\UNC\\"):
+                long_path = "\\\\" + long_path[8:]
+            elif long_path.startswith("\\\\?\\"):
+                long_path = long_path[4:]
+            return Path(long_path)
+        if result >= 32767:
+            raise OSError(206, "canonical Windows path exceeds the supported length", path_text)
+        size = result + 1
+
+
+def _require_canonical_windows_relative_path(
+    *, root_long_path: Path, candidate: Path, declared_path: str, field: str
+) -> None:
+    """Reject alternate Windows spellings such as an existing 8.3 alias."""
+
+    if os.name != "nt":
+        return
+    try:
+        candidate_long_path = _windows_long_path(candidate)
+        canonical_relative = candidate_long_path.relative_to(root_long_path).as_posix()
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"capture manifest {field} could not be verified as a canonical Windows long path: {declared_path}"
+        ) from error
+    if declared_path != canonical_relative:
+        raise ValueError(
+            f"capture manifest {field} must use canonical Windows long path {canonical_relative!r}, "
+            f"not {declared_path!r}"
+        )
+
+
+def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool) -> None:
+    """Validate values and nested types of the production manifest-v2 contract."""
+
+    if not isinstance(manifest, dict):
+        raise ValueError("capture manifest must be a mapping")
+    if type(manifest.get("manifest_version")) is not int or manifest["manifest_version"] != CAPTURE_MANIFEST_VERSION:
+        raise ValueError("unsupported capture manifest version")
+    if manifest.get("status") != "complete":
+        raise ValueError("capture manifest is not complete")
+    _nonempty_string(manifest.get("capture_id"), "capture_id")
+    git_sha = _nonempty_string(manifest.get("git_sha"), "git_sha")
+    if not _HEX_40.fullmatch(git_sha):
+        raise ValueError("capture manifest git_sha must be 40 hexadecimal characters")
+    _nonempty_string(manifest.get("scenario"), "scenario")
+    if manifest.get("rmw_implementation") != "rmw_zenoh_cpp":
+        raise ValueError("capture manifest rmw_implementation must be rmw_zenoh_cpp")
+    ros_domain_id = _nonnegative_integer(manifest.get("ros_domain_id"), "ros_domain_id")
+    if ros_domain_id > 232:
+        raise ValueError("capture manifest ros_domain_id must be in the ROS 2 range 0..232")
+    _finite_number(manifest.get("duration_s"), "duration_s", positive=True)
+
+    bag = _mapping(manifest.get("bag"), "bag")
+    _safe_relative_path(bag.get("uri"), "bag.uri")
+    if bag.get("storage_id") != "sqlite3":
+        raise ValueError("capture manifest bag.storage_id must be sqlite3")
+    topics = bag.get("topics")
+    if not isinstance(topics, list) or topics != list(REQUIRED_CAPTURE_TOPICS):
+        raise ValueError("capture manifest bag.topics must be the exact ordered v2 raw-topic list")
+    topic_types = _mapping(bag.get("topic_types"), "bag.topic_types")
+    if topic_types != REQUIRED_CAPTURE_TOPIC_TYPES:
+        raise ValueError("capture manifest bag.topic_types must match the v2 raw-topic types")
+    counts = _mapping(bag.get("counts"), "bag.counts")
+    if set(counts) != set(REQUIRED_CAPTURE_TOPICS):
+        raise ValueError("capture manifest bag.counts must contain exactly the v2 raw topics")
+    for topic in REQUIRED_CAPTURE_TOPICS:
+        _nonnegative_integer(counts.get(topic), f"bag.counts[{topic}]", positive=True)
+    first_clock = _finite_number(bag.get("first_clock_s"), "bag.first_clock_s", nonnegative=True)
+    last_clock = _finite_number(bag.get("last_clock_s"), "bag.last_clock_s", nonnegative=True)
+    if last_clock < first_clock:
+        raise ValueError("capture manifest bag clock range is reversed")
+
+    rgb = _mapping(manifest.get("rgb"), "rgb")
+    for field in ("video", "timestamp_index", "camera_info", "metadata"):
+        _safe_relative_path(rgb.get(field), f"rgb.{field}")
+    if rgb.get("camera_info_provenance") != "configured_intrinsics":
+        raise ValueError("capture manifest rgb.camera_info_provenance must be configured_intrinsics")
+    _nonnegative_integer(rgb.get("frame_count"), "rgb.frame_count", positive=True)
+    first_stamp = _finite_number(rgb.get("first_stamp_s"), "rgb.first_stamp_s", nonnegative=True)
+    last_stamp = _finite_number(rgb.get("last_stamp_s"), "rgb.last_stamp_s", nonnegative=True)
+    if last_stamp < first_stamp:
+        raise ValueError("capture manifest RGB timestamp range is reversed")
+
+    ground_truth = _mapping(manifest.get("ground_truth"), "ground_truth")
+    _safe_relative_path(ground_truth.get("inventory_csv"), "ground_truth.inventory_csv")
+    _safe_relative_path(ground_truth.get("inventory_json"), "ground_truth.inventory_json")
+    if ground_truth.get("pose_topic") != "/sim/ground_truth/pose" or ground_truth.get("evaluation_only") is not True:
+        raise ValueError("capture manifest ground_truth boundary is invalid")
+
+    hashes = _mapping(manifest.get("hashes"), "hashes")
+    for field in ("geometry_sha256", "inventory_sha256", "trajectory_sha256", "sensor_sha256", "appearance_sha256"):
+        value = hashes.get(field)
+        if not isinstance(value, str) or not _HEX_64.fullmatch(value):
+            raise ValueError(f"capture manifest hashes.{field} must be 64 hexadecimal characters")
+    _mapping(hashes.get("inputs"), "hashes.inputs")
+    hashes_git = hashes.get("git_sha")
+    if not isinstance(hashes_git, str) or not _HEX_40.fullmatch(hashes_git):
+        raise ValueError("capture manifest hashes.git_sha must be 40 hexadecimal characters")
+    if hashes_git != git_sha:
+        raise ValueError("capture manifest hashes.git_sha must exactly match git_sha")
+    _nonempty_string(manifest.get("software_versions"), "software_versions")
+
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        raise ValueError("capture manifest files must be a nonempty list")
+    seen_paths: set[str] = set()
+    for index, item in enumerate(files):
+        entry = _mapping(item, f"files[{index}]")
+        path_text = _safe_relative_path(entry.get("path"), f"files[{index}].path")
+        canonical_key = path_text.casefold()
+        if canonical_key == "capture_manifest.json":
+            raise ValueError("capture manifest files cannot include capture_manifest.json")
+        if canonical_key in seen_paths:
+            raise ValueError(f"capture manifest files contains duplicate path: {path_text}")
+        seen_paths.add(canonical_key)
+        digest = entry.get("sha256")
+        if not isinstance(digest, str) or not _HEX_64.fullmatch(digest):
+            raise ValueError(f"capture manifest files[{index}].sha256 must be 64 hexadecimal characters")
+        _nonnegative_integer(entry.get("size_bytes"), f"files[{index}].size_bytes")
+
+    if require_hash:
+        declared = manifest.get("capture_sha256")
+        if not isinstance(declared, str) or not _HEX_64.fullmatch(declared):
+            raise ValueError("capture manifest lacks a full capture_sha256")
+
+
+def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: str | Path) -> None:
+    """Verify the manifest inventory against immutable bytes under the capture root."""
+
+    root = Path(capture_root).resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("capture manifest output parent must be a directory")
+    try:
+        root_long_path = _windows_long_path(root)
+    except OSError as error:
+        raise ValueError("capture manifest output parent has no verifiable canonical Windows long path") from error
+
+    referenced_fields = [
+        (f"rgb.{field}", manifest["rgb"][field])
+        for field in ("video", "timestamp_index", "camera_info", "metadata")
+    ] + [
+        (f"ground_truth.{field}", manifest["ground_truth"][field])
+        for field in ("inventory_csv", "inventory_json")
+    ]
+    for field, path_text in referenced_fields:
+        candidate = root.joinpath(*PurePosixPath(path_text).parts)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (FileNotFoundError, OSError) as error:
+            raise ValueError(f"capture manifest referenced artifact does not exist: {path_text}") from error
+        if not resolved.is_relative_to(root) or not resolved.is_file():
+            raise ValueError(f"capture manifest {field} is not a regular file under capture root: {path_text}")
+        _require_canonical_windows_relative_path(
+            root_long_path=root_long_path,
+            candidate=candidate,
+            declared_path=path_text,
+            field=field,
+        )
+
+    bag_uri = manifest["bag"]["uri"]
+    bag_candidate = root.joinpath(*PurePosixPath(bag_uri).parts)
+    try:
+        bag_root = bag_candidate.resolve(strict=True)
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError(f"capture manifest bag directory does not exist: {bag_uri}") from error
+    if not bag_root.is_relative_to(root) or not bag_root.is_dir():
+        raise ValueError(f"capture manifest bag URI is not a directory under capture root: {bag_uri}")
+    _require_canonical_windows_relative_path(
+        root_long_path=root_long_path,
+        candidate=bag_candidate,
+        declared_path=bag_uri,
+        field="bag.uri",
+    )
+
+    inventory: set[str] = set()
+    resolved_inventory: list[Path] = []
+    resolved_identities: set[str] = set()
+    manifest_path = root / "capture_manifest.json"
+    manifest_identity = str(manifest_path.resolve(strict=False)).replace("\\", "/").casefold()
+    for index, item in enumerate(manifest["files"]):
+        path_text = _safe_relative_path(item["path"], f"files[{index}].path")
+        candidate = root.joinpath(*PurePosixPath(path_text).parts)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (FileNotFoundError, OSError) as error:
+            raise ValueError(f"capture manifest file does not exist: {path_text}") from error
+        if not resolved.is_relative_to(root) or not resolved.is_file():
+            raise ValueError(f"capture manifest file is not a regular file under capture root: {path_text}")
+        _require_canonical_windows_relative_path(
+            root_long_path=root_long_path,
+            candidate=candidate,
+            declared_path=path_text,
+            field=f"files[{index}].path",
+        )
+        resolved_identity = str(resolved).replace("\\", "/").casefold()
+        if resolved_identity == manifest_identity:
+            raise ValueError("capture manifest files cannot resolve to capture_manifest.json")
+        if manifest_path.exists():
+            try:
+                if os.path.samefile(resolved, manifest_path):
+                    raise ValueError("capture manifest files cannot alias capture_manifest.json")
+            except OSError:
+                pass
+        if resolved_identity in resolved_identities:
+            raise ValueError(f"capture manifest files resolve to a duplicate path: {path_text}")
+        for previous in resolved_inventory:
+            try:
+                if os.path.samefile(resolved, previous):
+                    raise ValueError(f"capture manifest files alias the same file: {path_text}")
+            except OSError:
+                continue
+        resolved_identities.add(resolved_identity)
+        resolved_inventory.append(resolved)
+        actual_size = resolved.stat().st_size
+        if item["size_bytes"] != actual_size:
+            raise ValueError(
+                f"capture manifest file size mismatch for {path_text}: declared {item['size_bytes']}, actual {actual_size}"
+            )
+        actual_hash = sha256_file(resolved)
+        if item["sha256"].lower() != actual_hash:
+            raise ValueError(
+                f"capture manifest file hash mismatch for {path_text}: declared {item['sha256']}, actual {actual_hash}"
+            )
+        inventory.add(path_text)
+
+    referenced = [path for _, path in referenced_fields]
+    missing_references = [path for path in referenced if path not in inventory]
+    if missing_references:
+        raise ValueError(f"capture manifest referenced artifacts are absent from files: {missing_references}")
+
+    bag_files = []
+    for path in bag_root.rglob("*"):
+        if not path.is_file():
+            continue
+        resolved = path.resolve(strict=True)
+        if not resolved.is_relative_to(bag_root):
+            raise ValueError(f"capture manifest bag file escapes bag directory: {path}")
+        bag_files.append(resolved.relative_to(root).as_posix())
+    if not bag_files:
+        raise ValueError("capture manifest bag directory contains no storage files")
+    missing_bag_files = [path for path in bag_files if path not in inventory]
+    if missing_bag_files:
+        raise ValueError(f"capture manifest bag storage files are absent from files: {missing_bag_files}")
+    metadata_path = f"{bag_uri}/metadata.yaml"
+    if metadata_path not in inventory or not (bag_root / "metadata.yaml").is_file():
+        raise ValueError("capture manifest sqlite3 bag requires inventoried metadata.yaml")
+    db3_paths = [
+        path for path in bag_root.iterdir()
+        if path.is_file() and path.suffix.casefold() == ".db3"
+    ]
+    if not db3_paths:
+        raise ValueError("capture manifest sqlite3 bag requires at least one .db3 storage file")
+    missing_db3 = [path.resolve(strict=True).relative_to(root).as_posix() for path in db3_paths]
+    missing_db3 = [path for path in missing_db3 if path not in inventory]
+    if missing_db3:
+        raise ValueError(f"capture manifest sqlite3 storage files are absent from files: {missing_db3}")
+
+
+def validate_capture_manifest_hash(manifest: dict[str, Any]) -> str:
+    """Return the canonical capture hash or reject a malformed/mismatched manifest."""
+
+    validate_capture_manifest_v2(manifest, require_hash=True)
+    declared = manifest.get("capture_sha256")
+    expected = capture_hash(manifest)
+    if declared.lower() != expected:
+        raise ValueError(f"capture manifest hash mismatch: declared {declared}, canonical {expected}")
+    return expected
+
+
+def finalize_capture_manifest(staging_path: str | Path, output_path: str | Path) -> dict[str, Any]:
+    """Canonicalize an unhashed v2 staging manifest and write BOM-free UTF-8.
+
+    PowerShell 5.1 staging files may contain a UTF-8 BOM, so only this staging
+    boundary accepts ``utf-8-sig``. The final file is emitted through
+    :func:`write_json` and is immediately re-read as strict UTF-8.
+    """
+
+    staging = Path(staging_path)
+    output = Path(output_path)
+    value = json.loads(staging.read_text(encoding="utf-8-sig"))
+    if not isinstance(value, dict):
+        raise ValueError("capture manifest staging input must be a JSON object")
+    validate_capture_manifest_v2(value, require_hash=False)
+    validate_capture_manifest_artifacts(value, output.parent)
+    finalized = dict(value)
+    finalized.pop("capture_sha256", None)
+    finalized["capture_sha256"] = capture_hash(finalized)
+    validate_capture_manifest_hash(finalized)
+    temporary = output.with_name(f"{output.name}.tmp")
+    try:
+        write_json(temporary, finalized)
+        decoded = json.loads(temporary.read_text(encoding="utf-8"))
+        validate_capture_manifest_hash(decoded)
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return finalized
+
+
 def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate the sensor-only interface required by offline SLAM.
 
@@ -170,6 +573,15 @@ def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] 
     missing = [topic for topic in REQUIRED_CAPTURE_TOPICS if topic not in data.get("bag", {}).get("topics", [])]
     if missing:
         raise ValueError(f"capture bag is missing required sensor topics: {missing}")
+    rgb = data.get("rgb", {})
+    if rgb.get("camera_info_provenance") != "configured_intrinsics":
+        raise ValueError("capture must identify camera intrinsics as configured_intrinsics")
+    camera_info_path = root / str(rgb.get("camera_info", ""))
+    if not camera_info_path.is_file():
+        raise ValueError("configured camera intrinsics artifact is missing")
+    camera_info = json.loads(camera_info_path.read_text(encoding="utf-8"))
+    if camera_info.get("provenance") != "configured_intrinsics" or camera_info.get("observed_ros_message") is not False:
+        raise ValueError("camera intrinsics artifact has invalid provenance")
     bag_uri = root / str(data.get("bag", {}).get("uri", ""))
     if not bag_uri.is_dir():
         raise ValueError(f"capture bag does not exist: {bag_uri}")
