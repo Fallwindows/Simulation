@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "input_manifest_schema_versions": {
+    "diagnostic_or_single_role": 2,
+    "complete_shot_bundle": 3
+  },
+  "rgb_capture_acceptance": {
+    "mechanism": "reviewed_exact_capture_allowlist",
+    "catalog_path": "config/presentation/accepted_rgb_captures.json",
+    "cryptographic_execution_attestation": false
+  },
+  "diagnostic_baseline": {
+    "schema_id": "simulation.presentation.diagnostic_baseline.v1",
+    "producer_id": "repository.demo.baseline.v1",
+    "artifacts": {
+      "view_video": "video"
+    },
+    "immutable_identity": {
+      "plan_path": "config/presentation/storyboard.yaml",
+      "plan_sha256_lf": "5a7e98db32134ba8f6507e60534a056bf9e5e35f3290d61eb9fa6b684479bc5f",
+      "manifest_path": "config/presentation/diagnostic_baseline_inputs.json",
+      "manifest_sha256_lf": "c18e9139feb34a59e9582aea331a83c2f1e0a8e1d77b2490dd3892eb21e8a9cf",
+      "video_path": "demo/walking_aisle_final_hifi.mp4",
+      "video_sha256": "c8a0032862b1397889d187295cc4132ad1d45caad4697fad3fd6f320384e4096",
+      "video_git_blob": "57628e29ab73fc83a9e7ad97167a01df9b66e472",
+      "introduced_commit": "d5e825c8f6dab77aa6a1007c9731c226b588dfcf",
+      "storyboard_manifest_commit": "d315aa9c21fa1bfb3aec284687c6ed4a49151941"
+    }
+  },
+  "roles": {
+    "rgb": {
+      "schema_id": "simulation.presentation.rgb_bundle.v1",
+      "producer_id": "scripts.capture_simulation.v1",
+      "producer_source_path": "scripts/capture_simulation.ps1",
+      "artifacts": {
+        "view_video": "video",
+        "frame_index": "rgb_frame_index",
+        "camera_info": "camera_info",
+        "rgb_metadata": "rgb_metadata",
+        "capture_manifest": "capture_manifest",
+        "view_manifest": "view_manifest"
+      },
+      "view_producer_id": "simulator.presentation.rgb_bundle_emitter.v1",
+      "view_producer_source_path": "simulator/presentation/rgb_bundle.py",
+      "view_producer_available": true
+    },
+    "lidar": {
+      "schema_id": "simulation.presentation.lidar_bundle.v1",
+      "producer_id": "simulator.capture.rosbag_capture.v1",
+      "producer_source_path": "simulator/capture/rosbag_capture.py",
+      "artifacts": {
+        "view_video": "video",
+        "scan_index": "bag_metadata",
+        "returns": "rosbag2",
+        "calibration": "sensor_transforms",
+        "capture_manifest": "capture_manifest",
+        "view_manifest": "view_manifest"
+      },
+      "view_producer_id": "simulator.presentation.lidar_view.v1",
+      "view_producer_source_path": null,
+      "view_producer_available": false
+    },
+    "pose": {
+      "schema_id": "simulation.presentation.pose_bundle.v1",
+      "producer_id": "scripts.run_slam_offline.v1",
+      "producer_source_path": "scripts/run_slam_offline.ps1",
+      "artifacts": {
+        "trajectory": "slam_poses",
+        "frame_contract": "frame_contract",
+        "capture_manifest": "capture_manifest",
+        "slam_manifest": "slam_manifest"
+      },
+      "view_producer_id": null,
+      "view_producer_source_path": null,
+      "view_producer_available": true
+    },
+    "map": {
+      "schema_id": "simulation.presentation.map_bundle.v1",
+      "producer_id": "scripts.run_slam_offline.v1",
+      "producer_source_path": "scripts/run_slam_offline.ps1",
+      "artifacts": {
+        "view_video": "video",
+        "snapshot_index": "map_snapshot_index",
+        "map_states": "pcd",
+        "pose_association": "slam_poses",
+        "capture_manifest": "capture_manifest",
+        "slam_manifest": "slam_manifest",
+        "view_manifest": "view_manifest"
+      },
+      "view_producer_id": "simulator.presentation.map_view.v1",
+      "view_producer_source_path": null,
+      "view_producer_available": false
+    },
+    "reconstruction": {
+      "schema_id": "simulation.presentation.reconstruction_bundle.v1",
+      "producer_id": "simulator.perception.rgb_tracking.v1",
+      "producer_source_path": "simulator/perception/rgb_tracking.py",
+      "artifacts": {
+        "view_video": "video",
+        "object_records": "object_records",
+        "observation_links": "observation_links",
+        "capture_manifest": "capture_manifest",
+        "slam_manifest": "slam_manifest",
+        "perception_manifest": "perception_manifest",
+        "view_manifest": "view_manifest"
+      },
+      "view_producer_id": "simulator.presentation.reconstruction_view.v1",
+      "view_producer_source_path": null,
+      "view_producer_available": false
+    }
+  },
+  "view_derivation": {
+    "schema_id": "simulation.presentation.view_derivation.v1",
+    "required_fields": [
+      "producer_id",
+      "producer_source_sha256",
+      "role",
+      "capture_id",
+      "output_video_sha256",
+      "source_artifact_sha256",
+      "source_time_range_s",
+      "map_version",
+      "object_state_version"
+    ]
+  },
+  "complete_bundle": {
+    "schema_id": "simulation.presentation.complete_bundle.v3",
+    "producer_id": "simulator.presentation.complete_bundle_emitter.v1",
+    "technical_producer_id": "grocery_sim.technical_views.cpu.v1",
+    "technical_views": [
+      "sensor_activation",
+      "lidar_environment",
+      "persistent_map",
+      "object_association",
+      "object_detail",
+      "observed_aisle_overview",
+      "final_technical_view"
+    ]
+  }
+}

@@ -248,3 +248,32 @@ source bindings, receipts, and generated media are unchanged from r2.
   written and revalidated from canonical temporary bytes before atomic replace.
   Adversarial tests prove invalid staging preserves an existing output exactly
   and leaves no temporary file.
+
+## 2026-09-21 — combined presentation delivery r5
+
+- Complete presentation inputs now combine a reviewed RGB receipt with seven
+  independently validated technical-view receipts. The adapter requires one
+  capture identity and exact hashes, producer revisions, source-catalog
+  identity, map/trajectory/object versions, and local-frame-zero technical
+  clips of 120/90/90/120/120/120/150 frames for shots 6–12.
+- Capture validation consumes manifest v2's exact five raw bag topics. Camera
+  calibration remains a configured artifact. RGB presentation coverage is the
+  contiguous 30 fps source interval through frame 539, so the intended
+  20.5-second capture supplies the five RGB shots without claiming 45 seconds
+  of raw capture. Every film-shot mapping records its actual source frames and
+  simulation-time range.
+- RGB presentation receipts declare a horizontal flip, the source-visible
+  correction for mirrored package labels. The renderer applies that transform
+  without altering capture bytes and records it per RGB shot in the output
+  manifest.
+- Complete delivery writes a 1920x1080 FFV1 lossless master, a high-quality
+  silent H.264 file, a deterministic stereo ambience/footstep/cart bed, the
+  audio-muxed native H.264 final, a 1280x720 review file, a contact sheet, and
+  start/mid/end frames for all 12 shots. Every output is probed for exact CFR,
+  frame count, dimensions, duration, codecs, streams, and hashes. Source-view
+  upscaling is rejected.
+- The checked-in production RGB catalog remains empty until a real capture is
+  reviewed. Generated fixtures can exercise the full pipeline only with
+  explicit test catalogs; their renders are visibly and structurally labeled
+  as non-production demonstrations. Diagnostic rendering remains pinned to the
+  immutable pre-storyboard baseline and rejects storyboard pixels by identity.

@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "label": "Existing simulated RGB baseline only; technical products unavailable",
+  "ground_truth_consumed": false,
+  "roles": {
+    "rgb_baseline": {
+      "contract": "rgb",
+      "status": "complete",
+      "provenance": "diagnostic_baseline",
+      "schema_id": "simulation.presentation.diagnostic_baseline.v1",
+      "producer_id": "repository.demo.baseline.v1",
+      "capture_id": "legacy-demo-walking-aisle-final-hifi",
+      "artifacts": {
+        "view_video": {
+          "path": "../../demo/walking_aisle_final_hifi.mp4",
+          "sha256": "c8a0032862b1397889d187295cc4132ad1d45caad4697fad3fd6f320384e4096"
+        }
+      }
+    }
+  }
+}
