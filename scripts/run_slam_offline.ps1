@@ -106,21 +106,24 @@ try {
   $playerExit = Wait-ProcessWithTimeout $player $waitSeconds "bag replay"
   if ($playerExit -ne 0) { throw "Bag replay failed with exit code $playerExit; see ${logPrefix}_bag_play.err.log." }
 
-  # Let RTAB-Map drain the DDS subscription queue, then close and copy a
-  # transactionally consistent database through its native backup service.
+  # Let RTAB-Map drain the DDS subscription queue and stop accepting data.
+  # The RTAB-Map backup service copies only the SQLite main file and can omit
+  # live WAL content on Windows, so stop the writer before validating/exporting.
   $settleSeconds = [Math]::Max(15, [Math]::Min(60, [int]($duration * 0.5)))
   Start-Sleep -Seconds $settleSeconds
   $pauseResult = Invoke-RosCliProbe "pause RTAB-Map" @("service","call","/rtabmap/pause","std_srvs/srv/Empty") 30
   if ($pauseResult.ExitCode -ne 0) { throw "RTAB-Map pause service failed; see $($pauseResult.StderrPath)." }
-  $backupResult = Invoke-RosCliProbe "backup RTAB-Map database" @("service","call","/rtabmap/backup","std_srvs/srv/Empty") 90
-  if ($backupResult.ExitCode -ne 0) { throw "RTAB-Map backup service failed; see $($backupResult.StderrPath)." }
-  $databaseBackup = "$database.back"
-  if (-not (Test-Path -LiteralPath $databaseBackup -PathType Leaf)) { throw "RTAB-Map backup service did not create $databaseBackup." }
-
   if ($mapping -and -not $mapping.HasExited) { Stop-BoundedProcessTree -RootPid $mapping.Id }
   if ($router -and -not $router.HasExited) { Stop-BoundedProcessTree -RootPid $router.Id }
-  Start-Sleep -Seconds 2
-  Copy-Item -LiteralPath $databaseBackup -Destination $database -Force
+  Start-Sleep -Seconds 3
+  if (-not (Test-Path -LiteralPath $database -PathType Leaf)) { throw "RTAB-Map database was not created." }
+  $databaseValidation = Invoke-BoundedProcess -FilePath $pixi `
+    -ArgumentList @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python",(Join-Path $repo "scripts/validate_rtabmap_db.py"),$database) `
+    -WorkingDirectory $repo -TimeoutSeconds 60 -Name "RTAB-Map database validation" `
+    -RedirectStandardOutput (Join-Path $logsDir "${logPrefix}_database_validation.out.log") `
+    -RedirectStandardError (Join-Path $logsDir "${logPrefix}_database_validation.err.log")
+  $databaseValidation.Stdout | Set-Content -LiteralPath (Join-Path $slamDir "database_validation.txt") -Encoding UTF8
+  if ($databaseValidation.ExitCode -ne 0) { throw "RTAB-Map database validation failed; see $($databaseValidation.StderrPath)." }
 
   $exporterBaseArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"rtabmap-export.exe")
   $versionResult = Invoke-BoundedProcess -FilePath $pixi -ArgumentList @($exporterBaseArgs + @("--version")) `
@@ -158,13 +161,6 @@ try {
   if (-not (Test-Path -LiteralPath $producerPath -PathType Leaf)) { throw "SLAM producer metadata is missing." }
   $producerMeta = Get-Content -LiteralPath $producerPath -Raw | ConvertFrom-Json
   if ($producerMeta.status -ne "complete" -or $producerMeta.producer_mode -ne "rtabmap_database_export") { throw "SLAM database export metadata is incomplete." }
-  $databaseValidation = Invoke-BoundedProcess -FilePath $pixi `
-    -ArgumentList @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python",(Join-Path $repo "scripts/validate_rtabmap_db.py"),$database) `
-    -WorkingDirectory $repo -TimeoutSeconds 60 -Name "RTAB-Map database validation" `
-    -RedirectStandardOutput (Join-Path $logsDir "${logPrefix}_database_validation.out.log") `
-    -RedirectStandardError (Join-Path $logsDir "${logPrefix}_database_validation.err.log")
-  $databaseValidation.Stdout | Set-Content -LiteralPath (Join-Path $slamDir "database_validation.txt") -Encoding UTF8
-  if ($databaseValidation.ExitCode -ne 0) { throw "RTAB-Map database validation failed; see $($databaseValidation.StderrPath)." }
   [ordered]@{
     ros_distro="jazzy"; rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID
     ros2_cli_prefix=$packagePrefixes["ros2cli"]

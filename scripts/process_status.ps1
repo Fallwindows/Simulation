@@ -60,6 +60,13 @@ function Stop-BoundedProcessTree {
     Stop-BoundedProcessTree -RootPid ([int]$childPid)
   }
   Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
+  $deadline = (Get-Date).AddSeconds(5)
+  while ((Get-Process -Id $RootPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 100
+  }
+  if (Get-Process -Id $RootPid -ErrorAction SilentlyContinue) {
+    throw "Process $RootPid did not exit after termination."
+  }
 }
 
 function Invoke-BoundedProcess {
