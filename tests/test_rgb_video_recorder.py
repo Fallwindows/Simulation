@@ -1,13 +1,21 @@
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 
-from evaluation.rgb_video_recorder import FfmpegVideoWriter, RawFrame, RgbVideoRecorder, _decode_image
+from evaluation.rgb_video_recorder import (
+    FfmpegVideoWriter,
+    RawFrame,
+    RgbVideoRecorder,
+    _decode_image,
+    _load_ros_image_type,
+)
 
 
 class _Image:
@@ -77,6 +85,9 @@ class RgbVideoRecorderTests(unittest.TestCase):
                 self.assertNotIn("/sim/camera/rgb/camera_info", topics)
                 self.assertEqual(topics, {"/sim/camera/rgb/image_raw"})
                 self.assertNotIn("numpy", sys.modules)
+                Image = _load_ros_image_type()
+                self.assertEqual(Image.__module__, "sensor_msgs.msg._image")
+                self.assertIs(sys.modules["sensor_msgs.msg._image"].Image, Image)
                 recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([255, 0, 0]) * 8, 0.0))
                 recorder._on_image(_Image("rgb8", 4, 2, 12, bytes([0, 255, 0]) * 8, 0.1))
                 self.assertEqual(recorder.done_reason, "simulation_time_reached")
@@ -85,6 +96,7 @@ class RgbVideoRecorderTests(unittest.TestCase):
                 self.assertEqual(metadata["completion_clock_source"], "image_header")
                 self.assertEqual(metadata["frame_count"], 2)
                 self.assertEqual(metadata["encoder_returncode"], 0)
+                self.assertFalse(metadata["numpy_loaded"])
             finally:
                 if recorder is not None:
                     for subscription in list(recorder.node.subscriptions):
@@ -105,6 +117,87 @@ class RgbVideoRecorderTests(unittest.TestCase):
                     startup_timeout_s=1.0,
                     camera_info_path=root / "camera_info.json",
                 )
+
+    def test_cross_process_zenoh_image_delivery_encodes_without_crash_or_numpy(self):
+        if not os.environ.get("AMENT_PREFIX_PATH"):
+            self.skipTest("requires the Pixi ROS environment")
+        router_executable = (
+            Path(sys.prefix) / "Library" / "lib" / "rmw_zenoh_cpp" / "rmw_zenohd.exe"
+        )
+        if not router_executable.exists():
+            self.skipTest("rmw_zenohd is not installed")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            output = root / "transport.mp4"
+            metadata_path = root / "transport.json"
+            environment = os.environ.copy()
+            environment["RMW_IMPLEMENTATION"] = "rmw_zenoh_cpp"
+            environment["ROS_DOMAIN_ID"] = str(100 + os.getpid() % 100)
+            router_log_path = root / "router.log"
+            router_log = router_log_path.open("w+b")
+            router = subprocess.Popen(
+                [str(router_executable)],
+                env=environment,
+                stdout=router_log,
+                stderr=subprocess.STDOUT,
+            )
+            recorder = None
+            publisher = None
+            try:
+                time.sleep(2.0)
+                self.assertIsNone(router.poll(), router_log_path.read_text(encoding="utf-8"))
+                recorder = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "evaluation.rgb_video_recorder",
+                        "--output",
+                        str(output),
+                        "--metadata",
+                        str(metadata_path),
+                        "--duration-seconds",
+                        "0.1",
+                        "--startup-timeout-seconds",
+                        "20",
+                    ],
+                    cwd=Path(__file__).resolve().parents[1],
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                time.sleep(2.0)
+                self.assertIsNone(recorder.poll(), "recorder exited before publisher startup")
+                publisher = subprocess.Popen(
+                    [sys.executable, "-m", "tests.ros_image_transport_peer"],
+                    cwd=Path(__file__).resolve().parents[1],
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                publisher_output, _ = publisher.communicate(timeout=20)
+                self.assertEqual(publisher.returncode, 0, publisher_output)
+                self.assertIn("published=3 numpy_loaded=False", publisher_output)
+                recorder_output, _ = recorder.communicate(timeout=20)
+                self.assertEqual(recorder.returncode, 0, recorder_output)
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                self.assertEqual(metadata["status"], "complete")
+                self.assertEqual(metadata["frame_count"], 3)
+                self.assertEqual((metadata["width"], metadata["height"]), (1280, 720))
+                self.assertFalse(metadata["numpy_loaded"])
+                self.assertGreater(output.stat().st_size, 0)
+            finally:
+                for process in (publisher, recorder, router):
+                    if process is not None and process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                router_log.close()
 
     def test_supported_encodings_map_to_ffmpeg_raw_pixel_formats(self):
         cases = {

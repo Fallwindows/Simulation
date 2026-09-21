@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import importlib.util
+import importlib
+import importlib.machinery
 import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
+import types
 from typing import BinaryIO
 
 
@@ -53,20 +56,39 @@ class _DisabledTypeDescriptionService:
 
 
 def _load_ros_image_type():
-    """Load only the generated Image type, bypassing sensor_msgs.msg imports."""
+    """Load Image with its canonical module identity without running msg __init__."""
 
     import sensor_msgs
 
-    module_path = Path(sensor_msgs.__file__).resolve().parent / "msg" / "_image.py"
-    spec = importlib.util.spec_from_file_location("_grocery_sim_sensor_msgs_image", module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load generated ROS Image type from {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.Image
+    image_module_name = "sensor_msgs.msg._image"
+    existing_image_module = sys.modules.get(image_module_name)
+    if existing_image_module is not None:
+        return existing_image_module.Image
+
+    msg_path = Path(sensor_msgs.__file__).resolve().parent / "msg"
+    msg_package = sys.modules.get("sensor_msgs.msg")
+    if msg_package is None:
+        msg_package = types.ModuleType("sensor_msgs.msg")
+        msg_package.__file__ = str(msg_path / "__init__.py")
+        msg_package.__package__ = "sensor_msgs.msg"
+        msg_package.__path__ = [str(msg_path)]
+        msg_package.__spec__ = importlib.machinery.ModuleSpec(
+            "sensor_msgs.msg",
+            loader=None,
+            is_package=True,
+        )
+        msg_package.__spec__.submodule_search_locations = [str(msg_path)]
+        sys.modules["sensor_msgs.msg"] = msg_package
+        sensor_msgs.msg = msg_package
+    elif not hasattr(msg_package, "__path__"):
+        raise RuntimeError("Existing sensor_msgs.msg module is not a package")
+
+    image_module = importlib.import_module(image_module_name)
+    msg_package.Image = image_module.Image
+    return image_module.Image
 
 
-def _create_recorder_node():
+def _create_recorder_node(node_name: str = "grocery_sim_rgb_video_recorder"):
     """Create the narrow recorder node without NumPy-dependent ROS services."""
 
     import rclpy.node as node_module
@@ -75,7 +97,7 @@ def _create_recorder_node():
     node_module.TypeDescriptionService = _DisabledTypeDescriptionService
     try:
         return node_module.Node(
-            "grocery_sim_rgb_video_recorder",
+            node_name,
             start_parameter_services=False,
         )
     finally:
@@ -456,6 +478,7 @@ class RgbVideoRecorder:
             "target_sim_time_s": self.target_s,
             "last_clock_s": None,
             "completion_clock_source": "image_header",
+            "numpy_loaded": "numpy" in sys.modules,
             "encoding": self.encoding,
             "invalid_frames": self.invalid_frames,
             "duplicate_frames": self.duplicate_frames,
