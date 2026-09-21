@@ -516,8 +516,9 @@ def _validate_slam_manifest(path: Path) -> None:
         raise ValueError("SLAM manifest is incomplete")
     if not SHA256_PATTERN.fullmatch(str(data.get("capture_sha256", "")).lower()):
         raise ValueError("SLAM capture_sha256 is invalid")
+    producer_mode_declared = "producer_mode" in data
     producer_mode = data.get("producer_mode")
-    if producer_mode not in (None, "rtabmap_database_export"):
+    if producer_mode_declared and producer_mode != "rtabmap_database_export":
         raise ValueError("unsupported explicit SLAM producer mode")
     if producer_mode == "rtabmap_database_export":
         producer = data.get("producer", {})
@@ -536,6 +537,9 @@ def _validate_slam_manifest(path: Path) -> None:
         if not isinstance(database, dict) or database.get("path") != "rtabmap.db" or not SHA256_PATTERN.fullmatch(str(database.get("sha256", "")).lower()):
             raise ValueError("SLAM database export database hash is invalid")
         database_path = path.with_name("rtabmap.db")
+        declared_database_path = Path(str(data.get("database_path", "")))
+        if not declared_database_path.is_absolute() or declared_database_path.resolve() != database_path.resolve():
+            raise ValueError("SLAM manifest database path does not match the sibling database")
         if not database_path.is_file() or sha256_path(database_path) != str(database["sha256"]).lower():
             raise ValueError("SLAM database export database bytes do not match provenance")
         artifacts = producer.get("artifacts", {})

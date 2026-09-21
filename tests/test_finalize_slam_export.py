@@ -107,6 +107,7 @@ class FinalizeSlamExportTests(unittest.TestCase):
                 "status": "complete",
                 "capture_id": "fixture-capture",
                 "capture_sha256": "a" * 64,
+                "database_path": str(output / "rtabmap.db"),
                 "producer_mode": "rtabmap_database_export",
                 "producer": producer,
             }
@@ -145,6 +146,10 @@ class FinalizeSlamExportTests(unittest.TestCase):
                     "odom_sample_count": 2,
                 },
             }
+            manifest_path.write_text(json.dumps(unknown), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unsupported explicit SLAM producer mode"):
+                _validate_slam_manifest(manifest_path)
+            unknown["producer_mode"] = None
             manifest_path.write_text(json.dumps(unknown), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "unsupported explicit SLAM producer mode"):
                 _validate_slam_manifest(manifest_path)
