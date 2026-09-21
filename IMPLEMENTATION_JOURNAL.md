@@ -137,3 +137,40 @@ remaining blocker: [setup report](review/setup-20260920/report.md).
   path with the smallest policy-compliant mechanism, and build the data-driven
   12-shot presentation/timeline path. Expensive simulator and GPU work remains
   serialized.
+
+## 2026-09-21 — technical source views for shots 6–12
+
+- Added a CPU-only renderer for seven ordered LiDAR, map, and reconstruction
+  views. It projects a coherent run's finalized ASCII PLY map, estimated SLAM
+  trajectory, and ground-truth-free LiDAR-localized item centers; it does not
+  decode storyboard images or RGB beauty footage.
+- The source is historical run `20260913-120559639`: 120,404 map points, 123
+  estimated poses, and 11,016 estimated-inventory observations. Input paths and
+  hashes are enumerated in each receipt, and storyboard paths plus every known
+  reference hash are rejected before decoding.
+- Rendered a 1280x720/30 fps, 810-frame diagnostic preview with 21 representative
+  frames and a contact sheet. Rendered seven separate 1920x1080/30 fps role
+  videos with exact frame counts `[120, 90, 90, 120, 120, 120, 150]`; each video
+  has an ffprobe-verified receipt linked to its source hashes.
+- The inventory source contains estimated centers and observation support, but
+  no estimated product classes or extents. The views therefore label class and
+  extent as unknown rather than drawing synthetic boxes. The sensor-ray view is
+  explicitly an offline map-point explanation because the source is not a
+  time-indexed scan sequence.
+- These are reviewable technical source views, not the final 45-second film.
+  Presentation integration still needs an adapter from the technical receipt
+  schema to the presentation role-bundle schema after the branches merge.
+
+Technical-view r2 closes the independent source-coherence and typography
+findings. The legacy historical run is now accepted only through the checked-in
+immutable source catalog, which pins its capture/SLAM/perception manifests,
+producer commits, map/trajectory/inventory hashes and versions, approved
+LiDAR-with-SLAM depth source, and the trajectory's 0.2–20.4 second simulation
+range. Cross-run substitutions, capture-ID mismatches, unknown or ground-truth
+depth sources, ground-truth manifest claims, and nonexistent producer revisions
+fail before rendering. Delivery receipts expose the validated time range and
+map, trajectory, and object-state identities. Technical tests keep NumPy and the
+renderer inside child processes so repository discovery order cannot contaminate
+the recorder's NumPy-free import assertion. The object-detail card now measures
+and fits every variable label; start/mid/end frames were inspected at 720p and
+1080p before regenerating the complete evidence set.
