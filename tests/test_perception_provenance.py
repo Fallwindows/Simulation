@@ -3,18 +3,77 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from simulator.perception.provenance import (
     build_perception_input_bindings,
     validate_perception_frame_coverage,
     validate_perception_manifest_bindings,
 )
+from simulator.perception.rgb_tracking import run_rgb_tracking
 from simulator.capture.manifest import sha256_file
 from simulator.presentation.provenance import Artifact, _role_associations, _validate_perception_manifest
 from tests.perception_provenance_fixture import create_perception_run, refresh_perception_manifest
 
 
 class PerceptionProvenanceTests(unittest.TestCase):
+    def test_preflight_ignores_removed_and_mutated_evaluation_truth(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = create_perception_run(Path(temporary), frame_count=540)
+            before = build_perception_input_bindings(fixture["capture"], fixture["slam"], fixture["perception"])
+            truth_paths = [
+                Path(fixture["capture"]) / "inventory_ground_truth.csv",
+                Path(fixture["capture"]) / "inventory_ground_truth.json",
+            ]
+            for path in truth_paths:
+                path.write_bytes(b"mutated evaluation truth that is not an estimator input")
+            after_mutation = build_perception_input_bindings(
+                fixture["capture"], fixture["slam"], fixture["perception"]
+            )
+            self.assertEqual(after_mutation, before)
+            for path in truth_paths:
+                path.unlink()
+            after_removal = build_perception_input_bindings(
+                fixture["capture"], fixture["slam"], fixture["perception"]
+            )
+            self.assertEqual(after_removal, before)
+
+    def test_meaningful_rgb_estimator_succeeds_when_truth_access_is_denied(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = create_perception_run(
+                Path(temporary), frame_count=540, capture_id="denied-truth", decodable_video=True
+            )
+            original_open = Path.open
+            attempted_truth_access: list[str] = []
+
+            def deny_truth(path: Path, *args, **kwargs):
+                if path.name in {"inventory_ground_truth.csv", "inventory_ground_truth.json"}:
+                    attempted_truth_access.append(path.name)
+                    raise PermissionError(f"evaluation truth denied: {path}")
+                return original_open(path, *args, **kwargs)
+
+            scans = [
+                (stamp, np.asarray([
+                    [-0.04, -0.04, 2.0], [0.0, -0.04, 2.0], [0.04, -0.04, 2.0],
+                    [-0.04, 0.04, 2.0], [0.0, 0.04, 2.0], [0.04, 0.04, 2.0],
+                ], dtype=np.float64))
+                for stamp in (0.0, 4.0, 8.0, 12.0, 16.0)
+            ]
+            with mock.patch.object(Path, "open", new=deny_truth), mock.patch(
+                "simulator.perception.rgb_tracking._read_lidar_scans", return_value=iter(scans)
+            ):
+                result = run_rgb_tracking(
+                    fixture["capture"], fixture["slam"], fixture["perception"], Path(__file__).resolve().parents[1]
+                )
+            self.assertEqual(attempted_truth_access, [])
+            self.assertEqual(result["status"], "complete")
+            self.assertEqual(result["frame_count"], 540)
+            self.assertGreater(result["detection_count"], 0)
+            self.assertGreater(result["track_count"], 0)
+            self.assertFalse(result["ground_truth_consumed"])
+
     def test_offline_launcher_preflights_exact_inputs_before_creating_output(self):
         script = (Path(__file__).resolve().parents[1] / "scripts/run_inventory_offline.ps1").read_text(encoding="utf-8")
         preflight = script.index('"--validate-inputs-only"')
@@ -61,6 +120,61 @@ class PerceptionProvenanceTests(unittest.TestCase):
                 validate_perception_manifest_bindings(
                     fixture["perception_manifest"], fixture["capture"], fixture["slam"], fixture["perception"]
                 )
+
+    def test_missing_or_tampered_consumed_sensor_inputs_fail_closed(self):
+        consumed = (
+            "rgb_camera.mp4",
+            "rgb_frames.jsonl",
+            "rgb_video.json",
+            "sensor_transforms.json",
+            "sensors_bag/capture_0.db3",
+            "sensors_bag/metadata.yaml",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case = 0
+            for relative in consumed:
+                for attack in ("missing", "tampered"):
+                    with self.subTest(relative=relative, attack=attack):
+                        fixture = create_perception_run(
+                            root / str(case), frame_count=540, capture_id=f"sensor-{case}"
+                        )
+                        case += 1
+                        path = Path(fixture["capture"]) / relative
+                        if attack == "missing":
+                            path.unlink()
+                        else:
+                            data = path.read_bytes()
+                            path.write_bytes((b"X" + data[1:]) if data else b"X")
+                        with self.assertRaisesRegex(ValueError, "(missing|required|mismatch|storage|do not exactly match)"):
+                            build_perception_input_bindings(
+                                fixture["capture"], fixture["slam"], fixture["perception"]
+                            )
+
+            fixture = create_perception_run(root / "capture-manifest", frame_count=540, capture_id="capture-manifest")
+            capture_manifest_path = Path(fixture["capture"]) / "capture_manifest.json"
+            capture_payload = json.loads(capture_manifest_path.read_text(encoding="utf-8"))
+            capture_payload["duration_s"] = 1.0
+            capture_manifest_path.write_text(json.dumps(capture_payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "capture manifest hash mismatch"):
+                build_perception_input_bindings(fixture["capture"], fixture["slam"], fixture["perception"])
+
+            fixture = create_perception_run(root / "slam-manifest", frame_count=540, capture_id="slam-manifest")
+            slam_manifest_path = Path(fixture["slam"]) / "slam_manifest.json"
+            slam_payload = json.loads(slam_manifest_path.read_text(encoding="utf-8"))
+            slam_payload["capture_sha256"] = "f" * 64
+            slam_manifest_path.write_text(json.dumps(slam_payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "SLAM manifest capture_sha256"):
+                build_perception_input_bindings(fixture["capture"], fixture["slam"], fixture["perception"])
+
+            fixture = create_perception_run(root / "missing-slam", frame_count=540, capture_id="missing-slam")
+            (Path(fixture["slam"]) / "slam_manifest.json").unlink()
+            with self.assertRaisesRegex(ValueError, "requires capture_manifest.json and slam_manifest.json"):
+                build_perception_input_bindings(fixture["capture"], fixture["slam"], fixture["perception"])
+            fixture = create_perception_run(root / "unlisted-bag", frame_count=540, capture_id="unlisted-bag")
+            (Path(fixture["capture"]) / "sensors_bag/unlisted_1.db3").write_bytes(b"unlisted bag bytes")
+            with self.assertRaisesRegex(ValueError, "bag files do not exactly match"):
+                build_perception_input_bindings(fixture["capture"], fixture["slam"], fixture["perception"])
             fixture = create_perception_run(root / "bag", capture_id="capture-b")
             (Path(fixture["capture"]) / "sensors_bag/capture_0.db3").write_bytes(b"cross-run")
             with self.assertRaisesRegex(ValueError, "(size|hash) mismatch"):

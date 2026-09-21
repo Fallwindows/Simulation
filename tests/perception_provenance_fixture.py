@@ -17,7 +17,13 @@ def _jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
 
 
-def create_perception_run(parent: Path, frame_count: int = 613, capture_id: str = "perception-fixture") -> dict[str, Path | dict]:
+def create_perception_run(
+    parent: Path,
+    frame_count: int = 613,
+    capture_id: str = "perception-fixture",
+    *,
+    decodable_video: bool = False,
+) -> dict[str, Path | dict]:
     repo = Path(__file__).resolve().parents[1]
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     run = parent / capture_id
@@ -27,21 +33,43 @@ def create_perception_run(parent: Path, frame_count: int = 613, capture_id: str 
     for directory in (capture, slam, perception):
         directory.mkdir(parents=True)
 
+    width, height = ((96, 72) if decodable_video else (3840, 2160))
     frames = [
-        {"frame_index": index, "stamp_s": index / 30.0, "width": 3840, "height": 2160}
+        {"frame_index": index, "stamp_s": index / 30.0, "width": width, "height": height}
         for index in range(frame_count)
     ]
     _jsonl(capture / "rgb_frames.jsonl", frames)
-    (capture / "rgb_camera.mp4").write_bytes(b"native-rgb-fixture")
+    if decodable_video:
+        import cv2
+        import numpy as np
+
+        writer = cv2.VideoWriter(
+            str(capture / "rgb_camera.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (width, height)
+        )
+        if not writer.isOpened():
+            raise RuntimeError("test video writer did not open")
+        for _ in range(frame_count):
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+            frame[28:45, 40:57] = (0, 0, 255)
+            writer.write(frame)
+        writer.release()
+    else:
+        (capture / "rgb_camera.mp4").write_bytes(b"native-rgb-fixture")
     write_json(capture / "rgb_video.json", {
         "status": "complete", "frame_count": frame_count, "nominal_fps": 30.0,
-        "width": 3840, "height": 2160, "first_image_stamp_s": 0.0,
+        "width": width, "height": height, "first_image_stamp_s": 0.0,
         "last_image_stamp_s": (frame_count - 1) / 30.0,
     })
     write_json(capture / "camera_info.json", {
         "provenance": "configured_intrinsics", "observed_ros_message": False,
     })
-    write_json(capture / "sensor_transforms.json", {"frames": {}, "transforms": []})
+    write_json(capture / "sensor_transforms.json", {
+        "intrinsics": {"fx_px": 48.0, "fy_px": 48.0, "cx_px": 48.0, "cy_px": 36.0},
+        "transforms": [
+            {"child": name, "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 0.0, 1.0]}
+            for name in ("lidar_link", "camera_link", "camera_optical_frame")
+        ],
+    })
     (capture / "inventory_ground_truth.csv").write_text("semantic_id\n1\n", encoding="utf-8")
     write_json(capture / "inventory_ground_truth.json", {"evaluation_only": True, "items": [1]})
     bag = capture / "sensors_bag"

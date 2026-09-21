@@ -10,8 +10,10 @@ from typing import Any
 
 from simulator.capture.manifest import (
     REQUIRED_CAPTURE_TOPIC_TYPES,
+    _require_canonical_windows_relative_path,
+    _safe_relative_path,
+    _windows_long_path,
     sha256_file,
-    validate_capture_manifest_artifacts,
     validate_capture_manifest_hash,
 )
 
@@ -48,16 +50,73 @@ def _capture_file_binding(
     inventory: dict[str, dict[str, Any]],
     relative: str,
 ) -> dict[str, object]:
+    relative = _safe_relative_path(relative, "perception sensor input")
     item = inventory.get(relative)
     path = capture_root / relative
-    if not isinstance(item, dict) or not path.is_file():
+    try:
+        resolved = path.resolve(strict=True)
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError(f"capture provenance is missing required artifact: {relative}") from error
+    if not isinstance(item, dict) or not resolved.is_file() or not resolved.is_relative_to(capture_root):
         raise ValueError(f"capture provenance is missing required artifact: {relative}")
+    _require_canonical_windows_relative_path(
+        root_long_path=_windows_long_path(capture_root),
+        candidate=path,
+        declared_path=relative,
+        field="perception sensor input",
+    )
     digest = str(item.get("sha256", "")).lower()
-    if not SHA256_PATTERN.fullmatch(digest) or sha256_file(path) != digest:
+    if not SHA256_PATTERN.fullmatch(digest) or sha256_file(resolved) != digest:
         raise ValueError(f"capture artifact hash mismatch: {relative}")
-    if int(item.get("size_bytes", -1)) != path.stat().st_size:
+    if int(item.get("size_bytes", -1)) != resolved.stat().st_size:
         raise ValueError(f"capture artifact size mismatch: {relative}")
-    return {"path": f"../capture/{relative}", "sha256": digest, "size_bytes": path.stat().st_size}
+    return {"path": f"../capture/{relative}", "sha256": digest, "size_bytes": resolved.stat().st_size}
+
+
+def _capture_bag_bindings(
+    capture_root: Path,
+    inventory: dict[str, dict[str, Any]],
+    bag_uri: str,
+) -> list[dict[str, object]]:
+    bag_uri = _safe_relative_path(bag_uri, "perception raw LiDAR bag")
+    bag_candidate = capture_root / bag_uri
+    try:
+        bag_root = bag_candidate.resolve(strict=True)
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError("capture provenance is missing the raw LiDAR bag") from error
+    if not bag_root.is_dir() or not bag_root.is_relative_to(capture_root):
+        raise ValueError("capture raw LiDAR bag must be a directory under the capture root")
+    root_long_path = _windows_long_path(capture_root)
+    _require_canonical_windows_relative_path(
+        root_long_path=root_long_path,
+        candidate=bag_candidate,
+        declared_path=bag_uri,
+        field="perception raw LiDAR bag",
+    )
+    actual_files: list[str] = []
+    for path in bag_root.rglob("*"):
+        if not path.is_file():
+            continue
+        resolved = path.resolve(strict=True)
+        if not resolved.is_relative_to(bag_root):
+            raise ValueError("capture raw LiDAR bag file escapes its directory")
+        relative = resolved.relative_to(capture_root).as_posix()
+        _require_canonical_windows_relative_path(
+            root_long_path=root_long_path,
+            candidate=path,
+            declared_path=relative,
+            field="perception raw LiDAR bag file",
+        )
+        actual_files.append(relative)
+    inventoried_files = sorted(relative for relative in inventory if relative.startswith(f"{bag_uri}/"))
+    if sorted(actual_files) != inventoried_files:
+        raise ValueError("capture raw LiDAR bag files do not exactly match the capture manifest inventory")
+    bag_files = [_capture_file_binding(capture_root, inventory, relative) for relative in inventoried_files]
+    if not bag_files or not any(str(item["path"]).lower().endswith(".db3") for item in bag_files):
+        raise ValueError("capture manifest does not bind raw SQLite bag storage")
+    if not any(str(item["path"]).lower().endswith("/metadata.yaml") for item in bag_files):
+        raise ValueError("capture manifest does not bind raw bag metadata")
+    return bag_files
 
 
 def build_perception_input_bindings(
@@ -78,7 +137,6 @@ def build_perception_input_bindings(
         raise ValueError("perception requires capture_manifest.json and slam_manifest.json")
     capture = _json(capture_manifest_path)
     canonical_capture_sha = validate_capture_manifest_hash(capture)
-    validate_capture_manifest_artifacts(capture, capture_root)
     capture_id = str(capture.get("capture_id", ""))
 
     slam = _json(slam_manifest_path)
@@ -111,13 +169,7 @@ def build_perception_input_bindings(
     metadata_binding = _capture_file_binding(capture_root, inventory, str(rgb["metadata"]))
     transforms_binding = _capture_file_binding(capture_root, inventory, "sensor_transforms.json")
     bag_uri = str(capture["bag"]["uri"])
-    bag_files = [
-        _capture_file_binding(capture_root, inventory, relative)
-        for relative in sorted(inventory)
-        if relative.startswith(f"{bag_uri}/")
-    ]
-    if not bag_files or not any(str(item["path"]).lower().endswith(".db3") for item in bag_files):
-        raise ValueError("capture manifest does not bind raw SQLite bag storage")
+    bag_files = _capture_bag_bindings(capture_root, inventory, bag_uri)
 
     return {
         "capture": {
