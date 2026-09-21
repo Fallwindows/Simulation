@@ -39,6 +39,8 @@ _WINDOWS_RESERVED_BASENAMES = frozenset(
     {"con", "prn", "aux", "nul", "conin$", "conout$"}
     | {f"com{index}" for index in range(1, 10)}
     | {f"lpt{index}" for index in range(1, 10)}
+    | {f"com{index}" for index in "¹²³"}
+    | {f"lpt{index}" for index in "¹²³"}
 )
 
 
@@ -224,6 +226,68 @@ def _safe_relative_path(value: object, field: str) -> str:
     return canonical
 
 
+def _windows_long_path(path: Path) -> Path:
+    """Return the existing path's long Windows spelling, or fail closed."""
+
+    if os.name != "nt":
+        return path
+
+    import ctypes
+    from ctypes import wintypes
+
+    get_long_path_name = ctypes.WinDLL("kernel32", use_last_error=True).GetLongPathNameW
+    get_long_path_name.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    get_long_path_name.restype = wintypes.DWORD
+
+    path_text = os.path.abspath(os.fspath(path))
+    if path_text.startswith("\\\\?\\"):
+        api_path = path_text
+    elif path_text.startswith("\\\\"):
+        api_path = "\\\\?\\UNC\\" + path_text[2:]
+    else:
+        api_path = "\\\\?\\" + path_text
+
+    size = 260
+    while True:
+        buffer = ctypes.create_unicode_buffer(size)
+        ctypes.set_last_error(0)
+        result = get_long_path_name(api_path, buffer, size)
+        if result == 0:
+            error_code = ctypes.get_last_error()
+            raise OSError(error_code, ctypes.FormatError(error_code), path_text)
+        if result < size:
+            long_path = buffer.value
+            if long_path.startswith("\\\\?\\UNC\\"):
+                long_path = "\\\\" + long_path[8:]
+            elif long_path.startswith("\\\\?\\"):
+                long_path = long_path[4:]
+            return Path(long_path)
+        if result >= 32767:
+            raise OSError(206, "canonical Windows path exceeds the supported length", path_text)
+        size = result + 1
+
+
+def _require_canonical_windows_relative_path(
+    *, root_long_path: Path, candidate: Path, declared_path: str, field: str
+) -> None:
+    """Reject alternate Windows spellings such as an existing 8.3 alias."""
+
+    if os.name != "nt":
+        return
+    try:
+        candidate_long_path = _windows_long_path(candidate)
+        canonical_relative = candidate_long_path.relative_to(root_long_path).as_posix()
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"capture manifest {field} could not be verified as a canonical Windows long path: {declared_path}"
+        ) from error
+    if declared_path != canonical_relative:
+        raise ValueError(
+            f"capture manifest {field} must use canonical Windows long path {canonical_relative!r}, "
+            f"not {declared_path!r}"
+        )
+
+
 def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool) -> None:
     """Validate values and nested types of the production manifest-v2 contract."""
 
@@ -325,6 +389,47 @@ def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: 
     root = Path(capture_root).resolve(strict=True)
     if not root.is_dir():
         raise ValueError("capture manifest output parent must be a directory")
+    try:
+        root_long_path = _windows_long_path(root)
+    except OSError as error:
+        raise ValueError("capture manifest output parent has no verifiable canonical Windows long path") from error
+
+    referenced_fields = [
+        (f"rgb.{field}", manifest["rgb"][field])
+        for field in ("video", "timestamp_index", "camera_info", "metadata")
+    ] + [
+        (f"ground_truth.{field}", manifest["ground_truth"][field])
+        for field in ("inventory_csv", "inventory_json")
+    ]
+    for field, path_text in referenced_fields:
+        candidate = root.joinpath(*PurePosixPath(path_text).parts)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (FileNotFoundError, OSError) as error:
+            raise ValueError(f"capture manifest referenced artifact does not exist: {path_text}") from error
+        if not resolved.is_relative_to(root) or not resolved.is_file():
+            raise ValueError(f"capture manifest {field} is not a regular file under capture root: {path_text}")
+        _require_canonical_windows_relative_path(
+            root_long_path=root_long_path,
+            candidate=candidate,
+            declared_path=path_text,
+            field=field,
+        )
+
+    bag_uri = manifest["bag"]["uri"]
+    bag_candidate = root.joinpath(*PurePosixPath(bag_uri).parts)
+    try:
+        bag_root = bag_candidate.resolve(strict=True)
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError(f"capture manifest bag directory does not exist: {bag_uri}") from error
+    if not bag_root.is_relative_to(root) or not bag_root.is_dir():
+        raise ValueError(f"capture manifest bag URI is not a directory under capture root: {bag_uri}")
+    _require_canonical_windows_relative_path(
+        root_long_path=root_long_path,
+        candidate=bag_candidate,
+        declared_path=bag_uri,
+        field="bag.uri",
+    )
 
     inventory: set[str] = set()
     resolved_inventory: list[Path] = []
@@ -340,6 +445,12 @@ def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: 
             raise ValueError(f"capture manifest file does not exist: {path_text}") from error
         if not resolved.is_relative_to(root) or not resolved.is_file():
             raise ValueError(f"capture manifest file is not a regular file under capture root: {path_text}")
+        _require_canonical_windows_relative_path(
+            root_long_path=root_long_path,
+            candidate=candidate,
+            declared_path=path_text,
+            field=f"files[{index}].path",
+        )
         resolved_identity = str(resolved).replace("\\", "/").casefold()
         if resolved_identity == manifest_identity:
             raise ValueError("capture manifest files cannot resolve to capture_manifest.json")
@@ -371,23 +482,11 @@ def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: 
             )
         inventory.add(path_text)
 
-    referenced = [
-        manifest["rgb"][field] for field in ("video", "timestamp_index", "camera_info", "metadata")
-    ] + [
-        manifest["ground_truth"][field] for field in ("inventory_csv", "inventory_json")
-    ]
+    referenced = [path for _, path in referenced_fields]
     missing_references = [path for path in referenced if path not in inventory]
     if missing_references:
         raise ValueError(f"capture manifest referenced artifacts are absent from files: {missing_references}")
 
-    bag_uri = manifest["bag"]["uri"]
-    bag_candidate = root.joinpath(*PurePosixPath(bag_uri).parts)
-    try:
-        bag_root = bag_candidate.resolve(strict=True)
-    except (FileNotFoundError, OSError) as error:
-        raise ValueError(f"capture manifest bag directory does not exist: {bag_uri}") from error
-    if not bag_root.is_relative_to(root) or not bag_root.is_dir():
-        raise ValueError(f"capture manifest bag URI is not a directory under capture root: {bag_uri}")
     bag_files = []
     for path in bag_root.rglob("*"):
         if not path.is_file():

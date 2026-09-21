@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,30 @@ def _materialize_capture(root: Path) -> None:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
+
+
+def _windows_short_relative(path: Path, root: Path) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    get_short_path_name = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    get_short_path_name.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    get_short_path_name.restype = wintypes.DWORD
+
+    def short_path(candidate: Path) -> Path:
+        size = 260
+        while True:
+            buffer = ctypes.create_unicode_buffer(size)
+            ctypes.set_last_error(0)
+            result = get_short_path_name(str(candidate), buffer, size)
+            if result == 0:
+                error_code = ctypes.get_last_error()
+                raise OSError(error_code, ctypes.FormatError(error_code), str(candidate))
+            if result < size:
+                return Path(buffer.value)
+            size = result + 1
+
+    return short_path(path).relative_to(short_path(root)).as_posix()
 
 
 def _production_manifest() -> dict[str, object]:
@@ -218,6 +243,24 @@ class CaptureArchitectureTests(unittest.TestCase):
             "reserved port": [
                 {"path": "LPT9.log", "sha256": "7" * 64, "size_bytes": 1},
             ],
+            "reserved superscript COM1": [
+                {"path": "COM¹.txt", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "reserved superscript COM2": [
+                {"path": "folder/COM².log", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "reserved superscript COM3": [
+                {"path": "COM³", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "reserved superscript LPT1": [
+                {"path": "LPT¹.txt", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "reserved superscript LPT2": [
+                {"path": "folder/LPT².log", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "reserved superscript LPT3": [
+                {"path": "LPT³", "sha256": "7" * 64, "size_bytes": 1},
+            ],
             "UNC": [
                 {"path": "//server/share/file", "sha256": "7" * 64, "size_bytes": 1},
             ],
@@ -265,6 +308,94 @@ class CaptureArchitectureTests(unittest.TestCase):
                         finalize_capture_manifest(staging, output)
                     self.assertEqual(output.read_bytes(), original)
                     self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
+    @unittest.skipUnless(os.name == "nt", "real 8.3 aliases are Windows-specific")
+    def test_finalizer_rejects_real_short_names_for_references_inventory_and_bag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _materialize_capture(root)
+            staging = root / "staging.json"
+            output = root / "capture_manifest.json"
+            original_output = b"existing-output-must-survive"
+
+            reference_fields = {
+                "rgb": ("video", "timestamp_index", "camera_info", "metadata"),
+                "ground_truth": ("inventory_csv", "inventory_json"),
+            }
+            for group, fields in reference_fields.items():
+                for field in fields:
+                    with self.subTest(group=group, field=field):
+                        value = copy.deepcopy(_production_manifest())
+                        original_path = value[group][field]
+                        short_alias = _windows_short_relative(root / original_path, root)
+                        if short_alias.casefold() == original_path.casefold():
+                            self.skipTest("8.3 aliases are unavailable on this Windows volume")
+                        self.assertTrue((root / original_path).samefile(root / short_alias))
+                        value[group][field] = short_alias
+                        for item in value["files"]:
+                            if item["path"] == original_path:
+                                item["path"] = short_alias
+                        staging.write_text(json.dumps(value), encoding="utf-8")
+                        output.write_bytes(original_output)
+                        with self.assertRaisesRegex(ValueError, "canonical Windows long path"):
+                            finalize_capture_manifest(staging, output)
+                        self.assertEqual(output.read_bytes(), original_output)
+                        self.assertFalse(output.with_name(output.name + ".tmp").exists())
+
+            value = copy.deepcopy(_production_manifest())
+            bag_uri = value["bag"]["uri"]
+            bag_alias = _windows_short_relative(root / bag_uri, root)
+            if bag_alias.casefold() == bag_uri.casefold():
+                self.skipTest("8.3 aliases are unavailable on this Windows volume")
+            self.assertTrue((root / bag_uri).samefile(root / bag_alias))
+            value["bag"]["uri"] = bag_alias
+            staging.write_text(json.dumps(value), encoding="utf-8")
+            output.write_bytes(original_output)
+            with self.assertRaisesRegex(ValueError, "canonical Windows long path"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original_output)
+            self.assertFalse(output.with_name(output.name + ".tmp").exists())
+
+    @unittest.skipUnless(os.name == "nt", "real 8.3 aliases are Windows-specific")
+    def test_finalizer_rejects_real_short_name_duplicate_and_self_aliases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _materialize_capture(root)
+            staging = root / "staging.json"
+            output = root / "capture_manifest.json"
+            original_output = b"existing-output-must-survive"
+
+            source = root / "rgb_camera.mp4"
+            short_alias = _windows_short_relative(source, root)
+            if short_alias.casefold() == source.name.casefold():
+                self.skipTest("8.3 aliases are unavailable on this Windows volume")
+            value = copy.deepcopy(_production_manifest())
+            value["files"].append({
+                "path": short_alias,
+                "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "size_bytes": source.stat().st_size,
+            })
+            staging.write_text(json.dumps(value), encoding="utf-8")
+            output.write_bytes(original_output)
+            with self.assertRaisesRegex(ValueError, "canonical Windows long path"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original_output)
+            self.assertFalse(output.with_name(output.name + ".tmp").exists())
+
+            self_alias = _windows_short_relative(output, root)
+            if self_alias.casefold() == output.name.casefold():
+                self.skipTest("8.3 aliases are unavailable on this Windows volume")
+            value = copy.deepcopy(_production_manifest())
+            value["files"].append({
+                "path": self_alias,
+                "sha256": hashlib.sha256(original_output).hexdigest(),
+                "size_bytes": len(original_output),
+            })
+            staging.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "canonical Windows long path"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original_output)
+            self.assertFalse(output.with_name(output.name + ".tmp").exists())
 
     def test_finalizer_verifies_inventory_bytes_references_and_bag_storage(self):
         with tempfile.TemporaryDirectory() as temporary:
