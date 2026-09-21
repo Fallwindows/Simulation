@@ -153,9 +153,18 @@ def finalize(
     ):
         if not path.is_file() or path.stat().st_size <= 0:
             raise ValueError(f"{label} is missing or empty: {path}")
-    if not optimize_command or "--save_in_db" not in optimize_command or "--opt" not in optimize_command:
+    expected_optimize = [
+        "rtabmap-export.exe", "--poses", "--poses_format", "10", "--opt", "0", "--save_in_db",
+        "--output", "slam_optimized", "--output_dir", str(cloud_path.parent), str(database_path),
+    ]
+    expected_export = [
+        "rtabmap-export.exe", "--cloud", "--scan", "--poses", "--poses_format", "10", "--ascii",
+        "--opt", "2", "--max_range", "100", "--voxel", "0.03", "--output", "slam_map",
+        "--output_dir", str(cloud_path.parent), str(database_path),
+    ]
+    if optimize_command != expected_optimize:
         raise ValueError("optimization command provenance is incomplete")
-    if not export_command or "--cloud" not in export_command or "--scan" not in export_command:
+    if export_command != expected_export:
         raise ValueError("cloud export command provenance is incomplete")
 
     version_output = exporter_version_path.read_text(encoding="utf-8", errors="strict")

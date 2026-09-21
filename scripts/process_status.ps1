@@ -81,9 +81,10 @@ function Invoke-BoundedProcess {
   )
   if ($TimeoutSeconds -le 0) { throw "$Name requires a positive timeout." }
   Remove-Item -LiteralPath $RedirectStandardOutput,$RedirectStandardError -Force -ErrorAction SilentlyContinue
-  $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
-    -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput $RedirectStandardOutput -RedirectStandardError $RedirectStandardError
+  $statusPath = "$RedirectStandardOutput.status.json"
+  $process = Start-TrackedProcess -FilePath $FilePath -ArgumentList $ArgumentList `
+    -WorkingDirectory $WorkingDirectory -RedirectStandardOutput $RedirectStandardOutput `
+    -RedirectStandardError $RedirectStandardError -StatusPath $statusPath
   try {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
@@ -96,6 +97,17 @@ function Invoke-BoundedProcess {
       throw "$Name timed out after $TimeoutSeconds seconds; stdout=$RedirectStandardOutput stderr=$RedirectStandardError"
     }
     [void]$process.WaitForExit()
+    if (-not (Test-Path -LiteralPath $statusPath)) {
+      throw "$Name exit status is unavailable: $statusPath was not written."
+    }
+    try {
+      $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+    } catch {
+      throw "$Name exit status is unavailable: $statusPath is invalid JSON."
+    }
+    if (-not [bool]$status.available -or $null -eq $status.exit_code) {
+      throw "$Name exit status is unavailable: $($status.failure)"
+    }
     $stdout = if (Test-Path -LiteralPath $RedirectStandardOutput) {
       Get-Content -LiteralPath $RedirectStandardOutput -Raw -ErrorAction SilentlyContinue
     } else { "" }
@@ -103,7 +115,7 @@ function Invoke-BoundedProcess {
       Get-Content -LiteralPath $RedirectStandardError -Raw -ErrorAction SilentlyContinue
     } else { "" }
     return [pscustomobject]@{
-      ExitCode = [int]$process.ExitCode
+      ExitCode = [int]$status.exit_code
       Stdout = [string]$stdout
       Stderr = [string]$stderr
       StdoutPath = $RedirectStandardOutput

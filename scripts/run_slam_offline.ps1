@@ -5,7 +5,8 @@ param(
   [string]$PixiPath = "",
   [string]$RosWorkspace = "",
   [string]$IsaacPython = "C:/isaacsim/python.bat",
-  [string]$ExperimentName = "offline_slam"
+  [string]$ExperimentName = "offline_slam",
+  [switch]$ValidateCaptureOnly
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")
@@ -28,6 +29,18 @@ $logPrefix = if ($ExperimentName -and $ExperimentName -ne "offline_slam") {
 
 $manifestPath = Join-Path $captureDir "capture_manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Capture manifest not found: $manifestPath" }
+$captureValidation = Invoke-BoundedProcess -FilePath $pixi `
+  -ArgumentList @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.finalize_manifest","verify","--manifest",$manifestPath) `
+  -WorkingDirectory $repo -TimeoutSeconds 600 -Name "strict capture manifest verification" `
+  -RedirectStandardOutput (Join-Path $logsDir "${logPrefix}_capture_validation.out.log") `
+  -RedirectStandardError (Join-Path $logsDir "${logPrefix}_capture_validation.err.log")
+if ($captureValidation.ExitCode -ne 0) {
+  throw "Strict capture manifest verification failed; see $($captureValidation.StderrPath)."
+}
+if ($ValidateCaptureOnly) {
+  Write-Host "Capture manifest is valid for offline SLAM: $manifestPath"
+  return
+}
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.status -ne "complete") { throw "Capture is not complete." }
 $required = @("/clock","/sim/camera/rgb/image_raw","/sim/lidar/points","/tf","/tf_static")

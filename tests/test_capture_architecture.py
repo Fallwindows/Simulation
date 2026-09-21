@@ -2,6 +2,8 @@ import copy
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -129,6 +131,58 @@ def _production_manifest() -> dict[str, object]:
 
 
 class CaptureArchitectureTests(unittest.TestCase):
+    def test_offline_launcher_strict_preflight_rejects_invalid_raw_topic_contract_before_ros(self):
+        pixi = shutil.which("pixi")
+        self.assertIsNotNone(pixi)
+        workspace = Path("C:/IsaacSim-ros_workspaces/jazzy_ws")
+        self.assertTrue((workspace / "pixi.toml").is_file())
+        attacks = {
+            "extra ground truth topic": (
+                lambda value: value["bag"]["topics"].append("/sim/ground_truth/pose"),
+                "exact ordered v2 raw-topic list",
+            ),
+            "wrong lidar type": (
+                lambda value: value["bag"]["topic_types"].__setitem__("/sim/lidar/points", "std_msgs/msg/String"),
+                "raw-topic types",
+            ),
+            "zero lidar count": (
+                lambda value: value["bag"]["counts"].__setitem__("/sim/lidar/points", 0),
+                "positive integer",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            for index, (name, (mutate, expected)) in enumerate(attacks.items()):
+                with self.subTest(name=name):
+                    run = parent / f"run-{index}"
+                    capture = run / "capture"
+                    capture.mkdir(parents=True)
+                    _materialize_capture(capture)
+                    staging = run / "capture_manifest.staging.json"
+                    staging.write_text(json.dumps(_production_manifest()), encoding="utf-8")
+                    manifest_path = capture / "capture_manifest.json"
+                    valid = finalize_capture_manifest(staging, manifest_path)
+                    invalid = copy.deepcopy(valid)
+                    mutate(invalid)
+                    invalid["capture_sha256"] = capture_hash(invalid)
+                    manifest_path.write_text(json.dumps(invalid), encoding="utf-8")
+                    completed = subprocess.run(
+                        [
+                            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                            str(ROOT / "scripts" / "run_slam_offline.ps1"),
+                            "-RunDir", str(run), "-CaptureDir", str(capture),
+                            "-PixiPath", str(pixi), "-RosWorkspace", str(workspace), "-ValidateCaptureOnly",
+                        ],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    self.assertNotEqual(completed.returncode, 0)
+                    validation_error = (run / "logs" / "offline_capture_validation.err.log").read_text(encoding="utf-8")
+                    self.assertIn(expected, validation_error)
+                    self.assertFalse((run / "logs" / "offline_zenoh.out.log").exists())
+
     def test_capture_manifest_finalizer_is_bom_free_canonical_and_tamper_evident(self):
         manifest = _production_manifest()
         with tempfile.TemporaryDirectory() as temporary:

@@ -448,7 +448,7 @@ def _validate_sensor_transforms(path: Path) -> None:
         raise ValueError("sensor transform LiDAR topic is invalid")
 
 
-def _validate_slam_poses(path: Path) -> None:
+def _slam_pose_time_range(path: Path) -> tuple[float, float]:
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     required = {"timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "quaternion_valid"}
@@ -464,8 +464,42 @@ def _validate_slam_poses(path: Path) -> None:
         if abs(norm - 1.0) > 1e-3:
             raise ValueError("SLAM quaternion is not normalized")
         last = stamp
-    if float(rows[-1]["timestamp_s"]) - float(rows[0]["timestamp_s"]) < 44.9:
-        raise ValueError("SLAM trajectory does not cover 45 seconds")
+    return float(rows[0]["timestamp_s"]), float(rows[-1]["timestamp_s"])
+
+
+def _validate_slam_poses(path: Path) -> None:
+    _slam_pose_time_range(path)
+
+
+def _validate_capture_time_coverage(
+    actual_start: float, actual_end: float, capture: dict[str, Any], label: str
+) -> None:
+    bag = capture.get("bag", {})
+    capture_start = _finite(bag.get("first_clock_s"), "capture first clock")
+    capture_end = _finite(bag.get("last_clock_s"), "capture last clock")
+    if capture_end <= capture_start:
+        raise ValueError("capture simulation-time range is invalid")
+    tolerance = 1e-6
+    if actual_start < capture_start - tolerance or actual_end > capture_end + tolerance:
+        raise ValueError(f"{label} lies outside the capture simulation-time range")
+    edge_allowance = max(1.0, (capture_end - capture_start) * 0.1)
+    if actual_start - capture_start > edge_allowance + tolerance or capture_end - actual_end > edge_allowance + tolerance:
+        raise ValueError(f"{label} does not cover the capture simulation-time range")
+
+
+def _validate_slam_pose_coverage(path: Path, capture: dict[str, Any], slam: dict[str, Any]) -> None:
+    """Bind estimator pose coverage to the source capture's simulation clock."""
+
+    actual_start, actual_end = _slam_pose_time_range(path)
+    _validate_capture_time_coverage(actual_start, actual_end, capture, "SLAM trajectory")
+    if slam.get("producer_mode") == "rtabmap_database_export":
+        producer = slam.get("producer", {})
+        declared_start = _finite(producer.get("first_pose_timestamp_s"), "producer first pose timestamp")
+        declared_end = _finite(producer.get("last_pose_timestamp_s"), "producer last pose timestamp")
+        if not math.isclose(actual_start, declared_start, abs_tol=1e-6) or not math.isclose(
+            actual_end, declared_end, abs_tol=1e-6
+        ):
+            raise ValueError("SLAM trajectory range does not match database-export provenance")
 
 
 def _validate_frame_contract(path: Path) -> None:
@@ -482,7 +516,10 @@ def _validate_slam_manifest(path: Path) -> None:
         raise ValueError("SLAM manifest is incomplete")
     if not SHA256_PATTERN.fullmatch(str(data.get("capture_sha256", "")).lower()):
         raise ValueError("SLAM capture_sha256 is invalid")
-    if data.get("producer_mode") == "rtabmap_database_export":
+    producer_mode = data.get("producer_mode")
+    if producer_mode not in (None, "rtabmap_database_export"):
+        raise ValueError("unsupported explicit SLAM producer mode")
+    if producer_mode == "rtabmap_database_export":
         producer = data.get("producer", {})
         if not isinstance(producer, dict) or producer.get("status") != "complete":
             raise ValueError("SLAM database-export producer metadata is incomplete")
@@ -492,19 +529,38 @@ def _validate_slam_manifest(path: Path) -> None:
             raise ValueError("SLAM database export ground-truth provenance is invalid")
         if int(producer.get("pose_count", 0)) < 2 or int(producer.get("map_point_count", 0)) <= 0:
             raise ValueError("SLAM database export is empty")
+        producer_path = path.with_name("slam_producer.json")
+        if not producer_path.is_file() or _json(producer_path) != producer:
+            raise ValueError("SLAM database-export producer metadata does not match slam_producer.json")
         database = producer.get("database", {})
-        if not isinstance(database, dict) or not SHA256_PATTERN.fullmatch(str(database.get("sha256", "")).lower()):
+        if not isinstance(database, dict) or database.get("path") != "rtabmap.db" or not SHA256_PATTERN.fullmatch(str(database.get("sha256", "")).lower()):
             raise ValueError("SLAM database export database hash is invalid")
+        database_path = path.with_name("rtabmap.db")
+        if not database_path.is_file() or sha256_path(database_path) != str(database["sha256"]).lower():
+            raise ValueError("SLAM database export database bytes do not match provenance")
         artifacts = producer.get("artifacts", {})
         for name in ("slam_poses.csv", "slam_map.ply", "slam_map.pcd"):
             artifact = artifacts.get(name, {}) if isinstance(artifacts, dict) else {}
             if artifact.get("path") != name or not SHA256_PATTERN.fullmatch(str(artifact.get("sha256", "")).lower()):
                 raise ValueError(f"SLAM database export {name} provenance is invalid")
+            artifact_path = path.with_name(name)
+            if not artifact_path.is_file() or sha256_path(artifact_path) != str(artifact["sha256"]).lower():
+                raise ValueError(f"SLAM database export {name} bytes do not match provenance")
         optimize_command = producer.get("optimization", {}).get("command", [])
         export_command = producer.get("map_export", {}).get("command", [])
-        if "--save_in_db" not in optimize_command or "--opt" not in optimize_command:
+        native_export = path.parent / "native_export"
+        expected_optimize = [
+            "rtabmap-export.exe", "--poses", "--poses_format", "10", "--opt", "0", "--save_in_db",
+            "--output", "slam_optimized", "--output_dir", str(native_export), str(database_path),
+        ]
+        expected_export = [
+            "rtabmap-export.exe", "--cloud", "--scan", "--poses", "--poses_format", "10", "--ascii",
+            "--opt", "2", "--max_range", "100", "--voxel", "0.03", "--output", "slam_map",
+            "--output_dir", str(native_export), str(database_path),
+        ]
+        if optimize_command != expected_optimize:
             raise ValueError("SLAM database optimization provenance is invalid")
-        if "--cloud" not in export_command or "--scan" not in export_command or "--opt" not in export_command:
+        if export_command != expected_export:
             raise ValueError("SLAM database map-export provenance is invalid")
         tool = producer.get("tool", {})
         if tool.get("name") != "rtabmap-export" or not str(tool.get("version", "")):
@@ -517,14 +573,24 @@ def _validate_slam_manifest(path: Path) -> None:
         raise ValueError("SLAM observer output is empty")
 
 
-def _validate_map_snapshot_index(path: Path) -> None:
+def _map_snapshot_time_range(path: Path) -> tuple[float, float]:
     data = _json(path)
     snapshots = data.get("snapshots")
     if data.get("status") != "complete" or not isinstance(snapshots, list) or not snapshots:
         raise ValueError("map snapshot index is incomplete")
     cutoffs = [_finite(item.get("measurement_cutoff_s"), "map cutoff") for item in snapshots if isinstance(item, dict)]
-    if len(cutoffs) != len(snapshots) or cutoffs != sorted(cutoffs) or cutoffs[-1] - cutoffs[0] < 44.9:
-        raise ValueError("map snapshot cutoffs are invalid or shorter than 45 seconds")
+    if len(cutoffs) < 2 or len(cutoffs) != len(snapshots) or any(right <= left for left, right in zip(cutoffs, cutoffs[1:])):
+        raise ValueError("map snapshot cutoffs are invalid or non-increasing")
+    return cutoffs[0], cutoffs[-1]
+
+
+def _validate_map_snapshot_index(path: Path) -> None:
+    _map_snapshot_time_range(path)
+
+
+def _validate_map_snapshot_coverage(path: Path, capture: dict[str, Any]) -> None:
+    start, end = _map_snapshot_time_range(path)
+    _validate_capture_time_coverage(start, end, capture, "map snapshots")
 
 
 def _validate_pcd(path: Path) -> None:
@@ -785,11 +851,15 @@ def _role_associations(role: str, item: dict[str, Any], artifacts: dict[str, Art
             raise ValueError("SLAM manifest was not produced from the declared capture bag")
         if role == "pose" and artifacts["trajectory"].path != artifacts["slam_manifest"].path.with_name("slam_poses.csv"):
             raise ValueError("pose trajectory is not the SLAM producer's slam_poses.csv")
+        if role == "pose":
+            _validate_slam_pose_coverage(artifacts["trajectory"].path, capture, slam)
         if role == "map":
             if artifacts["pose_association"].path != artifacts["slam_manifest"].path.with_name("slam_poses.csv"):
                 raise ValueError("map pose association is not the SLAM producer's slam_poses.csv")
             if artifacts["map_states"].path != artifacts["slam_manifest"].path.with_name("slam_map.pcd"):
                 raise ValueError("map state is not the SLAM producer's slam_map.pcd")
+            _validate_slam_pose_coverage(artifacts["pose_association"].path, capture, slam)
+            _validate_map_snapshot_coverage(artifacts["snapshot_index"].path, capture)
         expected_map_version = artifacts["slam_manifest"].sha256
         if item.get("map_version") != expected_map_version:
             raise ValueError("map_version must equal the SLAM manifest hash")

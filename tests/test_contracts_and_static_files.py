@@ -181,3 +181,6 @@ class ContractTests(unittest.TestCase):
         self.assertIn('@("--poses","--poses_format","10","--opt","0","--save_in_db"', launcher)
         self.assertIn('@("--cloud","--scan","--poses","--poses_format","10","--ascii","--opt","2"', launcher)
         self.assertIn('producer_mode="rtabmap_database_export"', launcher)
+        self.assertIn('"simulator.capture.finalize_manifest","verify","--manifest",$manifestPath', launcher)
+        self.assertLess(launcher.index("strict capture manifest verification"), launcher.index('$packagePrefixes = [ordered]@{}'))
+        self.assertLess(launcher.index("strict capture manifest verification"), launcher.index('$router = Start-Process'))
