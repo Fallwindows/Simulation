@@ -20,6 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from simulator.perception.provenance import (
+    MINIMUM_PRESENTATION_SOURCE_FRAMES,
+    validate_perception_frame_coverage,
+    validate_perception_manifest_bindings,
+)
+
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REQUIRED_CAPTURE_TOPICS = (
@@ -649,8 +655,14 @@ def _validate_perception_manifest(path: Path) -> None:
         raise ValueError("perception manifest provenance is invalid")
     if data.get("lidar_consumed_for_estimation") is not True or data.get("slam_consumed_for_estimation") is not True:
         raise ValueError("perception manifest did not consume LiDAR and SLAM")
-    if int(data.get("track_count", 0)) <= 0 or int(data.get("frame_count", 0)) < 1350:
-        raise ValueError("perception manifest is empty or shorter than 1350 frames")
+    if int(data.get("track_count", 0)) <= 0 or int(data.get("frame_count", 0)) < MINIMUM_PRESENTATION_SOURCE_FRAMES:
+        raise ValueError("perception manifest is empty or shorter than the 540-frame shot source contract")
+    if not all(isinstance(data.get(field), str) and SHA256_PATTERN.fullmatch(data[field]) for field in (
+        "capture_sha256", "capture_manifest_sha256", "slam_manifest_sha256",
+    )) or not isinstance(data.get("capture_id"), str) or not isinstance(data.get("inputs"), dict):
+        raise ValueError("perception manifest lacks exact capture and SLAM input bindings")
+    if "slam_artifact" in data or data.get("slam_trajectory") != "../slam/slam_poses.csv":
+        raise ValueError("perception manifest must identify the consumed SLAM trajectory")
 
 
 CONTENT_VALIDATORS = {
@@ -875,12 +887,23 @@ def _role_associations(role: str, item: dict[str, Any], artifacts: dict[str, Art
             raise ValueError("perception manifest is outside the capture run") from exc
         if not perception_relative.parts or perception_relative.parts[0] != "perception":
             raise ValueError("perception manifest is not in the capture run's perception output")
+        validate_perception_manifest_bindings(
+            perception,
+            artifacts["capture_manifest"].path.parent,
+            artifacts["slam_manifest"].path.parent,
+            artifacts["perception_manifest"].path.parent,
+        )
         expected_records = (artifacts["perception_manifest"].path.parent / str(perception.get("estimated_inventory", ""))).resolve()
         expected_observations = (artifacts["perception_manifest"].path.parent / str(perception.get("annotations", ""))).resolve()
         if artifacts["object_records"].path != expected_records:
             raise ValueError("object records do not match the perception producer manifest")
         if artifacts["observation_links"].path != expected_observations:
             raise ValueError("observation links do not match the perception producer manifest")
+        validate_perception_frame_coverage(
+            perception,
+            artifacts["capture_manifest"].path.parent,
+            artifacts["observation_links"].path,
+        )
         expected_rgb = (artifacts["perception_manifest"].path.parent / str(perception.get("video", ""))).resolve()
         expected_frames = (artifacts["perception_manifest"].path.parent / str(perception.get("frames", ""))).resolve()
         capture_rgb = capture["rgb"]

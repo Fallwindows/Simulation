@@ -7,6 +7,9 @@ import sys
 import tempfile
 import unittest
 
+from simulator.capture.manifest import sha256_file, write_json
+from tests.perception_provenance_fixture import create_perception_run
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -195,6 +198,60 @@ print(json.dumps({'failures':failures,'fits':fits}))
             self.assertEqual(result["capture_id"], "fixture-capture")
             self.assertEqual(result["time"], [0.2, 20.4])
             self.assertEqual(result["depth_sources"], ["lidar_projected_with_slam_pose"])
+
+    def test_modern_source_requires_exact_perception_input_bindings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            fixture = create_perception_run(parent, frame_count=613, capture_id="modern-source")
+            run = Path(fixture["run"])
+            references = parent / "references.json"
+            references.write_text('{"storyboards": []}\n', encoding="utf-8")
+            revision = str(fixture["perception_manifest"]["git_sha"])
+            paths = {
+                "capture": run / "capture/capture_manifest.json",
+                "slam": run / "slam/slam_manifest.json",
+                "perception": run / "perception/perception_manifest.json",
+                "map": run / "slam/slam_map.ply",
+                "trajectory": run / "slam/slam_poses.csv",
+                "inventory": run / "perception/estimated_inventory.csv",
+            }
+            catalog = parent / "modern-catalog.json"
+            write_json(catalog, {
+                "schema_version": 1, "status": "reviewed_source_catalog", "sources": [{
+                    "source_id": "modern-source-v1", "capture_id": "modern-source",
+                    "run_directory_name": "modern-source",
+                    "capture_sha256": fixture["capture_manifest"]["capture_sha256"],
+                    "producer_revisions": {"capture": revision, "slam": revision, "perception": revision},
+                    "producer_manifests": {
+                        name: {"path": path.relative_to(run).as_posix(), "sha256": sha256_file(path)}
+                        for name, path in (("capture", paths["capture"]), ("slam", paths["slam"]), ("perception", paths["perception"]))
+                    },
+                    "artifacts": {
+                        name: {"path": paths[name].relative_to(run).as_posix(), "sha256": sha256_file(paths[name]), "version": f"modern-{name}-v1"}
+                        for name in ("map", "trajectory", "inventory")
+                    },
+                    "simulation_time": {"source": "slam/slam_poses.csv:timestamp_s", "start_s": 0.0, "end_s": 20.4},
+                    "perception_contract": {
+                        "allowed_depth_sources": ["lidar_projected_with_slam_pose"],
+                        "estimated_inventory": "estimated_inventory.csv",
+                        "slam_trajectory": "../slam/slam_poses.csv",
+                        "legacy_capture_id_omitted": False,
+                        "ground_truth_consumed": False,
+                    },
+                }],
+            })
+            result = json.loads(_run_technical(INSPECT_SCRIPT, run, references, catalog).stdout)
+            self.assertEqual(result["capture_id"], "modern-source")
+
+            perception_path = paths["perception"]
+            payload = json.loads(perception_path.read_text(encoding="utf-8"))
+            payload["inputs"]["slam"]["trajectory"]["sha256"] = "f" * 64
+            write_json(perception_path, payload)
+            catalog_payload = json.loads(catalog.read_text(encoding="utf-8"))
+            catalog_payload["sources"][0]["producer_manifests"]["perception"]["sha256"] = sha256_file(perception_path)
+            write_json(catalog, catalog_payload)
+            result = _run_technical(INSPECT_SCRIPT, run, references, catalog, expect_success=False)
+            self.assertIn("input bindings do not match", result.stderr)
 
     def test_source_binding_rejects_cross_run_gt_unknown_and_capture_mismatch(self):
         attacks = {

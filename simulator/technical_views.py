@@ -24,6 +24,11 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from simulator.perception.provenance import (
+    validate_perception_frame_coverage,
+    validate_perception_manifest_bindings,
+)
+
 
 PRODUCER_ID = "grocery_sim.technical_views.cpu.v1"
 ALLOWED_ESTIMATED_DEPTH_SOURCES = frozenset({"lidar_projected_with_slam_pose"})
@@ -264,8 +269,11 @@ def _inspect_source_bundle_with_catalog(
     if perception_capture_id is None:
         if perception_contract.get("legacy_capture_id_omitted") is not True:
             raise ValueError("perception manifest omits capture_id without an exact reviewed legacy pin")
+        legacy_perception = True
     elif str(perception_capture_id) != capture_id:
         raise ValueError("capture, SLAM, and perception capture_id must agree")
+    else:
+        legacy_perception = False
     if str(slam.get("capture_sha256", "")) != str(capture.get("capture_sha256", "")):
         raise ValueError("SLAM manifest does not reference the capture manifest checksum")
     if bool(slam.get("ground_truth_subscribed")):
@@ -302,8 +310,19 @@ def _inspect_source_bundle_with_catalog(
         raise ValueError("capture checksum does not match the reviewed source catalog")
     if perception.get("estimated_inventory") != perception_contract.get("estimated_inventory"):
         raise ValueError("perception manifest inventory association does not match the reviewed source catalog")
-    if perception.get("slam_artifact") != perception_contract.get("slam_artifact"):
-        raise ValueError("perception manifest SLAM association does not match the reviewed source catalog")
+    if legacy_perception:
+        if perception.get("slam_artifact") != perception_contract.get("slam_artifact"):
+            raise ValueError("perception manifest SLAM association does not match the reviewed source catalog")
+    else:
+        if perception_contract.get("legacy_capture_id_omitted") is True:
+            raise ValueError("modern perception provenance cannot use the reviewed legacy omission waiver")
+        if perception.get("slam_trajectory") != perception_contract.get("slam_trajectory"):
+            raise ValueError("perception manifest trajectory association does not match the reviewed source catalog")
+        validate_perception_manifest_bindings(perception, run / "capture", run / "slam", run / "perception")
+        annotations = run / "perception" / str(perception.get("annotations", ""))
+        if not annotations.is_file():
+            raise ValueError("perception annotations named by the producer manifest are missing")
+        validate_perception_frame_coverage(perception, run / "capture", annotations)
     allowed_depth_sources = frozenset(perception_contract.get("allowed_depth_sources", []))
     if not allowed_depth_sources or not allowed_depth_sources.issubset(ALLOWED_ESTIMATED_DEPTH_SOURCES):
         raise ValueError("catalog source has no supported estimated depth source")

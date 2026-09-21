@@ -23,6 +23,12 @@ if (-not (Test-Path -LiteralPath $slamManifestPath)) { throw "Offline SLAM manif
 $slamManifest = Get-Content -LiteralPath $slamManifestPath -Raw | ConvertFrom-Json
 if ($slamManifest.status -ne "complete") { throw "Offline SLAM is not complete." }
 $perception = Join-Path $run "perception"
+$preflightArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.perception.rgb_tracking","--capture-dir",$capture,"--slam-dir",$slam,"--output-dir",$perception,"--repo-root",$repo,"--validate-inputs-only")
+Push-Location $repo
+try {
+  & $pixi @preflightArgs
+  if ($LASTEXITCODE -ne 0) { throw "Offline RGB perception input provenance failed with exit code $LASTEXITCODE." }
+} finally { Pop-Location }
 New-Item -ItemType Directory -Force -Path $perception | Out-Null
 $args = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.perception.rgb_tracking","--capture-dir",$capture,"--slam-dir",$slam,"--output-dir",$perception,"--repo-root",$repo)
 Push-Location $repo

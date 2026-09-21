@@ -27,6 +27,11 @@ import cv2
 import numpy as np
 
 from evaluation.metrics import PoseSample, interpolate_pose, safe_quaternion
+from simulator.perception.provenance import (
+    build_perception_input_bindings,
+    validate_perception_frame_coverage,
+    validate_perception_manifest_bindings,
+)
 
 
 @dataclass(frozen=True)
@@ -299,17 +304,18 @@ def _nearest_frame_index(frames: list[dict[str, object]], timestamps: list[float
 
 
 def _augment_with_lidar_estimates(
-    capture: Path,
-    slam: Path,
+    trajectory_path: Path,
+    sensor_transforms_path: Path,
+    bag_path: Path,
     frames: list[dict[str, object]],
     frame_annotations: list[dict[str, object]],
 ) -> tuple[dict[int, np.ndarray], dict[int, np.ndarray], dict[str, object]]:
     """Associate projected LiDAR returns with RGB proposals and make start-relative estimates."""
 
-    poses = _load_slam_poses(slam / "slam_poses.csv")
+    poses = _load_slam_poses(trajectory_path)
     if not poses:
         return {}, {}, {"status": "unavailable", "reason": "no_valid_slam_poses"}
-    geometry = _load_sensor_geometry(capture / "sensor_transforms.json")
+    geometry = _load_sensor_geometry(sensor_transforms_path)
     start_t = np.asarray(poses[0].position_m, dtype=np.float64)
     start_r = _quat_to_matrix(poses[0].orientation_xyzw)
     frame_timestamps = [float(frame["stamp_s"]) for frame in frames]
@@ -319,7 +325,7 @@ def _augment_with_lidar_estimates(
     scan_count = 0
     projected_point_count = 0
 
-    for stamp_s, lidar_points in _read_lidar_scans(capture / "sensors_bag"):
+    for stamp_s, lidar_points in _read_lidar_scans(bag_path):
         pose = interpolate_pose(poses, stamp_s, max_gap_s=0.5)
         if pose is None:
             continue
@@ -481,8 +487,14 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     capture = Path(capture_dir).resolve()
     slam = Path(slam_dir).resolve()
     output = Path(output_dir).resolve()
+    inputs = build_perception_input_bindings(capture, slam, output)
     output.mkdir(parents=True, exist_ok=True)
-    frames_index = _read_timestamp_index(capture / "rgb_frames.jsonl")
+    frames_path = (output / str(inputs["rgb"]["frames"]["path"])).resolve()
+    video_path = (output / str(inputs["rgb"]["video"]["path"])).resolve()
+    transforms_path = (output / str(inputs["rgb"]["sensor_transforms"]["path"])).resolve()
+    trajectory_path = (output / str(inputs["slam"]["trajectory"]["path"])).resolve()
+    bag_path = (output / str(inputs["raw_lidar"]["bag"]["path"])).resolve()
+    frames_index = _read_timestamp_index(frames_path)
     if not frames_index:
         raise ValueError("RGB timestamp index is empty")
 
@@ -490,7 +502,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
 
     tracker = BlobTracker()
     frame_annotations: list[dict[str, object]] = []
-    with av.open(str(capture / "rgb_camera.mp4")) as container:
+    with av.open(str(video_path)) as container:
         decoded = 0
         for frame in container.decode(video=0):
             if decoded >= len(frames_index):
@@ -509,7 +521,9 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     if decoded != len(frames_index):
         raise RuntimeError(f"RGB frame/index mismatch: decoded={decoded}, indexed={len(frames_index)}")
 
-    track_estimates, map_estimates, localization = _augment_with_lidar_estimates(capture, slam, frames_index, frame_annotations)
+    track_estimates, map_estimates, localization = _augment_with_lidar_estimates(
+        trajectory_path, transforms_path, bag_path, frames_index, frame_annotations
+    )
     raw_to_canonical, canonical_estimates, canonical_members = _consolidate_track_estimates(track_estimates)
     canonical_map_estimates: dict[int, np.ndarray] = {}
     for canonical_id, raw_members in canonical_members.items():
@@ -588,6 +602,11 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
 
     summary = {
         "status": "complete",
+        "capture_id": inputs["capture"]["capture_id"],
+        "capture_sha256": inputs["capture"]["capture_sha256"],
+        "capture_manifest_sha256": inputs["capture"]["manifest"]["sha256"],
+        "slam_manifest_sha256": inputs["slam"]["manifest"]["sha256"],
+        "inputs": inputs,
         "detector_status": "rgb_color_connected_component_baseline",
         "tracker_status": "nearest_prediction_with_appearance_gate",
         "capture_only": True,
@@ -596,18 +615,20 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "slam_consumed_for_estimation": True,
         "lidar_consumed_for_estimation": True,
         "localization": localization,
-        "slam_artifact": str((slam / "slam_map.pcd").relative_to(output.parent)).replace("\\", "/") if (slam / "slam_map.pcd").exists() else None,
+        "slam_trajectory": inputs["slam"]["trajectory"]["path"],
         "frame_count": len(frame_annotations),
         "detection_count": sum(len(item["detections"]) for item in frame_annotations),
         "track_count": len(track_rows),
         "raw_rgb_track_count": len(tracker.tracks),
-        "video": "../capture/rgb_camera.mp4",
-        "frames": "../capture/rgb_frames.jsonl",
+        "video": inputs["rgb"]["video"]["path"],
+        "frames": inputs["rgb"]["frames"]["path"],
         "annotations": "frame_annotations.jsonl",
         "estimated_inventory": "estimated_inventory.csv",
         "git_sha": _git_sha(Path(repo_root).resolve()) if repo_root else None,
         "notes": "Boxes originate from RGB components; start-relative 3D centers are robust medians of projected LiDAR returns using interpolated SLAM pose.",
     }
+    summary["source_frame_contract"] = validate_perception_frame_coverage(summary, capture, annotation_path)
+    validate_perception_manifest_bindings(summary, capture, slam, output)
     (output / "perception_manifest.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary
 
@@ -618,7 +639,12 @@ def main() -> None:
     parser.add_argument("--slam-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--repo-root", default="")
+    parser.add_argument("--validate-inputs-only", action="store_true")
     args = parser.parse_args()
+    if args.validate_inputs_only:
+        result = build_perception_input_bindings(args.capture_dir, args.slam_dir, args.output_dir)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
     result = run_rgb_tracking(args.capture_dir, args.slam_dir, args.output_dir, args.repo_root or None)
     print(json.dumps(result, indent=2, sort_keys=True))
 
