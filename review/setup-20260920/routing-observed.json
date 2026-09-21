@@ -1,0 +1,46 @@
+[
+  {
+    "session": "rollout-2026-09-20T22-18-18-01a0c266-9832-7121-8cf5-fd237a040d2c",
+    "type": "turn_context",
+    "model": "gpt-6-astra",
+    "effort": "medium",
+    "reasoning_effort": null,
+    "approval_policy": "never",
+    "sandbox_policy": {
+      "type": "danger-full-access"
+    }
+  },
+  {
+    "session": "rollout-2026-09-20T22-19-18-01a0c267-804b-7a92-9312-6924d588d409",
+    "type": "turn_context",
+    "model": "gpt-5.6-luna",
+    "effort": "high",
+    "reasoning_effort": null,
+    "approval_policy": "never",
+    "sandbox_policy": {
+      "type": "danger-full-access"
+    }
+  },
+  {
+    "session": "rollout-2026-09-20T22-21-51-01a0c269-d5ca-7a20-ab83-97b8d063651b",
+    "type": "turn_context",
+    "model": "gpt-5.6-sol",
+    "effort": "high",
+    "reasoning_effort": null,
+    "approval_policy": "never",
+    "sandbox_policy": {
+      "type": "danger-full-access"
+    }
+  },
+  {
+    "session": "rollout-2026-09-20T22-22-10-01a0c26a-2340-7d92-bcd2-5aa1fb2f5bdf",
+    "type": "turn_context",
+    "model": "gpt-5.6-luna",
+    "effort": "high",
+    "reasoning_effort": null,
+    "approval_policy": "never",
+    "sandbox_policy": {
+      "type": "danger-full-access"
+    }
+  }
+]

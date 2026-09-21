@@ -1,0 +1,23 @@
+[
+  {
+    "source": "ros2_ws/src/grocery_sim_mapping/launch/rtabmap_lidar.launch.py",
+    "installed": "C:\\IsaacSim-ros_workspaces\\jazzy_ws\\install\\share\\grocery_sim_mapping\\launch\\rtabmap_lidar.launch.py",
+    "source_sha256": "C242F3096511FC86D9FC5EC202E832C0D62192C3DD98A239643BED1B2018FDE1",
+    "installed_sha256": "C242F3096511FC86D9FC5EC202E832C0D62192C3DD98A239643BED1B2018FDE1",
+    "match": true
+  },
+  {
+    "source": "ros2_ws/src/grocery_sim_mapping/config/contracts.yaml",
+    "installed": "C:\\IsaacSim-ros_workspaces\\jazzy_ws\\install\\share\\grocery_sim_mapping\\config\\contracts.yaml",
+    "source_sha256": "276D0AA9D30180DBEE2B387D0238A014FBC2BBB436E343E1B582EEDFE4144A98",
+    "installed_sha256": "276D0AA9D30180DBEE2B387D0238A014FBC2BBB436E343E1B582EEDFE4144A98",
+    "match": true
+  },
+  {
+    "source": "ros2_ws/src/grocery_sim_mapping/config/params.yaml",
+    "installed": "C:\\IsaacSim-ros_workspaces\\jazzy_ws\\install\\share\\grocery_sim_mapping\\config\\params.yaml",
+    "source_sha256": "507A5E500ECA3211F6A5C808F12607D6B9A3420390645303CE74E14DAC6A55F2",
+    "installed_sha256": "507A5E500ECA3211F6A5C808F12607D6B9A3420390645303CE74E14DAC6A55F2",
+    "match": true
+  }
+]

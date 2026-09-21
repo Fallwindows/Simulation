@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "fps": 30,
+  "duration_seconds": 45,
+  "frame_count": 1350,
+  "reference_count": 12,
+  "references": [
+    {
+      "shot": 1,
+      "path": "storyboard/01_enter_aisle_rgb.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_28_53 PM (1).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "b068c43f1a5ff34d9d4573cfe641f0cc3f1fa9255c65f5ef57cb856bdecf6f0a",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        0,
+        3
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        0,
+        89
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 2,
+      "path": "storyboard/02_walk_forward_rgb.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_28_53 PM (2).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "1dd93c320ce31c79eaa1a40c7e3b96507656ae59ab28eadec7d94e089cfc77d7",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        3,
+        6
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        90,
+        179
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 3,
+      "path": "storyboard/03_explore_shelves_rgb.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_28_53 PM (3).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "09154a4f078b9d625c4cb80bd3a9e46397c49159338cdfba98929eab2dd39297",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        6,
+        10
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        180,
+        299
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 4,
+      "path": "storyboard/04_approach_end_rgb.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_28_53 PM (4).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "3303fe6d984a99d5946a0edd1241751ce408f737076d59b74e1d208356363551",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        10,
+        14
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        300,
+        419
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 5,
+      "path": "storyboard/05_look_at_products_rgb.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_28_53 PM (5).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "f9111fa7a641a68af08200ee966c7bb1c8a40cfe0542487b3bde620144234bca",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        14,
+        18
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        420,
+        539
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 6,
+      "path": "storyboard/06_first_person_sensor_activation.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_28_53 PM (6).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "14ba4786710ea2f2c1fe2d5ec9d933599f6c99408850156e982e92a5f08804ca",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        18,
+        22
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        540,
+        659
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 7,
+      "path": "storyboard/07_environment_lidar.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_29_15 PM (1).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "59ff6095d129bac1c33c4d7b364dad8a5a3a71704d6c39d0d3dec871ab018123",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        22,
+        25
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        660,
+        749
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 8,
+      "path": "storyboard/08_persistent_3d_map.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_29_16 PM (2).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "f7903b9164b5e7e2c3403b243a131bbc0399f225a63465f6ac05133ab495a22f",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        25,
+        28
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        750,
+        839
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 9,
+      "path": "storyboard/09_object_level_reconstruction.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_29_16 PM (3).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "baf57184e5955ff2cc51e895443b0bc92554525c30a56a6f420b5d3b807b9952",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        28,
+        32
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        840,
+        959
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 10,
+      "path": "storyboard/10_object_details.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_29_16 PM (4).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "939e7f22d478d683a184d4deec7cd92649a609092cf8fd0e0937ddf8892ae189",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        32,
+        36
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        960,
+        1079
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 11,
+      "path": "storyboard/11_complete_aisle_map.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_29_16 PM (5).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "5dee1a798cb557bfb83f27a1f8b91819ba908df46d6ce608109dc26243ad9c42",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        36,
+        40
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        1080,
+        1199
+      ],
+      "status": "visual target, not measured system output"
+    },
+    {
+      "shot": 12,
+      "path": "storyboard/12_final_shot.png",
+      "original_upload_filename": "ChatGPT Image Sep 19, 2026, 12_29_16 PM (6).png",
+      "width_px": 1672,
+      "height_px": 941,
+      "sha256": "5061ad30addf9f9a5336f804e8e13ea78e148055b43164a2db50c029c0b57a77",
+      "bytes_preserved": true,
+      "film_interval_seconds": [
+        40,
+        45
+      ],
+      "interval_semantics": "start-inclusive/end-exclusive",
+      "delivery_frames_inclusive": [
+        1200,
+        1349
+      ],
+      "status": "visual target, not measured system output"
+    }
+  ]
+}

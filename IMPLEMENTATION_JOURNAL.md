@@ -94,3 +94,46 @@ Earlier implementation milestones and handoff cleanup were pushed to `origin/mas
 - Live walking smoke `runs/final_walking_runtime_smoke.json`: 120 frames completed and the final rig quaternion was non-identity, confirming full sampled orientation reached USD runtime state. Live sensor-realism smoke `runs/final_sensor_realism_runtime_smoke.json`: 21 noisy clouds received and published with timestamp offsets recorded. The GUI smoke `runs/final_gui_runtime_smoke.json` completed 120 frames without `--no-window`.
 - The collector now waits for the first live sample before measuring its scenario-derived capture window, preventing Isaac startup time from consuming the evaluation interval.
 - Final automated suite: 39 tests passing; Python compileall and PowerShell parse checks passing; native RTAB package prefixes and executables verified.
+
+## 2026-09-20 — specification startup preparation (G00)
+
+Owner scope: setup only; no full production run. Main checkout preserved at
+master/d5e825c8f6dab77aa6a1007c9731c226b588dfcf. Supplied untracked specification
+and handoff remain intact. Added short AGENTS.md pointer, copied verified roles
+and all 12 hash-matching storyboard images to expected root paths, configured
+project Astra/medium, Luna/high and dedicated Sol/high using installed Codex
+0.155.0-alpha.9.2. Actual host turn-context routing confirms those settings.
+All six disposable rejection/revision/approval/stale/base-move/missing-evidence
+rehearsal cases completed with independent Sol verdicts. Main source unchanged.
+
+G00: workflow verified; technical baseline partially verified; saved visual
+baseline BLOCKED. A 180-frame Isaac smoke observed 88 RGB callbacks/29 LiDAR
+clouds. Windows Code Integrity blocks the recorder dependency libcblas.dll in
+the ROS Pixi environment; policy owner approval or an approved compatible build
+is required before the recorder smoke can yield an inspectable frame. No bypass.
+Teardown InvalidHandle traceback remains recorded, not certified as clean exit.
+
+Scoped setup repair: backed up installed grocery_sim_mapping surfaces and rebuilt
+only that pure-Python package with Pixi --as-is. Installed launch/config hashes,
+package prefix/import and launch argument expansion now match/pass. No upgrades.
+
+Start a fresh Codex task/session to pick up project defaults; live limits still
+need checking (this session: four total slots, full-access override). Existing
+uncommitted setup files require verified bootstrap into new worktrees. G01-G09
+not started; no pushes or production source commits. Full evidence and exact
+remaining blocker: [setup report](review/setup-20260920/report.md).
+
+## 2026-09-20 — production run opened
+
+- Start: 2026-09-20 23:21:35 PDT (UTC-07:00).
+- Working deadline: 2026-09-21 11:21:35 PDT (approximately 12 hours).
+- Integration branch: `codex/storyboard-video`, isolated from the preserved dirty
+  `master` checkout at `d5e825c8f6dab77aa6a1007c9731c226b588dfcf`.
+- Active authority: `EXECUTION_OVERRIDES.md`; every role uses GPT-5.6 Sol with
+  high reasoning. Two implementation workers maximum, with a separate reviewer.
+- Delivery target: native 1920x1080, 30 fps, exactly 45 seconds / 1,350 frames,
+  preserving all 12 storyboard shots. Development previews use 1280x720.
+- First implementation priorities: replace the recorder's blocked NumPy/OpenCV
+  path with the smallest policy-compliant mechanism, and build the data-driven
+  12-shot presentation/timeline path. Expensive simulator and GPU work remains
+  serialized.
