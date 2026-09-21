@@ -195,10 +195,18 @@ def _nonnegative_integer(value: object, field: str, *, positive: bool = False) -
 
 def _safe_relative_path(value: object, field: str) -> str:
     path_text = _nonempty_string(value, field)
+    raw_parts = path_text.split("/")
     path = PurePosixPath(path_text)
-    if "\\" in path_text or path.is_absolute() or ":" in path_text or any(part in ("", ".", "..") for part in path.parts):
+    canonical = path.as_posix()
+    if (
+        "\\" in path_text
+        or path.is_absolute()
+        or ":" in path_text
+        or any(part in ("", ".", "..") for part in raw_parts)
+        or path_text != canonical
+    ):
         raise ValueError(f"capture manifest {field} must be a safe POSIX relative path")
-    return path_text
+    return canonical
 
 
 def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool) -> None:
@@ -215,8 +223,11 @@ def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool
     if not _HEX_40.fullmatch(git_sha):
         raise ValueError("capture manifest git_sha must be 40 hexadecimal characters")
     _nonempty_string(manifest.get("scenario"), "scenario")
-    _nonempty_string(manifest.get("rmw_implementation"), "rmw_implementation")
-    _nonnegative_integer(manifest.get("ros_domain_id"), "ros_domain_id")
+    if manifest.get("rmw_implementation") != "rmw_zenoh_cpp":
+        raise ValueError("capture manifest rmw_implementation must be rmw_zenoh_cpp")
+    ros_domain_id = _nonnegative_integer(manifest.get("ros_domain_id"), "ros_domain_id")
+    if ros_domain_id > 232:
+        raise ValueError("capture manifest ros_domain_id must be in the ROS 2 range 0..232")
     _finite_number(manifest.get("duration_s"), "duration_s", positive=True)
 
     bag = _mapping(manifest.get("bag"), "bag")
@@ -233,7 +244,7 @@ def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool
     if set(counts) != set(REQUIRED_CAPTURE_TOPICS):
         raise ValueError("capture manifest bag.counts must contain exactly the v2 raw topics")
     for topic in REQUIRED_CAPTURE_TOPICS:
-        _nonnegative_integer(counts.get(topic), f"bag.counts[{topic}]")
+        _nonnegative_integer(counts.get(topic), f"bag.counts[{topic}]", positive=True)
     first_clock = _finite_number(bag.get("first_clock_s"), "bag.first_clock_s", nonnegative=True)
     last_clock = _finite_number(bag.get("last_clock_s"), "bag.last_clock_s", nonnegative=True)
     if last_clock < first_clock:
@@ -265,6 +276,8 @@ def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool
     hashes_git = hashes.get("git_sha")
     if not isinstance(hashes_git, str) or not _HEX_40.fullmatch(hashes_git):
         raise ValueError("capture manifest hashes.git_sha must be 40 hexadecimal characters")
+    if hashes_git != git_sha:
+        raise ValueError("capture manifest hashes.git_sha must exactly match git_sha")
     _nonempty_string(manifest.get("software_versions"), "software_versions")
 
     files = manifest.get("files")
@@ -274,12 +287,12 @@ def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool
     for index, item in enumerate(files):
         entry = _mapping(item, f"files[{index}]")
         path_text = _safe_relative_path(entry.get("path"), f"files[{index}].path")
-        normalized = path_text.casefold()
-        if normalized == "capture_manifest.json":
+        canonical_key = path_text.casefold()
+        if canonical_key == "capture_manifest.json":
             raise ValueError("capture manifest files cannot include capture_manifest.json")
-        if normalized in seen_paths:
+        if canonical_key in seen_paths:
             raise ValueError(f"capture manifest files contains duplicate path: {path_text}")
-        seen_paths.add(normalized)
+        seen_paths.add(canonical_key)
         digest = entry.get("sha256")
         if not isinstance(digest, str) or not _HEX_64.fullmatch(digest):
             raise ValueError(f"capture manifest files[{index}].sha256 must be 64 hexadecimal characters")
@@ -289,6 +302,67 @@ def validate_capture_manifest_v2(manifest: dict[str, Any], *, require_hash: bool
         declared = manifest.get("capture_sha256")
         if not isinstance(declared, str) or not _HEX_64.fullmatch(declared):
             raise ValueError("capture manifest lacks a full capture_sha256")
+
+
+def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: str | Path) -> None:
+    """Verify the manifest inventory against immutable bytes under the capture root."""
+
+    root = Path(capture_root).resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("capture manifest output parent must be a directory")
+
+    inventory: set[str] = set()
+    for index, item in enumerate(manifest["files"]):
+        path_text = _safe_relative_path(item["path"], f"files[{index}].path")
+        candidate = root.joinpath(*PurePosixPath(path_text).parts)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (FileNotFoundError, OSError) as error:
+            raise ValueError(f"capture manifest file does not exist: {path_text}") from error
+        if not resolved.is_relative_to(root) or not resolved.is_file():
+            raise ValueError(f"capture manifest file is not a regular file under capture root: {path_text}")
+        actual_size = resolved.stat().st_size
+        if item["size_bytes"] != actual_size:
+            raise ValueError(
+                f"capture manifest file size mismatch for {path_text}: declared {item['size_bytes']}, actual {actual_size}"
+            )
+        actual_hash = sha256_file(resolved)
+        if item["sha256"].lower() != actual_hash:
+            raise ValueError(
+                f"capture manifest file hash mismatch for {path_text}: declared {item['sha256']}, actual {actual_hash}"
+            )
+        inventory.add(path_text)
+
+    referenced = [
+        manifest["rgb"][field] for field in ("video", "timestamp_index", "camera_info", "metadata")
+    ] + [
+        manifest["ground_truth"][field] for field in ("inventory_csv", "inventory_json")
+    ]
+    missing_references = [path for path in referenced if path not in inventory]
+    if missing_references:
+        raise ValueError(f"capture manifest referenced artifacts are absent from files: {missing_references}")
+
+    bag_uri = manifest["bag"]["uri"]
+    bag_candidate = root.joinpath(*PurePosixPath(bag_uri).parts)
+    try:
+        bag_root = bag_candidate.resolve(strict=True)
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError(f"capture manifest bag directory does not exist: {bag_uri}") from error
+    if not bag_root.is_relative_to(root) or not bag_root.is_dir():
+        raise ValueError(f"capture manifest bag URI is not a directory under capture root: {bag_uri}")
+    bag_files = []
+    for path in bag_root.rglob("*"):
+        if not path.is_file():
+            continue
+        resolved = path.resolve(strict=True)
+        if not resolved.is_relative_to(root):
+            raise ValueError(f"capture manifest bag file escapes capture root: {path}")
+        bag_files.append(resolved.relative_to(root).as_posix())
+    if not bag_files:
+        raise ValueError("capture manifest bag directory contains no storage files")
+    missing_bag_files = [path for path in bag_files if path not in inventory]
+    if missing_bag_files:
+        raise ValueError(f"capture manifest bag storage files are absent from files: {missing_bag_files}")
 
 
 def validate_capture_manifest_hash(manifest: dict[str, Any]) -> str:
@@ -316,6 +390,7 @@ def finalize_capture_manifest(staging_path: str | Path, output_path: str | Path)
     if not isinstance(value, dict):
         raise ValueError("capture manifest staging input must be a JSON object")
     validate_capture_manifest_v2(value, require_hash=False)
+    validate_capture_manifest_artifacts(value, output.parent)
     finalized = dict(value)
     finalized.pop("capture_sha256", None)
     finalized["capture_sha256"] = capture_hash(finalized)

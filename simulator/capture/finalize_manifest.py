@@ -6,7 +6,11 @@ import argparse
 import json
 from pathlib import Path
 
-from simulator.capture.manifest import finalize_capture_manifest, validate_capture_manifest_hash
+from simulator.capture.manifest import (
+    finalize_capture_manifest,
+    validate_capture_manifest_artifacts,
+    validate_capture_manifest_hash,
+)
 
 
 def main() -> None:
@@ -24,7 +28,9 @@ def main() -> None:
     else:
         path = Path(args.manifest)
         manifest = json.loads(path.read_text(encoding="utf-8"))
-        result = {"status": "valid", "path": str(path.resolve()), "capture_sha256": validate_capture_manifest_hash(manifest)}
+        digest = validate_capture_manifest_hash(manifest)
+        validate_capture_manifest_artifacts(manifest, path.parent)
+        result = {"status": "valid", "path": str(path.resolve()), "capture_sha256": digest}
     print(json.dumps(result, sort_keys=True))
 
 

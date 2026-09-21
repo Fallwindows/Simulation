@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import tempfile
 import unittest
@@ -19,6 +20,29 @@ from simulator.capture.manifest import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO = ROOT / "config/scenarios/baseline_straight.yaml"
+
+CAPTURE_FILE_BYTES = {
+    "rgb_camera.mp4": b"fixture-video",
+    "rgb_frames.jsonl": b'{"frame_index":0,"stamp_s":0.1}\n',
+    "camera_info.json": b'{"provenance":"configured_intrinsics"}\n',
+    "rgb_video.json": b'{"status":"complete","frame_count":1350}\n',
+    "inventory_ground_truth.csv": b"semantic_id,x_m,y_m,z_m\nitem/1,1,2,3\n",
+    "inventory_ground_truth.json": b'[{"semantic_id":"item/1"}]\n',
+    "sensors_bag/metadata.yaml": b"rosbag2_bagfile_information:\n  storage_identifier: sqlite3\n",
+    "sensors_bag/capture_0.db3": b"SQLite fixture bytes",
+}
+
+
+def _file_entry(path: str) -> dict[str, object]:
+    payload = CAPTURE_FILE_BYTES[path]
+    return {"path": path, "sha256": hashlib.sha256(payload).hexdigest(), "size_bytes": len(payload)}
+
+
+def _materialize_capture(root: Path) -> None:
+    for relative, payload in CAPTURE_FILE_BYTES.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
 
 
 def _production_manifest() -> dict[str, object]:
@@ -75,7 +99,7 @@ def _production_manifest() -> dict[str, object]:
             "git_sha": "1" * 40,
         },
         "software_versions": "../software_versions.json",
-        "files": [{"path": "rgb_camera.mp4", "sha256": "7" * 64, "size_bytes": 12}],
+        "files": [_file_entry(path) for path in CAPTURE_FILE_BYTES],
     }
 
 
@@ -84,6 +108,7 @@ class CaptureArchitectureTests(unittest.TestCase):
         manifest = _production_manifest()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            _materialize_capture(root)
             staging = root / "staging.json"
             output = root / "capture_manifest.json"
             reversed_manifest = dict(reversed(list(manifest.items())))
@@ -112,6 +137,10 @@ class CaptureArchitectureTests(unittest.TestCase):
             "wrong topics": lambda value: value["bag"].update(topics=["/clock"]),
             "wrong topic types": lambda value: value["bag"].update(topic_types={"/clock": "wrong"}),
             "negative count": lambda value: value["bag"]["counts"].update({"/clock": -1}),
+            "zero required count": lambda value: value["bag"]["counts"].update({"/clock": 0}),
+            "wrong RMW": lambda value: value.update(rmw_implementation="rmw_cyclonedds_cpp"),
+            "domain above ROS range": lambda value: value.update(ros_domain_id=233),
+            "mismatched hash git SHA": lambda value: value["hashes"].update(git_sha="2" * 40),
             "rgb not mapping": lambda value: value.update(rgb=None),
             "wrong camera provenance": lambda value: value["rgb"].update(camera_info_provenance="observed"),
             "ground truth not mapping": lambda value: value.update(ground_truth=None),
@@ -120,6 +149,7 @@ class CaptureArchitectureTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            _materialize_capture(root)
             staging = root / "staging.json"
             output = root / "capture_manifest.json"
             original = b"existing-output-must-survive"
@@ -145,9 +175,37 @@ class CaptureArchitectureTests(unittest.TestCase):
             "self": [
                 {"path": "capture_manifest.json", "sha256": "7" * 64, "size_bytes": 1},
             ],
+            "self dot alias": [
+                {"path": "./capture_manifest.json", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "self parent alias": [
+                {"path": "folder/../capture_manifest.json", "sha256": "7" * 64, "size_bytes": 1},
+            ],
             "duplicate": [
                 {"path": "rgb_camera.mp4", "sha256": "7" * 64, "size_bytes": 1},
                 {"path": "RGB_CAMERA.MP4", "sha256": "8" * 64, "size_bytes": 2},
+            ],
+            "dot prefix": [
+                {"path": "./rgb_camera.mp4", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "dot component": [
+                {"path": "folder/./file", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "empty component": [
+                {"path": "folder//file", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "trailing slash": [
+                {"path": "folder/file/", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "backslash": [
+                {"path": "folder\\file", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "UNC": [
+                {"path": "//server/share/file", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "normalization collision": [
+                _file_entry("rgb_camera.mp4"),
+                {"path": "./rgb_camera.mp4", "sha256": "7" * 64, "size_bytes": 1},
             ],
         }
         with tempfile.TemporaryDirectory() as temporary:
@@ -163,6 +221,44 @@ class CaptureArchitectureTests(unittest.TestCase):
                         finalize_capture_manifest(staging, output)
                     self.assertFalse(output.exists())
                     self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
+    def test_finalizer_verifies_inventory_bytes_references_and_bag_storage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _materialize_capture(root)
+            staging = root / "staging.json"
+            output = root / "capture_manifest.json"
+            original = b"preserve-on-artifact-failure"
+            mutations = {
+                "tampered file hash": lambda value: value["files"][0].update(sha256="f" * 64),
+                "zero file size for nonempty artifact": lambda value: value["files"][0].update(size_bytes=0),
+                "missing referenced inventory entry": lambda value: value.update(
+                    files=[item for item in value["files"] if item["path"] != "camera_info.json"]
+                ),
+                "missing bag inventory entry": lambda value: value.update(
+                    files=[item for item in value["files"] if item["path"] != "sensors_bag/capture_0.db3"]
+                ),
+            }
+            for name, mutate in mutations.items():
+                with self.subTest(name=name):
+                    value = copy.deepcopy(_production_manifest())
+                    mutate(value)
+                    staging.write_text(json.dumps(value), encoding="utf-8")
+                    output.write_bytes(original)
+                    with self.assertRaises(ValueError):
+                        finalize_capture_manifest(staging, output)
+                    self.assertEqual(output.read_bytes(), original)
+                    self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
+            value = _production_manifest()
+            missing = root / "rgb_camera.mp4"
+            missing.unlink()
+            staging.write_text(json.dumps(value), encoding="utf-8")
+            output.write_bytes(original)
+            with self.assertRaisesRegex(ValueError, "does not exist"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original)
+            self.assertFalse((root / "capture_manifest.json.tmp").exists())
 
     def test_capture_metadata_exports_configured_camera_intrinsics_with_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
