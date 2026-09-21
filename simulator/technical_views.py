@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 PRODUCER_ID = "grocery_sim.technical_views.cpu.v1"
+ALLOWED_ESTIMATED_DEPTH_SOURCES = frozenset({"lidar_projected_with_slam_pose"})
 VIEW_ORDER = (
     "sensor_activation",
     "lidar_environment",
@@ -69,14 +70,23 @@ class InventoryRecord:
 class SourceBundle:
     run_root: Path
     capture_id: str
+    source_id: str
     capture_git_sha: str
+    slam_git_sha: str
     perception_git_sha: str
+    simulation_time_start_s: float
+    simulation_time_end_s: float
+    map_version: str
+    trajectory_version: str
+    object_state_version: str
+    depth_sources: tuple[str, ...]
     map_path: Path
     trajectory_path: Path
     inventory_path: Path
     capture_manifest_path: Path
     slam_manifest_path: Path
     perception_manifest_path: Path
+    source_catalog_path: Path
     hashes: dict[str, str]
 
 
@@ -147,8 +157,75 @@ def _known_storyboard_hashes(manifest_path: Path) -> set[str]:
     return hashes
 
 
-def inspect_source_bundle(run_root: str | Path, reference_manifest: str | Path) -> SourceBundle:
+def _catalog_source(catalog_path: Path, capture_id: str) -> dict[str, object]:
+    catalog = _read_json(catalog_path)
+    if catalog.get("schema_version") != 1 or catalog.get("status") != "reviewed_source_catalog":
+        raise ValueError("technical source catalog is not a reviewed schema-v1 catalog")
+    matches = [
+        item for item in catalog.get("sources", [])
+        if isinstance(item, dict) and item.get("capture_id") == capture_id
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"capture_id is not uniquely pinned in the reviewed technical source catalog: {capture_id}")
+    return matches[0]
+
+
+def _require_git_commit(repo_root: Path, revision: str, producer: str) -> None:
+    if len(revision) != 40:
+        raise ValueError(f"{producer} producer revision must be a full Git SHA")
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "cat-file", "-e", f"{revision}^{{commit}}"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"{producer} producer revision is not a repository commit: {revision}")
+
+
+def _trajectory_time_range(path: Path) -> tuple[float, float]:
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    try:
+        timestamps = [float(row["timestamp_s"]) for row in rows]
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("trajectory CSV lacks finite timestamp_s values") from error
+    if len(timestamps) < 2 or not all(math.isfinite(value) for value in timestamps) or any(
+        later < earlier for earlier, later in zip(timestamps, timestamps[1:])
+    ):
+        raise ValueError("trajectory timestamps must be finite and ordered")
+    return timestamps[0], timestamps[-1]
+
+
+def _inventory_depth_sources(path: Path, allowed: set[str] | frozenset[str]) -> tuple[str, ...]:
+    used: set[str] = set()
+    localized_rows = 0
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        required = {"estimated_x_m", "estimated_y_m", "estimated_z_m", "3d_observation_count", "depth_source"}
+        if not required.issubset(reader.fieldnames or []):
+            raise ValueError("estimated inventory lacks its depth-source contract")
+        for row in reader:
+            coordinates = [row.get(name) for name in ("estimated_x_m", "estimated_y_m", "estimated_z_m")]
+            if not all(value not in (None, "") for value in coordinates):
+                continue
+            if int(row["3d_observation_count"]) <= 0:
+                continue
+            source = str(row.get("depth_source", ""))
+            if source not in allowed:
+                raise ValueError(f"estimated inventory uses an unapproved depth source: {source or '<missing>'}")
+            localized_rows += 1
+            used.add(source)
+    if localized_rows == 0:
+        raise ValueError("estimated inventory has no approved LiDAR-localized rows")
+    return tuple(sorted(used))
+
+
+def _inspect_source_bundle_with_catalog(
+    run_root: str | Path,
+    reference_manifest: str | Path,
+    source_catalog: str | Path,
+) -> SourceBundle:
     run = Path(run_root).resolve()
+    catalog_path = Path(source_catalog).resolve()
     paths = {
         "map": run / "slam" / "slam_map.ply",
         "trajectory": run / "slam" / "slam_poses.csv",
@@ -177,31 +254,96 @@ def inspect_source_bundle(run_root: str | Path, reference_manifest: str | Path) 
     capture_id = str(capture.get("capture_id", ""))
     if not capture_id or str(slam.get("capture_id", "")) != capture_id or run.name != capture_id:
         raise ValueError("run directory, capture manifest, and SLAM manifest capture_id must agree")
+    source = _catalog_source(catalog_path, capture_id)
+    if source.get("run_directory_name") != run.name:
+        raise ValueError("run directory is not the catalog-pinned source identity")
+    perception_capture_id = perception.get("capture_id")
+    perception_contract = source.get("perception_contract")
+    if not isinstance(perception_contract, dict):
+        raise ValueError("catalog source lacks a perception contract")
+    if perception_capture_id is None:
+        if perception_contract.get("legacy_capture_id_omitted") is not True:
+            raise ValueError("perception manifest omits capture_id without an exact reviewed legacy pin")
+    elif str(perception_capture_id) != capture_id:
+        raise ValueError("capture, SLAM, and perception capture_id must agree")
     if str(slam.get("capture_sha256", "")) != str(capture.get("capture_sha256", "")):
         raise ValueError("SLAM manifest does not reference the capture manifest checksum")
     if bool(slam.get("ground_truth_subscribed")):
         raise ValueError("technical map input must not subscribe to ground truth")
     if bool(perception.get("ground_truth_consumed")) or not bool(perception.get("lidar_consumed_for_estimation")) or not bool(perception.get("slam_consumed_for_estimation")):
         raise ValueError("estimated inventory must be ground-truth-free and consume LiDAR plus SLAM")
+    if perception.get("ground_truth_required") not in (False, None):
+        raise ValueError("estimated inventory must not require ground truth")
     if Path(str(perception.get("estimated_inventory", ""))).name != paths["inventory"].name:
         raise ValueError("perception manifest does not name the estimated inventory input")
     capture_git = str(capture.get("git_sha", ""))
+    slam_git = str(slam.get("git_sha", ""))
     perception_git = str(perception.get("git_sha", ""))
-    if len(capture_git) != 40 or len(perception_git) != 40:
-        raise ValueError("capture and perception manifests require full producer revisions")
+    revisions = source.get("producer_revisions")
+    manifests = source.get("producer_manifests")
+    artifacts = source.get("artifacts")
+    if not all(isinstance(item, dict) for item in (revisions, manifests, artifacts)):
+        raise ValueError("catalog source lacks producer and artifact bindings")
+    observed_revisions = {"capture": capture_git, "slam": slam_git, "perception": perception_git}
+    for producer, revision in observed_revisions.items():
+        if revision != revisions.get(producer):
+            raise ValueError(f"{producer} producer revision does not match the reviewed source catalog")
+        _require_git_commit(Path(__file__).resolve().parents[1], revision, producer)
+    manifest_keys = {"capture": "capture_manifest", "slam": "slam_manifest", "perception": "perception_manifest"}
+    for producer, hash_key in manifest_keys.items():
+        binding = manifests.get(producer)
+        if not isinstance(binding, dict) or binding.get("path") != str(paths[hash_key].relative_to(run)).replace("\\", "/") or binding.get("sha256") != hashes[hash_key]:
+            raise ValueError(f"{producer} manifest does not match the reviewed source catalog")
+    for artifact_name in ("map", "trajectory", "inventory"):
+        binding = artifacts.get(artifact_name)
+        if not isinstance(binding, dict) or binding.get("path") != str(paths[artifact_name].relative_to(run)).replace("\\", "/") or binding.get("sha256") != hashes[artifact_name]:
+            raise ValueError(f"{artifact_name} artifact does not match the reviewed source catalog")
+    if source.get("capture_sha256") != capture.get("capture_sha256"):
+        raise ValueError("capture checksum does not match the reviewed source catalog")
+    if perception.get("estimated_inventory") != perception_contract.get("estimated_inventory"):
+        raise ValueError("perception manifest inventory association does not match the reviewed source catalog")
+    if perception.get("slam_artifact") != perception_contract.get("slam_artifact"):
+        raise ValueError("perception manifest SLAM association does not match the reviewed source catalog")
+    allowed_depth_sources = frozenset(perception_contract.get("allowed_depth_sources", []))
+    if not allowed_depth_sources or not allowed_depth_sources.issubset(ALLOWED_ESTIMATED_DEPTH_SOURCES):
+        raise ValueError("catalog source has no supported estimated depth source")
+    depth_sources = _inventory_depth_sources(paths["inventory"], allowed_depth_sources)
+    start_s, end_s = _trajectory_time_range(paths["trajectory"])
+    time_binding = source.get("simulation_time")
+    if not isinstance(time_binding, dict) or time_binding.get("source") != "slam/slam_poses.csv:timestamp_s":
+        raise ValueError("catalog source lacks a trajectory simulation-time binding")
+    if not math.isclose(start_s, float(time_binding.get("start_s", math.nan)), abs_tol=1e-9) or not math.isclose(end_s, float(time_binding.get("end_s", math.nan)), abs_tol=1e-9):
+        raise ValueError("trajectory simulation-time range does not match the reviewed source catalog")
+    hashes["source_catalog"] = sha256_file(catalog_path)
     return SourceBundle(
         run_root=run,
         capture_id=capture_id,
+        source_id=str(source["source_id"]),
         capture_git_sha=capture_git,
+        slam_git_sha=slam_git,
         perception_git_sha=perception_git,
+        simulation_time_start_s=start_s,
+        simulation_time_end_s=end_s,
+        map_version=str(artifacts["map"]["version"]),
+        trajectory_version=str(artifacts["trajectory"]["version"]),
+        object_state_version=str(artifacts["inventory"]["version"]),
+        depth_sources=depth_sources,
         map_path=paths["map"],
         trajectory_path=paths["trajectory"],
         inventory_path=paths["inventory"],
         capture_manifest_path=paths["capture_manifest"],
         slam_manifest_path=paths["slam_manifest"],
         perception_manifest_path=paths["perception_manifest"],
+        source_catalog_path=catalog_path,
         hashes=hashes,
     )
+
+
+def inspect_source_bundle(run_root: str | Path, reference_manifest: str | Path) -> SourceBundle:
+    """Inspect a render source against the repository's reviewed immutable catalog."""
+
+    catalog = Path(__file__).resolve().parents[1] / "config" / "technical_source_catalog.json"
+    return _inspect_source_bundle_with_catalog(run_root, reference_manifest, catalog)
 
 
 def load_ascii_ply(path: str | Path) -> np.ndarray:
@@ -260,7 +402,7 @@ def load_inventory(path: str | Path) -> tuple[InventoryRecord, ...]:
     records: list[InventoryRecord] = []
     with Path(path).open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
-        required = {"track_id", "estimated_x_m", "estimated_y_m", "estimated_z_m", "3d_observation_count"}
+        required = {"track_id", "estimated_x_m", "estimated_y_m", "estimated_z_m", "3d_observation_count", "depth_source"}
         if not required.issubset(reader.fieldnames or []):
             raise ValueError("estimated inventory CSV lacks the localization contract")
         for row in reader:
@@ -269,6 +411,8 @@ def load_inventory(path: str | Path) -> tuple[InventoryRecord, ...]:
             position = tuple(float(row[name]) for name in ("estimated_x_m", "estimated_y_m", "estimated_z_m"))
             observations = int(row["3d_observation_count"])
             if observations > 0 and all(math.isfinite(value) for value in position):
+                if row["depth_source"] not in ALLOWED_ESTIMATED_DEPTH_SOURCES:
+                    raise ValueError(f"estimated inventory uses an unapproved depth source: {row['depth_source']}")
                 records.append(InventoryRecord(int(row["track_id"]), position, observations))
     if not records:
         raise ValueError("estimated inventory has no LiDAR-localized records")
@@ -306,6 +450,17 @@ def project_points(points: np.ndarray, eye: np.ndarray, target: np.ndarray, widt
     v = np.rint(height * 0.5 - focal * camera[:, 1] / safe_depth).astype(np.int32)
     valid &= (u >= 0) & (u < width) & (v >= 0) & (v < height)
     return np.stack([u[valid], v[valid]], axis=1), depth[valid], valid
+
+
+def fit_font(text: str, font_path: Path, preferred_size: int, minimum_size: int, max_width: int) -> ImageFont.FreeTypeFont:
+    """Return the largest font in bounds for a single-line UI label."""
+
+    for size in range(preferred_size, minimum_size - 1, -1):
+        font = ImageFont.truetype(str(font_path), size)
+        left, _top, right, _bottom = font.getbbox(text)
+        if right - left <= max_width:
+            return font
+    raise ValueError(f"text cannot fit its UI bounds at the minimum font size: {text}")
 
 
 class TechnicalRenderer:
@@ -457,13 +612,22 @@ class TechnicalRenderer:
             draw.text((box_x + int(14 * scale), box_y + int(32 * scale)), f"({x_m:.2f}, {y_m:.2f}, {z_m:.2f}) m  ·  {record.observations} returns", font=self.fonts["mono"], fill=(210, 226, 232, 255))
         if spec.id == "object_detail" and self.inventory:
             record = self.inventory[0]
-            card_x = width - int(465 * scale)
+            card_x = width - int(520 * scale)
             card_y = height - int(260 * scale)
             draw.rounded_rectangle((card_x, card_y, width - pad, height - int(62 * scale)), radius=int(12 * scale), fill=(4, 12, 22, 232), outline=(75, 230, 248, 210), width=max(1, int(2 * scale)))
-            draw.text((card_x + int(20 * scale), card_y + int(18 * scale)), "SELECTED ESTIMATED CENTER", font=self.fonts["kicker"], fill=(87, 229, 245, 255))
-            draw.text((card_x + int(20 * scale), card_y + int(52 * scale)), f"Persistent track  {record.track_id}", font=self.fonts["title"], fill=(241, 247, 249, 255))
-            draw.text((card_x + int(20 * scale), card_y + int(108 * scale)), f"Observation support  {record.observations} LiDAR associations", font=self.fonts["body"], fill=(188, 207, 216, 255))
-            draw.text((card_x + int(20 * scale), card_y + int(144 * scale)), "Class unknown · Extent not estimated", font=self.fonts["body"], fill=(244, 188, 91, 255))
+            text_x = card_x + int(20 * scale)
+            text_right = width - pad - int(20 * scale)
+            text_width = text_right - text_x
+            title = f"Persistent track {record.track_id}"
+            title_font = fit_font(title, FONT_BOLD, max(30, int(42 * scale)), max(22, int(28 * scale)), text_width)
+            observation = f"Observation support · {record.observations} LiDAR associations"
+            observation_font = fit_font(observation, FONT_REGULAR, max(14, int(18 * scale)), max(12, int(14 * scale)), text_width)
+            limitation = "Class unknown · Extent not estimated"
+            limitation_font = fit_font(limitation, FONT_REGULAR, max(14, int(18 * scale)), max(12, int(14 * scale)), text_width)
+            draw.text((text_x, card_y + int(18 * scale)), "SELECTED ESTIMATED CENTER", font=self.fonts["kicker"], fill=(87, 229, 245, 255))
+            draw.text((text_x, card_y + int(52 * scale)), title, font=title_font, fill=(241, 247, 249, 255))
+            draw.text((text_x, card_y + int(108 * scale)), observation, font=observation_font, fill=(188, 207, 216, 255))
+            draw.text((text_x, card_y + int(144 * scale)), limitation, font=limitation_font, fill=(244, 188, 91, 255))
         if spec.id == "final_technical_view":
             panel_x = int(width * 0.64)
             draw.rectangle((panel_x, 0, width, height), fill=(3, 9, 17, 242))
@@ -566,9 +730,38 @@ def _validate_probe(probe: dict[str, object], profile: RenderProfile, expected_f
 
 def _source_receipt(bundle: SourceBundle) -> dict[str, object]:
     return {
+        "source_id": bundle.source_id,
         "capture_id": bundle.capture_id,
-        "capture_git_sha": bundle.capture_git_sha,
-        "perception_git_sha": bundle.perception_git_sha,
+        "producer_revisions": {
+            "capture": bundle.capture_git_sha,
+            "slam": bundle.slam_git_sha,
+            "perception": bundle.perception_git_sha,
+        },
+        "simulation_time": {
+            "basis": "slam/slam_poses.csv:timestamp_s",
+            "start_s": bundle.simulation_time_start_s,
+            "end_s": bundle.simulation_time_end_s,
+        },
+        "map_state": {
+            "version": bundle.map_version,
+            "sha256": bundle.hashes["map"],
+            "producer_manifest_sha256": bundle.hashes["slam_manifest"],
+            "producer_revision": bundle.slam_git_sha,
+        },
+        "trajectory_state": {
+            "version": bundle.trajectory_version,
+            "sha256": bundle.hashes["trajectory"],
+            "producer_manifest_sha256": bundle.hashes["slam_manifest"],
+            "producer_revision": bundle.slam_git_sha,
+        },
+        "object_state": {
+            "version": bundle.object_state_version,
+            "sha256": bundle.hashes["inventory"],
+            "producer_manifest_sha256": bundle.hashes["perception_manifest"],
+            "producer_revision": bundle.perception_git_sha,
+            "depth_sources": list(bundle.depth_sources),
+            "ground_truth_consumed": False,
+        },
         "artifacts": {
             "map": {"sha256": bundle.hashes["map"], "semantics": "finalized offline LiDAR-SLAM point cloud"},
             "trajectory": {"sha256": bundle.hashes["trajectory"], "semantics": "estimated SLAM trajectory in map frame"},
@@ -576,6 +769,7 @@ def _source_receipt(bundle: SourceBundle) -> dict[str, object]:
             "capture_manifest": {"sha256": bundle.hashes["capture_manifest"]},
             "slam_manifest": {"sha256": bundle.hashes["slam_manifest"]},
             "perception_manifest": {"sha256": bundle.hashes["perception_manifest"]},
+            "source_catalog": {"sha256": bundle.hashes["source_catalog"]},
         },
     }
 
@@ -691,7 +885,15 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
         "total_frames": sum(view.frames for view in views),
         "capture_id": bundle.capture_id,
         "capture_git_sha": bundle.capture_git_sha,
+        "slam_git_sha": bundle.slam_git_sha,
         "perception_git_sha": bundle.perception_git_sha,
+        "simulation_time": {
+            "start_s": bundle.simulation_time_start_s,
+            "end_s": bundle.simulation_time_end_s,
+        },
+        "map_version": bundle.map_version,
+        "trajectory_version": bundle.trajectory_version,
+        "object_state_version": bundle.object_state_version,
         "source": _source_receipt(bundle),
         "renderer": {"path": str(Path(__file__).resolve()), "sha256": renderer_hash},
         "plan": {"path": str(plan_path.resolve()), "sha256": plan_hash},

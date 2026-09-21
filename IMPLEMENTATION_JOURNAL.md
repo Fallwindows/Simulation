@@ -160,3 +160,17 @@ remaining blocker: [setup report](review/setup-20260920/report.md).
 - These are reviewable technical source views, not the final 45-second film.
   Presentation integration still needs an adapter from the technical receipt
   schema to the presentation role-bundle schema after the branches merge.
+
+Technical-view r2 closes the independent source-coherence and typography
+findings. The legacy historical run is now accepted only through the checked-in
+immutable source catalog, which pins its capture/SLAM/perception manifests,
+producer commits, map/trajectory/inventory hashes and versions, approved
+LiDAR-with-SLAM depth source, and the trajectory's 0.2–20.4 second simulation
+range. Cross-run substitutions, capture-ID mismatches, unknown or ground-truth
+depth sources, ground-truth manifest claims, and nonexistent producer revisions
+fail before rendering. Delivery receipts expose the validated time range and
+map, trajectory, and object-state identities. Technical tests keep NumPy and the
+renderer inside child processes so repository discovery order cannot contaminate
+the recorder's NumPy-free import assertion. The object-detail card now measures
+and fits every variable label; start/mid/end frames were inspected at 720p and
+1080p before regenerating the complete evidence set.
