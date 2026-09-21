@@ -137,3 +137,18 @@ remaining blocker: [setup report](review/setup-20260920/report.md).
   path with the smallest policy-compliant mechanism, and build the data-driven
   12-shot presentation/timeline path. Expensive simulator and GPU work remains
   serialized.
+
+## 2026-09-21 — raw capture recorder policy repair
+
+- `RawCaptureWriter` now loads the required generated Clock, Image,
+  PointCloud2, and TF message submodules under their canonical package names.
+  It no longer imports aggregate `sensor_msgs.msg` or CameraInfo, so the
+  dedicated capture process does not load NumPy or the blocked BLAS library.
+- Capture manifest version 2 stores `/clock`, RGB Image, PointCloud2, `/tf`, and
+  `/tf_static` in the raw SQLite bag. Camera calibration remains the separate
+  scenario-derived `camera_info.json`, explicitly labeled
+  `configured_intrinsics` and `observed_ros_message=false`.
+- A separate-process Zenoh publisher/player test delivered serialized messages
+  for every retained topic into the real writer. Persisted counts and types,
+  clean SQLite closure, `ros2 bag info`, and `numpy_loaded=false` all passed.
+  No Isaac or GPU workload was run for this repair.

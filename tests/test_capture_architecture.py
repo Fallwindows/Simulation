@@ -6,7 +6,7 @@ from pathlib import Path
 from evaluation.metrics import PoseSample, compute_metrics, interpolate_pose
 from simulator.capture.inventory import export_inventory
 from simulator.capture.export_metadata import export_metadata
-from simulator.capture.manifest import build_experiment_hashes, validate_capture_for_slam
+from simulator.capture.manifest import CAPTURE_MANIFEST_VERSION, build_experiment_hashes, validate_capture_for_slam
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,15 +47,25 @@ class CaptureArchitectureTests(unittest.TestCase):
             (root / "sensors_bag").mkdir()
             (root / "rgb_camera.mp4").write_bytes(b"video")
             (root / "rgb_frames.jsonl").write_text("{\"stamp_s\": 0.0}\n", encoding="utf-8")
+            (root / "camera_info.json").write_text(
+                json.dumps({"provenance": "configured_intrinsics", "observed_ros_message": False}),
+                encoding="utf-8",
+            )
             manifest = {
                 "status": "complete",
-                "manifest_version": 1,
+                "manifest_version": CAPTURE_MANIFEST_VERSION,
                 "bag": {"uri": "sensors_bag", "topics": [
-                    "/clock", "/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info",
+                    "/clock", "/sim/camera/rgb/image_raw",
                     "/sim/lidar/points", "/tf", "/tf_static",
                 ]},
+                "rgb": {
+                    "camera_info": "camera_info.json",
+                    "camera_info_provenance": "configured_intrinsics",
+                },
             }
-            self.assertTrue(validate_capture_for_slam(root, manifest)["gt_required"] is False)
+            result = validate_capture_for_slam(root, manifest)
+            self.assertTrue(result["gt_required"] is False)
+            self.assertNotIn("/sim/camera/rgb/camera_info", result["topics"])
 
     def test_interpolation_rejects_invalid_quaternion_and_uses_brackets(self):
         truth = [

@@ -15,11 +15,10 @@ import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
-CAPTURE_MANIFEST_VERSION = 1
+CAPTURE_MANIFEST_VERSION = 2
 REQUIRED_CAPTURE_TOPICS = (
     "/clock",
     "/sim/camera/rgb/image_raw",
-    "/sim/camera/rgb/camera_info",
     "/sim/lidar/points",
     "/tf",
     "/tf_static",
@@ -170,6 +169,15 @@ def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] 
     missing = [topic for topic in REQUIRED_CAPTURE_TOPICS if topic not in data.get("bag", {}).get("topics", [])]
     if missing:
         raise ValueError(f"capture bag is missing required sensor topics: {missing}")
+    rgb = data.get("rgb", {})
+    if rgb.get("camera_info_provenance") != "configured_intrinsics":
+        raise ValueError("capture must identify camera intrinsics as configured_intrinsics")
+    camera_info_path = root / str(rgb.get("camera_info", ""))
+    if not camera_info_path.is_file():
+        raise ValueError("configured camera intrinsics artifact is missing")
+    camera_info = json.loads(camera_info_path.read_text(encoding="utf-8"))
+    if camera_info.get("provenance") != "configured_intrinsics" or camera_info.get("observed_ros_message") is not False:
+        raise ValueError("camera intrinsics artifact has invalid provenance")
     bag_uri = root / str(data.get("bag", {}).get("uri", ""))
     if not bag_uri.is_dir():
         raise ValueError(f"capture bag does not exist: {bag_uri}")
