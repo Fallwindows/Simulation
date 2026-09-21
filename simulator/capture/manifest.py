@@ -34,6 +34,12 @@ REQUIRED_CAPTURE_TOPIC_TYPES = {
 }
 _HEX_40 = re.compile(r"^[0-9a-fA-F]{40}$")
 _HEX_64 = re.compile(r"^[0-9a-fA-F]{64}$")
+_WINDOWS_INVALID_CHARS = frozenset('<>:"\\|?*')
+_WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"con", "prn", "aux", "nul", "conin$", "conout$"}
+    | {f"com{index}" for index in range(1, 10)}
+    | {f"lpt{index}" for index in range(1, 10)}
+)
 
 
 def _jsonable(value: Any) -> Any:
@@ -206,6 +212,15 @@ def _safe_relative_path(value: object, field: str) -> str:
         or path_text != canonical
     ):
         raise ValueError(f"capture manifest {field} must be a safe POSIX relative path")
+    for component in raw_parts:
+        device_basename = component.split(".", 1)[0].rstrip(" .").casefold()
+        if (
+            component.endswith((".", " "))
+            or any(character in _WINDOWS_INVALID_CHARS or ord(character) < 32 for character in component)
+            or device_basename in _WINDOWS_RESERVED_BASENAMES
+            or len(component) > 255
+        ):
+            raise ValueError(f"capture manifest {field} must use Windows-canonical path components")
     return canonical
 
 
@@ -312,6 +327,10 @@ def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: 
         raise ValueError("capture manifest output parent must be a directory")
 
     inventory: set[str] = set()
+    resolved_inventory: list[Path] = []
+    resolved_identities: set[str] = set()
+    manifest_path = root / "capture_manifest.json"
+    manifest_identity = str(manifest_path.resolve(strict=False)).replace("\\", "/").casefold()
     for index, item in enumerate(manifest["files"]):
         path_text = _safe_relative_path(item["path"], f"files[{index}].path")
         candidate = root.joinpath(*PurePosixPath(path_text).parts)
@@ -321,6 +340,25 @@ def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: 
             raise ValueError(f"capture manifest file does not exist: {path_text}") from error
         if not resolved.is_relative_to(root) or not resolved.is_file():
             raise ValueError(f"capture manifest file is not a regular file under capture root: {path_text}")
+        resolved_identity = str(resolved).replace("\\", "/").casefold()
+        if resolved_identity == manifest_identity:
+            raise ValueError("capture manifest files cannot resolve to capture_manifest.json")
+        if manifest_path.exists():
+            try:
+                if os.path.samefile(resolved, manifest_path):
+                    raise ValueError("capture manifest files cannot alias capture_manifest.json")
+            except OSError:
+                pass
+        if resolved_identity in resolved_identities:
+            raise ValueError(f"capture manifest files resolve to a duplicate path: {path_text}")
+        for previous in resolved_inventory:
+            try:
+                if os.path.samefile(resolved, previous):
+                    raise ValueError(f"capture manifest files alias the same file: {path_text}")
+            except OSError:
+                continue
+        resolved_identities.add(resolved_identity)
+        resolved_inventory.append(resolved)
         actual_size = resolved.stat().st_size
         if item["size_bytes"] != actual_size:
             raise ValueError(
@@ -355,14 +393,27 @@ def validate_capture_manifest_artifacts(manifest: dict[str, Any], capture_root: 
         if not path.is_file():
             continue
         resolved = path.resolve(strict=True)
-        if not resolved.is_relative_to(root):
-            raise ValueError(f"capture manifest bag file escapes capture root: {path}")
+        if not resolved.is_relative_to(bag_root):
+            raise ValueError(f"capture manifest bag file escapes bag directory: {path}")
         bag_files.append(resolved.relative_to(root).as_posix())
     if not bag_files:
         raise ValueError("capture manifest bag directory contains no storage files")
     missing_bag_files = [path for path in bag_files if path not in inventory]
     if missing_bag_files:
         raise ValueError(f"capture manifest bag storage files are absent from files: {missing_bag_files}")
+    metadata_path = f"{bag_uri}/metadata.yaml"
+    if metadata_path not in inventory or not (bag_root / "metadata.yaml").is_file():
+        raise ValueError("capture manifest sqlite3 bag requires inventoried metadata.yaml")
+    db3_paths = [
+        path for path in bag_root.iterdir()
+        if path.is_file() and path.suffix.casefold() == ".db3"
+    ]
+    if not db3_paths:
+        raise ValueError("capture manifest sqlite3 bag requires at least one .db3 storage file")
+    missing_db3 = [path.resolve(strict=True).relative_to(root).as_posix() for path in db3_paths]
+    missing_db3 = [path for path in missing_db3 if path not in inventory]
+    if missing_db3:
+        raise ValueError(f"capture manifest sqlite3 storage files are absent from files: {missing_db3}")
 
 
 def validate_capture_manifest_hash(manifest: dict[str, Any]) -> str:

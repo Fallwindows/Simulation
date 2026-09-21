@@ -197,8 +197,26 @@ class CaptureArchitectureTests(unittest.TestCase):
             "trailing slash": [
                 {"path": "folder/file/", "sha256": "7" * 64, "size_bytes": 1},
             ],
+            "trailing dot": [
+                {"path": "alias.bin.", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "trailing space": [
+                {"path": "alias.bin ", "sha256": "7" * 64, "size_bytes": 1},
+            ],
             "backslash": [
                 {"path": "folder\\file", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "ADS": [
+                {"path": "alias.bin:stream", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "invalid character": [
+                {"path": "invalid<name.bin", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "reserved device": [
+                {"path": "folder/CON.txt", "sha256": "7" * 64, "size_bytes": 1},
+            ],
+            "reserved port": [
+                {"path": "LPT9.log", "sha256": "7" * 64, "size_bytes": 1},
             ],
             "UNC": [
                 {"path": "//server/share/file", "sha256": "7" * 64, "size_bytes": 1},
@@ -222,6 +240,32 @@ class CaptureArchitectureTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                     self.assertFalse((root / "capture_manifest.json.tmp").exists())
 
+    def test_finalizer_applies_windows_path_rules_to_every_reference(self):
+        mutations = {
+            "RGB trailing dot": lambda value: value["rgb"].update(video="rgb_camera.mp4."),
+            "RGB trailing space": lambda value: value["rgb"].update(video="rgb_camera.mp4 "),
+            "ground-truth reserved device": lambda value: value["ground_truth"].update(inventory_csv="CON.csv"),
+            "ground-truth ADS": lambda value: value["ground_truth"].update(inventory_json="inventory_ground_truth.json:stream"),
+            "bag trailing dot": lambda value: value["bag"].update(uri="sensors_bag."),
+            "bag trailing space": lambda value: value["bag"].update(uri="sensors_bag "),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _materialize_capture(root)
+            staging = root / "staging.json"
+            output = root / "capture_manifest.json"
+            original = b"existing-output-must-survive"
+            for name, mutate in mutations.items():
+                with self.subTest(name=name):
+                    value = copy.deepcopy(_production_manifest())
+                    mutate(value)
+                    staging.write_text(json.dumps(value), encoding="utf-8")
+                    output.write_bytes(original)
+                    with self.assertRaisesRegex(ValueError, "path"):
+                        finalize_capture_manifest(staging, output)
+                    self.assertEqual(output.read_bytes(), original)
+                    self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
     def test_finalizer_verifies_inventory_bytes_references_and_bag_storage(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -237,6 +281,9 @@ class CaptureArchitectureTests(unittest.TestCase):
                 ),
                 "missing bag inventory entry": lambda value: value.update(
                     files=[item for item in value["files"] if item["path"] != "sensors_bag/capture_0.db3"]
+                ),
+                "missing bag metadata inventory": lambda value: value.update(
+                    files=[item for item in value["files"] if item["path"] != "sensors_bag/metadata.yaml"]
                 ),
             }
             for name, mutate in mutations.items():
@@ -256,6 +303,87 @@ class CaptureArchitectureTests(unittest.TestCase):
             staging.write_text(json.dumps(value), encoding="utf-8")
             output.write_bytes(original)
             with self.assertRaisesRegex(ValueError, "does not exist"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original)
+            self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
+    def test_finalizer_rejects_dummy_bag_and_existing_file_identity_aliases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _materialize_capture(root)
+            staging = root / "staging.json"
+            output = root / "capture_manifest.json"
+            original = b"existing-output-must-survive"
+
+            db3 = root / "sensors_bag" / "capture_0.db3"
+            db3.unlink()
+            dummy = root / "sensors_bag" / "dummy.bin"
+            dummy.write_bytes(b"not sqlite storage")
+            dummy_manifest = _production_manifest()
+            dummy_manifest["files"] = [
+                item for item in dummy_manifest["files"] if item["path"] != "sensors_bag/capture_0.db3"
+            ] + [{
+                "path": "sensors_bag/dummy.bin",
+                "sha256": hashlib.sha256(dummy.read_bytes()).hexdigest(),
+                "size_bytes": dummy.stat().st_size,
+            }]
+            staging.write_text(json.dumps(dummy_manifest), encoding="utf-8")
+            output.write_bytes(original)
+            with self.assertRaisesRegex(ValueError, "requires at least one .db3"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original)
+            self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
+            dummy.unlink()
+            db3.write_bytes(CAPTURE_FILE_BYTES["sensors_bag/capture_0.db3"])
+            alias = root / "rgb_alias.mp4"
+            try:
+                alias.hardlink_to(root / "rgb_camera.mp4")
+            except OSError:
+                self.skipTest("hard links are unavailable on this filesystem")
+            alias_manifest = _production_manifest()
+            alias_manifest["files"].append({
+                "path": alias.name,
+                "sha256": hashlib.sha256(alias.read_bytes()).hexdigest(),
+                "size_bytes": alias.stat().st_size,
+            })
+            staging.write_text(json.dumps(alias_manifest), encoding="utf-8")
+            output.write_bytes(original)
+            with self.assertRaisesRegex(ValueError, "alias the same file"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original)
+            self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
+            alias.unlink()
+            output.write_bytes(original)
+            self_alias = root / "manifest_alias.json"
+            self_alias.hardlink_to(output)
+            self_manifest = _production_manifest()
+            self_manifest["files"].append({
+                "path": self_alias.name,
+                "sha256": hashlib.sha256(original).hexdigest(),
+                "size_bytes": len(original),
+            })
+            staging.write_text(json.dumps(self_manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "alias capture_manifest.json"):
+                finalize_capture_manifest(staging, output)
+            self.assertEqual(output.read_bytes(), original)
+            self.assertFalse((root / "capture_manifest.json.tmp").exists())
+
+    def test_finalizer_rejects_case_alias_between_reference_and_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _materialize_capture(root)
+            value = _production_manifest()
+            for item in value["files"]:
+                if item["path"] == "rgb_camera.mp4":
+                    item["path"] = "RGB_CAMERA.MP4"
+            staging = root / "staging.json"
+            output = root / "capture_manifest.json"
+            original = b"existing-output-must-survive"
+            staging.write_text(json.dumps(value), encoding="utf-8")
+            output.write_bytes(original)
+            with self.assertRaisesRegex(ValueError, "referenced artifacts"):
                 finalize_capture_manifest(staging, output)
             self.assertEqual(output.read_bytes(), original)
             self.assertFalse((root / "capture_manifest.json.tmp").exists())
