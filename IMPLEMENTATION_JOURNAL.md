@@ -188,3 +188,19 @@ remaining blocker: [setup report](review/setup-20260920/report.md).
 - Tests prove strict UTF-8 JSON readability, declared/canonical hash equality,
   deterministic hashes across key order, and rejection after tampering. The
   prior order-dependent inline PowerShell checksum was removed.
+
+### Strict manifest-v2 schema and atomic preservation
+
+- Finalization now validates the complete production value/type contract before
+  writing: capture identity/revisions, duration/runtime fields, the exact five
+  raw topics and ROS types, nonnegative counts and ordered time ranges,
+  configured RGB calibration provenance, evaluation-only ground-truth boundary,
+  experiment hashes, and the file inventory.
+- File entries require unique safe relative POSIX paths, SHA-256 values, and
+  nonnegative sizes; traversal, absolute paths, duplicates, and a manifest
+  self-entry are rejected. The production wrapper now carries raw topic types
+  from the bag receipt into the capture manifest.
+- The computed hash and full payload are validated before the temporary file is
+  written and revalidated from canonical temporary bytes before atomic replace.
+  Adversarial tests prove invalid staging preserves an existing output exactly
+  and leaves no temporary file.

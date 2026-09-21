@@ -126,7 +126,7 @@ try {
   $manifest = [ordered]@{
     manifest_version=2; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha
     rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; duration_s=$duration
-    bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
+    bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; topic_types=$bagMeta.topic_types; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
     rgb=[ordered]@{ video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; camera_info_provenance="configured_intrinsics"; metadata="rgb_video.json"; frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s }
     ground_truth=[ordered]@{ inventory_csv="inventory_ground_truth.csv"; inventory_json="inventory_ground_truth.json"; pose_topic="/sim/ground_truth/pose"; evaluation_only=$true }
     hashes=(Get-Content -LiteralPath (Join-Path $captureDir "experiment_hashes.json") -Raw | ConvertFrom-Json)
