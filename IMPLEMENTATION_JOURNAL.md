@@ -166,3 +166,14 @@ remaining blocker: [setup report](review/setup-20260920/report.md).
   A Pixi/Zenoh regression reached an exact `2.1 s` horizon from a first clock
   of `2.0 s`, retained all five raw topics, and kept NumPy unloaded. CPU-only
   tests passed; no Isaac or GPU workload was run.
+
+### Redirected-process exit-status correction
+
+- The production wrapper no longer reads the nullable `ExitCode` property from
+  redirected `Start-Process` objects. Each RGB/raw child now runs through a
+  narrow PowerShell wrapper that atomically writes an explicit JSON exit-status
+  sentinel; the parent rejects missing, malformed, or unavailable status.
+- A real Windows `Start-Process` regression with redirected stdout/stderr proves
+  exit `0` is accepted, exit `7` propagates unchanged, and an absent sentinel is
+  rejected rather than treated as success. The functional native r2 smoke bag
+  remained valid; this correction addresses only wrapper completion reporting.

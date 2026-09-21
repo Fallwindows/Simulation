@@ -1,6 +1,7 @@
-import unittest
 import json
 from pathlib import Path
+import subprocess
+import unittest
 
 from simulator.ros.topic_contract import FRAMES, TOPICS
 
@@ -141,3 +142,15 @@ class ContractTests(unittest.TestCase):
         self.assertIn('"--end-clock-seconds",([string]$duration)', capture)
         self.assertIn('$recorderExit -ne 0', capture)
         self.assertIn('$bagExit -ne 0', capture)
+
+    def test_redirected_process_status_distinguishes_success_failure_and_unavailable(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "tests/process_status_regression.ps1")],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertIn("zero=0 nonzero=7 unavailable=rejected", result.stdout)
