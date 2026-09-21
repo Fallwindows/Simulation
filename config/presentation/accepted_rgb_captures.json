@@ -1,5 +1,36 @@
 {
   "schema_version": 1,
   "mechanism": "reviewed_exact_capture_allowlist",
-  "captures": []
+  "captures": [
+    {
+      "capture_id": "20260921-053814804",
+      "capture_sha256": "ab84ccc1f71790f896bab1375062ed1db9f40bf9a1531d582f7cd0e589121eba",
+      "git_sha": "c9bf2be24bed11f5581dcfff448a4f15efff91b7",
+      "producer_source_path": "scripts/capture_simulation.ps1",
+      "producer_blob_sha1": "3d9ce2da49d1553a8e69a25c78ec503c9e6d662a",
+      "required_artifact_sha256": {
+        "view_video": "c453b46e40acd06928b384fd13a5a7822c16f46ca5f30b79fc829d1d8e05c703",
+        "frame_index": "539977f7498135b5cfd06d36de7841aff932dc1e66511303f764b4e42306d0ea",
+        "camera_info": "e877d381131fe2f03893d746af454f101911f606a4c3d06faced151609966158",
+        "rgb_metadata": "e4cd5f3ec89a8821653dc52fb114407e305cf116f8c6f1ede364f483a4b57725",
+        "capture_manifest": "3d82955332e326376b1f3e683a34ff589e4f0324cf17015682d336f282db3599",
+        "sensor_transforms": "b925f05007126b4a755ba6659ba2b8756247d1069feb67276fbe265baa2b430f"
+      },
+      "review": {
+        "status": "accepted",
+        "reviewer": "independent-production-capture-review",
+        "reviewed_utc": "2026-09-21T12:51:13Z",
+        "verdict_path": "runs/production-20260920/reviewer-scratch/verdict-capture-20260921-053814804.md",
+        "verdict_sha256": "bbff6fbf052b70b14d9c1f7b0014fd2788bb92077db3e5f1ad8ba26e37e85c20"
+      },
+      "presentation_classification": {
+        "kind": "reviewed_production"
+      },
+      "presentation_transform": {
+        "operation": "none",
+        "reason": "independent review confirmed the raw FRESH MARKET sign reads left-to-right; no global flip is permitted",
+        "raw_capture_bytes_modified": false
+      }
+    }
+  ]
 }

@@ -23,7 +23,11 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from .provenance import DIAGNOSTIC_BASELINE_IDENTITY, validate_diagnostic_identity
+from .provenance import (
+    DIAGNOSTIC_BASELINE_IDENTITY,
+    validate_diagnostic_identity,
+    validate_presentation_transform,
+)
 from .timeline import InputReport, PresentationPlan, RoleInput, Shot, inspect_inputs, load_plan
 
 
@@ -40,6 +44,7 @@ class PlannedSegment:
     view_id: str | None = None
     video_sha256: str | None = None
     receipt_sha256: str | None = None
+    presentation_transform: dict[str, object] | None = None
 
 
 def _file_sha256(path: Path) -> str:
@@ -96,6 +101,7 @@ def plan_segments(plan: PresentationPlan, report: InputReport, mode: str) -> tup
                     source.view_id,
                     source.video_sha256,
                     source.receipt_sha256,
+                    source.presentation_transform,
                 )
             )
             continue
@@ -257,7 +263,11 @@ def _build_filter(
                 f"fps={plan.fps}",
             ]
             if segment.source_role == "rgb_capture":
-                chain.append("hflip")
+                transform = validate_presentation_transform(segment.presentation_transform)
+                if transform["operation"] == "hflip":
+                    chain.append("hflip")
+            elif segment.presentation_transform is not None:
+                raise ValueError("only reviewed RGB capture segments may declare a presentation transform")
             chain.extend(
                 [
                     f"scale={profile.width}:{profile.height}:force_original_aspect_ratio=decrease",
@@ -581,7 +591,7 @@ def _render_presentation_generation(
                 "view_id": segment.view_id,
                 "source_video_sha256": segment.video_sha256,
                 "source_receipt_sha256": segment.receipt_sha256,
-                "presentation_transform": "hflip" if segment.source_role == "rgb_capture" else None,
+                "presentation_transform": segment.presentation_transform,
                 "missing_genuine_roles": list(segment.missing_roles),
             }
             for segment in segments

@@ -201,17 +201,14 @@ def emit_rgb_bundle(
         "source_time_range_s": list(source_time_range),
         "source_frame_count": len(frames),
         "source_timestamp_mapping": "rgb_frames.jsonl contiguous frame_index and 30 fps simulation stamps",
-        "presentation_transform": {
-            "operation": "hflip",
-            "reason": "native simulator RGB is mirrored horizontally; presentation text must read normally",
-            "raw_capture_bytes_modified": False,
-        },
+        "presentation_transform": acceptance["presentation_transform"],
         "map_version": None,
         "object_state_version": None,
         "capture_acceptance": {
             "mechanism": "reviewed_exact_capture_allowlist",
             "catalog_sha256": acceptance["catalog_sha256"],
             "presentation_classification": acceptance["presentation_classification"],
+            "presentation_transform": acceptance["presentation_transform"],
             "cryptographic_execution_attestation": False,
         },
     }
@@ -236,6 +233,7 @@ def emit_rgb_bundle(
             "mechanism": "reviewed_exact_capture_allowlist",
             "catalog_sha256": acceptance["catalog_sha256"],
             "presentation_classification": acceptance["presentation_classification"],
+            "presentation_transform": acceptance["presentation_transform"],
             "cryptographic_execution_attestation": False,
         },
         "artifacts": artifacts,

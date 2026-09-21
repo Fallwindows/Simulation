@@ -17,6 +17,18 @@
         "marker_id": "simulator.presentation.generated-test-fixture.v1",
         "marker_sha256": "5ac77eb627c557f5f95ca9d9241960beddaf190084aa375f62d893c88ac6825e"
       }
+    ],
+    "presentation_transforms": [
+      {
+        "operation": "none",
+        "reason": "independent review confirmed the raw FRESH MARKET sign reads left-to-right; no global flip is permitted",
+        "raw_capture_bytes_modified": false
+      },
+      {
+        "operation": "hflip",
+        "reason": "native simulator RGB is mirrored horizontally; presentation text must read normally",
+        "raw_capture_bytes_modified": false
+      }
     ]
   },
   "diagnostic_baseline": {
@@ -129,6 +141,7 @@
       "output_video_sha256",
       "source_artifact_sha256",
       "source_time_range_s",
+      "presentation_transform",
       "map_version",
       "object_state_version"
     ]

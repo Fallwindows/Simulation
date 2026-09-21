@@ -49,6 +49,20 @@ GENERATED_TEST_FIXTURE_CLASSIFICATION = {
     "marker_id": GENERATED_TEST_FIXTURE_MARKER_ID,
     "marker_sha256": GENERATED_TEST_FIXTURE_MARKER_SHA256,
 }
+PRESENTATION_TRANSFORM_NONE = {
+    "operation": "none",
+    "reason": "independent review confirmed the raw FRESH MARKET sign reads left-to-right; no global flip is permitted",
+    "raw_capture_bytes_modified": False,
+}
+PRESENTATION_TRANSFORM_HFLIP = {
+    "operation": "hflip",
+    "reason": "native simulator RGB is mirrored horizontally; presentation text must read normally",
+    "raw_capture_bytes_modified": False,
+}
+PRESENTATION_TRANSFORMS = {
+    "none": PRESENTATION_TRANSFORM_NONE,
+    "hflip": PRESENTATION_TRANSFORM_HFLIP,
+}
 
 DIAGNOSTIC_BASELINE_IDENTITY = {
     "plan_path": "config/presentation/storyboard.yaml",
@@ -173,6 +187,7 @@ def schema_catalog() -> dict[str, Any]:
                 REVIEWED_PRODUCTION_CLASSIFICATION,
                 GENERATED_TEST_FIXTURE_CLASSIFICATION,
             ],
+            "presentation_transforms": list(PRESENTATION_TRANSFORMS.values()),
         },
         "diagnostic_baseline": {
             "schema_id": "simulation.presentation.diagnostic_baseline.v1",
@@ -202,6 +217,7 @@ def schema_catalog() -> dict[str, Any]:
                 "output_video_sha256",
                 "source_artifact_sha256",
                 "source_time_range_s",
+                "presentation_transform",
                 "map_version",
                 "object_state_version",
             ],
@@ -216,6 +232,18 @@ def schema_catalog() -> dict[str, Any]:
             ],
         },
     }
+
+
+def validate_presentation_transform(value: object) -> dict[str, object]:
+    """Accept only an exact reviewed RGB orientation operation and reason."""
+
+    if not isinstance(value, dict):
+        raise ValueError("RGB presentation_transform must be a mapping")
+    operation = value.get("operation")
+    expected = PRESENTATION_TRANSFORMS.get(str(operation))
+    if expected is None or value != expected:
+        raise ValueError("RGB presentation_transform is not an exact supported reviewed transform")
+    return dict(expected)
 
 
 @dataclass(frozen=True)
@@ -736,7 +764,7 @@ def validate_rgb_capture_acceptance(
     expected_keys = {
         "capture_id", "capture_sha256", "git_sha", "producer_source_path",
         "producer_blob_sha1", "required_artifact_sha256", "review",
-        "presentation_classification",
+        "presentation_classification", "presentation_transform",
     }
     if set(entry) != expected_keys:
         raise ValueError("reviewed RGB capture entry fields are invalid")
@@ -747,14 +775,25 @@ def validate_rgb_capture_acceptance(
     if entry.get("required_artifact_sha256") != artifact_hashes:
         raise ValueError("reviewed RGB artifact hashes do not match the capture bundle")
     review = entry.get("review")
-    if not isinstance(review, dict) or set(review) != {"status", "reviewer", "reviewed_utc"} or review.get("status") != "accepted":
+    if not isinstance(review, dict) or set(review) != {
+        "status", "reviewer", "reviewed_utc", "verdict_path", "verdict_sha256",
+    } or review.get("status") != "accepted":
         raise ValueError("reviewed RGB capture entry has no accepted review record")
+    verdict_path = str(review.get("verdict_path", ""))
+    if not verdict_path or "\\" in verdict_path or verdict_path.startswith("/") or any(
+        part in ("", ".", "..") for part in verdict_path.split("/")
+    ) or not SHA256_PATTERN.fullmatch(str(review.get("verdict_sha256", ""))):
+        raise ValueError("reviewed RGB capture entry has an invalid verdict binding")
+    if not str(review.get("reviewer", "")).strip() or not str(review.get("reviewed_utc", "")).endswith("Z"):
+        raise ValueError("reviewed RGB capture entry review identity/time is invalid")
     classification = validate_presentation_classification(entry.get("presentation_classification"))
+    presentation_transform = validate_presentation_transform(entry.get("presentation_transform"))
     return {
         "catalog_path": str(source),
         "catalog_sha256": sha256_path(source),
         "entry": entry,
         "presentation_classification": classification,
+        "presentation_transform": presentation_transform,
     }
 
 
@@ -823,12 +862,7 @@ def _validate_view_manifest(
         actual = (float(rows[0]["stamp_s"]), float(rows[-1]["stamp_s"]))
         if any(abs(observed - expected) > 1e-6 for observed, expected in zip((start, end), actual)):
             raise ValueError("RGB view manifest source_time_range_s must equal the actual frame-index stamps")
-        if data.get("presentation_transform") != {
-            "operation": "hflip",
-            "reason": "native simulator RGB is mirrored horizontally; presentation text must read normally",
-            "raw_capture_bytes_modified": False,
-        }:
-            raise ValueError("RGB view manifest must declare the reviewed horizontal presentation transform")
+        validate_presentation_transform(data.get("presentation_transform"))
     if data.get("map_version") != item.get("map_version") or data.get("object_state_version") != item.get("object_state_version"):
         raise ValueError("view manifest map/object version mismatch")
 
@@ -1053,6 +1087,7 @@ def validate_role(
                         "mechanism": "reviewed_exact_capture_allowlist",
                         "catalog_sha256": acceptance["catalog_sha256"],
                         "presentation_classification": acceptance["presentation_classification"],
+                        "presentation_transform": acceptance["presentation_transform"],
                         "cryptographic_execution_attestation": False,
                     }
                     if item.get("acceptance") != expected_acceptance:
@@ -1060,6 +1095,8 @@ def validate_role(
                     receipt = _json(artifacts["view_manifest"].path)
                     if receipt.get("capture_acceptance") != expected_acceptance:
                         raise ValueError("RGB view receipt acceptance does not match its reviewed catalog")
+                    if receipt.get("presentation_transform") != acceptance["presentation_transform"]:
+                        raise ValueError("RGB view receipt transform does not match its reviewed catalog")
                 except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
                     errors.append(str(exc))
     return ValidatedRole(

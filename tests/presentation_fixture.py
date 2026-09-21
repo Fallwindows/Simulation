@@ -11,7 +11,11 @@ from typing import Any
 
 from simulator.capture.manifest import capture_hash, write_json
 from simulator.presentation.complete_bundle import emit_complete_bundle
-from simulator.presentation.provenance import GENERATED_TEST_FIXTURE_CLASSIFICATION
+from simulator.presentation.provenance import (
+    GENERATED_TEST_FIXTURE_CLASSIFICATION,
+    GENERATED_TEST_FIXTURE_MARKER_SHA256,
+    PRESENTATION_TRANSFORM_HFLIP,
+)
 from simulator.presentation.rgb_bundle import emit_rgb_bundle
 
 
@@ -184,8 +188,13 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             "capture_id": capture_id, "capture_sha256": capture_value["capture_sha256"], "git_sha": revision,
             "producer_source_path": "scripts/capture_simulation.ps1", "producer_blob_sha1": producer_blob,
             "required_artifact_sha256": required_hashes,
-            "review": {"status": "accepted", "reviewer": "generated-test-fixture", "reviewed_utc": "2026-09-21T00:00:00Z"},
+            "review": {
+                "status": "accepted", "reviewer": "generated-test-fixture", "reviewed_utc": "2026-09-21T00:00:00Z",
+                "verdict_path": "tests/generated-presentation-fixture-verdict",
+                "verdict_sha256": GENERATED_TEST_FIXTURE_MARKER_SHA256,
+            },
             "presentation_classification": GENERATED_TEST_FIXTURE_CLASSIFICATION,
+            "presentation_transform": PRESENTATION_TRANSFORM_HFLIP,
         }],
     })
     rgb_bundle = root / "rgb_bundle.json"

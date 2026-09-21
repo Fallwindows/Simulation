@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .provenance import sha256_path, source_text_sha256
+from .provenance import sha256_path, source_text_sha256, validate_presentation_transform
 from .technical_bundle import ValidatedTechnicalDelivery, validate_technical_delivery
 
 
@@ -29,6 +29,7 @@ class CompleteShotSource:
     view_id: str
     receipt_path: Path
     receipt_sha256: str
+    presentation_transform: dict[str, object] | None
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ def _rgb_sources(
     role = report.roles["rgb"]
     receipt_path = role.artifacts["view_manifest"]
     receipt = _json(receipt_path)
+    presentation_transform = validate_presentation_transform(receipt.get("presentation_transform"))
     capture_manifest = _json(role.artifacts["capture_manifest"])
     rows = []
     with role.artifacts["frame_index"].open(encoding="utf-8") as handle:
@@ -105,6 +107,7 @@ def _rgb_sources(
                 "rgb",
                 receipt_path,
                 role.artifact_sha256["view_manifest"],
+                presentation_transform,
             )
         )
     return (
@@ -137,6 +140,7 @@ def _technical_sources(delivery: ValidatedTechnicalDelivery) -> list[CompleteSho
             source.view_id,
             source.receipt_path,
             source.receipt_sha256,
+            None,
         )
         for source in delivery.shots
     ]
@@ -153,6 +157,7 @@ def _shot_value(source: CompleteShotSource, manifest_path: Path) -> dict[str, An
         "frame_count": source.frame_count,
         "source_time_range_s": list(source.source_time_range_s),
         "source_time_basis": source.source_time_basis,
+        "presentation_transform": source.presentation_transform,
     }
 
 

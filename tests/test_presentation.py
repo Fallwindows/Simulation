@@ -8,8 +8,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 from simulator.presentation.complete_bundle import emit_complete_bundle
-from simulator.presentation.render_video import plan_segments, render_presentation
-from simulator.presentation.provenance import DIAGNOSTIC_BASELINE_IDENTITY, ROLE_SPECS, schema_catalog, source_text_sha256
+from simulator.presentation.render_video import PlannedSegment, _build_filter, plan_segments, render_presentation
+from simulator.presentation.provenance import (
+    DIAGNOSTIC_BASELINE_IDENTITY,
+    PRESENTATION_TRANSFORM_HFLIP,
+    PRESENTATION_TRANSFORM_NONE,
+    ROLE_SPECS,
+    schema_catalog,
+    source_text_sha256,
+    validate_rgb_capture_acceptance,
+    validate_presentation_transform,
+)
 from simulator.presentation.technical_bundle import validate_technical_delivery
 from simulator.presentation.timeline import EXPECTED_SHOT_BOUNDARIES, inspect_inputs, load_plan
 from tests.presentation_fixture import build_complete_fixture
@@ -128,7 +137,25 @@ class PresentationTimelineTests(unittest.TestCase):
         self.assertEqual(catalog, schema_catalog())
         accepted = json.loads((ROOT / "config" / "presentation" / "accepted_rgb_captures.json").read_text(encoding="utf-8"))
         self.assertEqual(accepted["mechanism"], "reviewed_exact_capture_allowlist")
-        self.assertEqual(accepted["captures"], [])
+        self.assertEqual(len(accepted["captures"]), 1)
+        production = accepted["captures"][0]
+        self.assertEqual(production["capture_id"], "20260921-053814804")
+        self.assertEqual(production["capture_sha256"], "ab84ccc1f71790f896bab1375062ed1db9f40bf9a1531d582f7cd0e589121eba")
+        self.assertEqual(production["presentation_transform"], PRESENTATION_TRANSFORM_NONE)
+        self.assertEqual(
+            production["review"]["verdict_sha256"],
+            "bbff6fbf052b70b14d9c1f7b0014fd2788bb92077db3e5f1ad8ba26e37e85c20",
+        )
+        accepted_production = validate_rgb_capture_acceptance(
+            {
+                "capture_id": production["capture_id"],
+                "capture_sha256": production["capture_sha256"],
+                "git_sha": production["git_sha"],
+            },
+            production["required_artifact_sha256"],
+            ROOT,
+        )
+        self.assertEqual(accepted_production["presentation_transform"], PRESENTATION_TRANSFORM_NONE)
         self.assertTrue(catalog["roles"]["rgb"]["view_producer_available"])
         for role in ("lidar", "map", "reconstruction"):
             self.assertFalse(catalog["roles"][role]["view_producer_available"])
@@ -441,17 +468,19 @@ class CompletePresentationTests(unittest.TestCase):
         report = self._report()
         self.assertTrue(report.complete)
         segments = plan_segments(load_plan(PLAN), report, "complete")
+        self.assertTrue(all(item.presentation_transform == PRESENTATION_TRANSFORM_HFLIP for item in segments[:5]))
+        self.assertTrue(all(item.presentation_transform is None for item in segments[5:]))
         self.assertEqual([item.source_start_frame for item in segments[:5]], [0, 90, 180, 300, 420])
         self.assertEqual([item.source_start_frame for item in segments[5:]], [0] * 7)
         self.assertEqual([item.shot.frame_count for item in segments[5:]], [120, 90, 90, 120, 120, 120, 150])
         self.assertAlmostEqual(segments[4].source_time_range_s[1], 539 / 30.0)
         self.assertEqual(len({item.video_sha256 for item in segments[5:]}), 7)
 
-    def test_production_catalog_stays_empty_and_fixture_bundle_fails_closed_by_default(self):
+    def test_production_catalog_rejects_unlisted_fixture_bundle_by_default(self):
         catalog = json.loads(
             (ROOT / "config" / "presentation" / "accepted_rgb_captures.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(catalog["captures"], [])
+        self.assertEqual([item["capture_id"] for item in catalog["captures"]], ["20260921-053814804"])
         with self.assertRaisesRegex(ValueError, "not present exactly once in the reviewed RGB capture allowlist"):
             inspect_inputs(load_plan(PLAN), self.fixture["complete_inputs"], ffprobe=str(FFPROBE))
 
@@ -534,7 +563,7 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertEqual((manifest["probe"]["width"], manifest["probe"]["height"]), (1280, 720))
         self.assertEqual((manifest["probe"]["frame_count"], manifest["probe"]["audio_stream_count"]), (1350, 0))
         self.assertEqual(len(manifest["representative_frames"]), 36)
-        self.assertTrue(all(item["presentation_transform"] == "hflip" for item in manifest["shots"][:5]))
+        self.assertTrue(all(item["presentation_transform"] == PRESENTATION_TRANSFORM_HFLIP for item in manifest["shots"][:5]))
         self.assertTrue(all(item["presentation_transform"] is None for item in manifest["shots"][5:]))
         from PIL import Image
 
@@ -543,6 +572,40 @@ class CompletePresentationTests(unittest.TestCase):
         right = frame.getpixel((1200, 360))
         self.assertGreater(left[2], left[0], "hflip must move the blue raw right half to presentation left")
         self.assertGreater(right[0], right[2], "hflip must move the red raw left half to presentation right")
+
+    def test_reviewed_orientation_operations_drive_filters_and_reject_forgery(self):
+        plan = load_plan(PLAN)
+        shot = plan.shots[0]
+        base = dict(
+            shot=shot,
+            kind="genuine",
+            source_role="rgb_capture",
+            video_path=Path("rgb.mp4"),
+            source_start_frame=0,
+            missing_roles=(),
+        )
+        _, no_flip_filter = _build_filter(
+            plan, "preview", (PlannedSegment(**base, presentation_transform=PRESENTATION_TRANSFORM_NONE),)
+        )
+        _, flip_filter = _build_filter(
+            plan, "preview", (PlannedSegment(**base, presentation_transform=PRESENTATION_TRANSFORM_HFLIP),)
+        )
+        self.assertNotIn("hflip", no_flip_filter)
+        self.assertIn("hflip", flip_filter)
+        for forged in (
+            {**PRESENTATION_TRANSFORM_NONE, "reason": "label says no flip"},
+            {"operation": "vflip", "reason": "label says so", "raw_capture_bytes_modified": False},
+            {"operation": "none"},
+        ):
+            with self.subTest(forged=forged), self.assertRaisesRegex(ValueError, "exact supported reviewed transform"):
+                validate_presentation_transform(forged)
+
+        forged_complete = self.fixture["complete_inputs"].with_name("forged_transform_complete_inputs.json")
+        complete_value = json.loads(self.fixture["complete_inputs"].read_text(encoding="utf-8"))
+        complete_value["shots"][0]["presentation_transform"] = PRESENTATION_TRANSFORM_NONE
+        forged_complete.write_text(json.dumps(complete_value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "shot mapping is forged"):
+            self._report(forged_complete)
 
     def test_delivery_failures_leave_prior_generation_byte_exact_and_remove_staging(self):
         expected_probe = {

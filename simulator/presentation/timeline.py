@@ -143,6 +143,7 @@ class ShotRenderInput:
     view_id: str
     receipt_path: Path
     receipt_sha256: str
+    presentation_transform: dict[str, object] | None
 
 
 @dataclass(frozen=True)
@@ -316,6 +317,7 @@ def inspect_inputs(
                 item.view_id,
                 item.receipt_path,
                 item.receipt_sha256,
+                item.presentation_transform,
             )
             for item in validated.shots
         }
