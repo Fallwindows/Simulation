@@ -48,3 +48,9 @@ class ConfigTests(unittest.TestCase):
         scenario = load_scenario(ROOT / "config/scenarios/baseline_straight.yaml")
         self.assertEqual(scenario.mapping["Reg/Strategy"], 1)
         self.assertFalse(scenario.mapping["subscribe_rgb"])
+
+    def test_scene_fidelity_preview_is_short_and_explicitly_720p(self):
+        scenario = load_scenario(ROOT / "config/scenarios/scene_fidelity_preview.yaml")
+        self.assertEqual(scenario.name, "scene_fidelity_preview_720p")
+        self.assertEqual((scenario.camera.width_px, scenario.camera.height_px), (1280, 720))
+        self.assertEqual(scenario.trajectory.duration_s, 4.0)
