@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "fps": 30,
+  "duration_seconds": 45,
+  "frame_count": 1350,
+  "profiles": {
+    "preview": {
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "frame_count": 1350,
+      "label": "DIAGNOSTIC PREVIEW"
+    },
+    "delivery": {
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "frame_count": 1350,
+      "label": "NATIVE DELIVERY"
+    }
+  },
+  "role_contracts": {
+    "rgb": {
+      "description": "Timestamped simulated RGB capture with camera calibration and a derived timeline-aligned view.",
+      "required_artifacts": ["view_video", "frame_index", "camera_info"]
+    },
+    "lidar": {
+      "description": "Recorded LiDAR returns with scan index, calibration, and a view derived from the declared returns.",
+      "required_artifacts": ["view_video", "scan_index", "returns", "calibration"]
+    },
+    "pose": {
+      "description": "Estimated pose trajectory and coordinate-frame contract used for rays, map state, and camera path.",
+      "required_artifacts": ["trajectory", "frame_contract"]
+    },
+    "map": {
+      "description": "Time-indexed accumulated map states, pose association, and a view derived from those snapshots.",
+      "required_artifacts": ["view_video", "snapshot_index", "map_states", "pose_association"]
+    },
+    "reconstruction": {
+      "description": "Persistent object records with observation links and map-version association plus a derived view.",
+      "required_artifacts": ["view_video", "object_records", "observation_links", "map_version"]
+    }
+  },
+  "shots": [
+    {
+      "number": 1,
+      "slug": "enter_aisle_rgb",
+      "title": "Enter aisle (RGB)",
+      "start_frame": 0,
+      "end_frame_exclusive": 90,
+      "render_role": "rgb",
+      "required_roles": ["rgb"],
+      "diagnostic_fallback": {"role": "rgb_baseline", "source_start_frame": 0}
+    },
+    {
+      "number": 2,
+      "slug": "walk_forward_rgb",
+      "title": "Walk forward (RGB)",
+      "start_frame": 90,
+      "end_frame_exclusive": 180,
+      "render_role": "rgb",
+      "required_roles": ["rgb"],
+      "diagnostic_fallback": {"role": "rgb_baseline", "source_start_frame": 90}
+    },
+    {
+      "number": 3,
+      "slug": "explore_shelves_rgb",
+      "title": "Explore shelves (RGB)",
+      "start_frame": 180,
+      "end_frame_exclusive": 300,
+      "render_role": "rgb",
+      "required_roles": ["rgb"],
+      "diagnostic_fallback": {"role": "rgb_baseline", "source_start_frame": 180}
+    },
+    {
+      "number": 4,
+      "slug": "approach_aisle_end_rgb",
+      "title": "Approach aisle end (RGB)",
+      "start_frame": 300,
+      "end_frame_exclusive": 420,
+      "render_role": "rgb",
+      "required_roles": ["rgb"],
+      "diagnostic_fallback": {"role": "rgb_baseline", "source_start_frame": 300}
+    },
+    {
+      "number": 5,
+      "slug": "inspect_products_rgb",
+      "title": "Inspect products (RGB)",
+      "start_frame": 420,
+      "end_frame_exclusive": 540,
+      "render_role": "rgb",
+      "required_roles": ["rgb"],
+      "diagnostic_fallback": {"role": "rgb_baseline", "source_start_frame": 420}
+    },
+    {
+      "number": 6,
+      "slug": "sensor_visualization",
+      "title": "Near-first-person sensor visualization",
+      "start_frame": 540,
+      "end_frame_exclusive": 660,
+      "render_role": "lidar",
+      "required_roles": ["rgb", "lidar", "pose"]
+    },
+    {
+      "number": 7,
+      "slug": "environment_lidar",
+      "title": "Environment in LiDAR",
+      "start_frame": 660,
+      "end_frame_exclusive": 750,
+      "render_role": "lidar",
+      "required_roles": ["lidar", "pose"]
+    },
+    {
+      "number": 8,
+      "slug": "persistent_map",
+      "title": "Persistent 3D map",
+      "start_frame": 750,
+      "end_frame_exclusive": 840,
+      "render_role": "map",
+      "required_roles": ["map", "pose"]
+    },
+    {
+      "number": 9,
+      "slug": "object_reconstruction",
+      "title": "Object-level reconstruction",
+      "start_frame": 840,
+      "end_frame_exclusive": 960,
+      "render_role": "reconstruction",
+      "required_roles": ["map", "reconstruction"]
+    },
+    {
+      "number": 10,
+      "slug": "object_details",
+      "title": "Object details",
+      "start_frame": 960,
+      "end_frame_exclusive": 1080,
+      "render_role": "reconstruction",
+      "required_roles": ["rgb", "map", "reconstruction"]
+    },
+    {
+      "number": 11,
+      "slug": "complete_aisle_map",
+      "title": "Complete observed aisle",
+      "start_frame": 1080,
+      "end_frame_exclusive": 1200,
+      "render_role": "reconstruction",
+      "required_roles": ["map", "reconstruction", "pose"]
+    },
+    {
+      "number": 12,
+      "slug": "final_statement",
+      "title": "Final statement",
+      "start_frame": 1200,
+      "end_frame_exclusive": 1350,
+      "render_role": "reconstruction",
+      "required_roles": ["rgb", "map", "reconstruction", "pose"]
+    }
+  ]
+}
