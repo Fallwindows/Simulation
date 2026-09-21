@@ -131,3 +131,10 @@ class ContractTests(unittest.TestCase):
         self.assertIn("demo/current_walking_aisle.mp4", baseline)
         self.assertIn("simulation_time_target_s", collector)
         self.assertIn("simulation_time_reached", collector)
+
+    def test_capture_uses_configured_camera_info_without_recorder_subscription(self):
+        root = Path(__file__).resolve().parents[1]
+        capture = (root / "scripts/capture_simulation.ps1").read_text(encoding="utf-8")
+        self.assertNotIn('"--camera-info-json"', capture)
+        self.assertIn('$cameraInfo.provenance -ne "configured_intrinsics"', capture)
+        self.assertIn('camera_info_provenance="configured_intrinsics"', capture)

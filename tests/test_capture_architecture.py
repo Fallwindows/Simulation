@@ -5,6 +5,7 @@ from pathlib import Path
 
 from evaluation.metrics import PoseSample, compute_metrics, interpolate_pose
 from simulator.capture.inventory import export_inventory
+from simulator.capture.export_metadata import export_metadata
 from simulator.capture.manifest import build_experiment_hashes, validate_capture_for_slam
 
 
@@ -13,6 +14,17 @@ SCENARIO = ROOT / "config/scenarios/baseline_straight.yaml"
 
 
 class CaptureArchitectureTests(unittest.TestCase):
+    def test_capture_metadata_exports_configured_camera_intrinsics_with_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            export_metadata(SCENARIO, root, ROOT)
+            camera_info = json.loads((root / "camera_info.json").read_text(encoding="utf-8"))
+            self.assertEqual(camera_info["provenance"], "configured_intrinsics")
+            self.assertFalse(camera_info["observed_ros_message"])
+            self.assertEqual(camera_info["source"], "sensor_transforms.json")
+            self.assertEqual(camera_info["topic"], "/sim/camera/rgb/camera_info")
+            self.assertEqual((camera_info["width_px"], camera_info["height_px"]), (1280, 720))
+
     def test_hashes_are_stable_and_physical_inputs_are_separate(self):
         first = build_experiment_hashes(SCENARIO, ROOT)
         second = build_experiment_hashes(SCENARIO, ROOT)
