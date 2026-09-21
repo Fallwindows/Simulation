@@ -1,20 +1,45 @@
-"""Record the native ROS RGB camera stream to a compact MP4."""
+"""Record the native ROS RGB camera stream to a compact MP4.
+
+The recorder intentionally uses only the Python standard library until ROS is
+imported. Frames are validated and streamed to FFmpeg as raw bytes so this
+process does not depend on NumPy or OpenCV and their native BLAS dependency.
+"""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
-import time
 from pathlib import Path
-
-import cv2
-import numpy as np
+import shutil
+import subprocess
+import tempfile
+import time
+from typing import BinaryIO
 
 
 RGB_TOPIC = "/sim/camera/rgb/image_raw"
 CLOCK_TOPIC = "/clock"
 SIM_CLOCK_START_TOLERANCE_S = 1.0
 POST_TARGET_GRACE_S = 1.0
+NOMINAL_FPS = 30.0
+FFMPEG_CLOSE_TIMEOUT_S = 30.0
+ENCODER_PRESET = "fast"
+ENCODER_CRF = 18
+
+
+@dataclass(frozen=True, slots=True)
+class RawFrame:
+    width: int
+    height: int
+    pixel_format: str
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class EncoderResult:
+    returncode: int | None
+    error: str | None
 
 
 def _stamp(message) -> float:
@@ -25,46 +50,203 @@ def _clock_stamp(message) -> float:
     return float(message.clock.sec) + float(message.clock.nanosec) / 1_000_000_000.0
 
 
-def _decode_image(message) -> np.ndarray | None:
-    """Decode a ROS Image while honoring encoding, width, height, and step."""
+def _decode_image(message) -> RawFrame | None:
+    """Validate and pack a supported 8-bit ROS Image without color conversion."""
 
-    width = int(message.width)
-    height = int(message.height)
-    step = int(message.step)
+    try:
+        width = int(message.width)
+        height = int(message.height)
+        step = int(message.step)
+    except (TypeError, ValueError, OverflowError):
+        return None
     if width <= 0 or height <= 0 or step <= 0:
         return None
-    encoding = str(message.encoding).lower()
-    channel_map = {
-        "mono8": 1,
-        "8uc1": 1,
-        "bgr8": 3,
-        "rgb8": 3,
-        "8uc3": 3,
-        "bgra8": 4,
-        "rgba8": 4,
-        "8uc4": 4,
+
+    encoding = str(message.encoding).strip().lower()
+    layouts = {
+        "mono8": (1, "gray"),
+        "8uc1": (1, "gray"),
+        "rgb8": (3, "rgb24"),
+        "bgr8": (3, "bgr24"),
+        # ROS generic encodings do not specify channel meaning. Match the
+        # previous OpenCV convention for common 3/4-channel byte layouts.
+        "8uc3": (3, "bgr24"),
+        "rgba8": (4, "rgba"),
+        "bgra8": (4, "bgra"),
+        "8uc4": (4, "bgra"),
     }
-    channels = channel_map.get(encoding)
-    if channels is None:
+    layout = layouts.get(encoding)
+    if layout is None:
         return None
+    channels, pixel_format = layout
     packed_row_bytes = width * channels
     if step < packed_row_bytes:
         return None
-    data = np.frombuffer(bytes(message.data), dtype=np.uint8)
+
+    try:
+        source = memoryview(message.data).cast("B")
+    except (TypeError, ValueError):
+        try:
+            source = memoryview(bytes(message.data))
+        except (TypeError, ValueError):
+            return None
     required_bytes = step * height
-    if data.size < required_bytes:
+    if source.nbytes < required_bytes:
         return None
-    rows = data[:required_bytes].reshape((height, step))
-    packed = rows[:, :packed_row_bytes].reshape((height, width, channels))
-    if channels == 1:
-        return cv2.cvtColor(packed, cv2.COLOR_GRAY2BGR)
-    if encoding == "rgb8":
-        return cv2.cvtColor(packed, cv2.COLOR_RGB2BGR)
-    if encoding == "rgba8":
-        return cv2.cvtColor(packed, cv2.COLOR_RGBA2BGR)
-    if encoding == "bgra8":
-        return cv2.cvtColor(packed, cv2.COLOR_BGRA2BGR)
-    return packed
+
+    if step == packed_row_bytes:
+        packed = bytes(source[:required_bytes])
+    else:
+        packed_buffer = bytearray(packed_row_bytes * height)
+        for row in range(height):
+            source_start = row * step
+            target_start = row * packed_row_bytes
+            packed_buffer[target_start : target_start + packed_row_bytes] = source[
+                source_start : source_start + packed_row_bytes
+            ]
+        packed = bytes(packed_buffer)
+    return RawFrame(width=width, height=height, pixel_format=pixel_format, data=packed)
+
+
+class FfmpegVideoWriter:
+    """Write fixed-layout raw frames to an H.264 MP4 using FFmpeg."""
+
+    def __init__(self, output: Path, executable: str, fps: float = NOMINAL_FPS):
+        self.output = output
+        self.executable_requested = executable
+        self.fps = float(fps)
+        self.executable_resolved: str | None = None
+        self.width: int | None = None
+        self.height: int | None = None
+        self.pixel_format: str | None = None
+        self.process: subprocess.Popen[bytes] | None = None
+        self._stderr: BinaryIO | None = None
+        self.error: str | None = None
+        self.returncode: int | None = None
+
+    @property
+    def started(self) -> bool:
+        return self.process is not None
+
+    def open(self, frame: RawFrame) -> bool:
+        if self.process is not None:
+            raise RuntimeError("FFmpeg writer is already open")
+        self.output.parent.mkdir(parents=True, exist_ok=True)
+        if self.output.exists():
+            self.output.unlink()
+        if frame.width % 2 or frame.height % 2:
+            self.error = "H.264 yuv420p output requires even frame dimensions"
+            return False
+
+        executable = shutil.which(self.executable_requested)
+        if executable is None:
+            self.error = f"FFmpeg executable was not found: {self.executable_requested}"
+            return False
+        self.executable_resolved = executable
+        self.width = frame.width
+        self.height = frame.height
+        self.pixel_format = frame.pixel_format
+        command = [
+            executable,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            frame.pixel_format,
+            "-video_size",
+            f"{frame.width}x{frame.height}",
+            "-framerate",
+            f"{self.fps:g}",
+            "-i",
+            "pipe:0",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            ENCODER_PRESET,
+            "-crf",
+            str(ENCODER_CRF),
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(self.output),
+        ]
+        self._stderr = tempfile.TemporaryFile(mode="w+b")
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=self._stderr,
+            )
+        except OSError as exc:
+            self.error = f"Could not start FFmpeg: {exc}"
+            self._stderr.close()
+            self._stderr = None
+            return False
+        return True
+
+    def accepts(self, frame: RawFrame) -> bool:
+        return (
+            frame.width == self.width
+            and frame.height == self.height
+            and frame.pixel_format == self.pixel_format
+        )
+
+    def write(self, frame: RawFrame) -> bool:
+        if self.process is None or self.process.stdin is None:
+            self.error = "FFmpeg writer is not open"
+            return False
+        if not self.accepts(frame):
+            self.error = (
+                "Image layout changed after recording started: "
+                f"expected {self.width}x{self.height} {self.pixel_format}, "
+                f"received {frame.width}x{frame.height} {frame.pixel_format}"
+            )
+            return False
+        if self.process.poll() is not None:
+            self.returncode = self.process.returncode
+            self.error = f"FFmpeg exited before accepting all frames (exit {self.returncode})"
+            return False
+        try:
+            self.process.stdin.write(frame.data)
+        except (BrokenPipeError, OSError) as exc:
+            self.returncode = self.process.poll()
+            self.error = f"FFmpeg frame write failed: {exc}"
+            return False
+        return True
+
+    def close(self) -> EncoderResult:
+        if self.process is None:
+            return EncoderResult(returncode=self.returncode, error=self.error)
+        if self.process.stdin is not None:
+            try:
+                self.process.stdin.close()
+            except OSError as exc:
+                if self.error is None:
+                    self.error = f"Could not close FFmpeg input: {exc}"
+            self.process.stdin = None
+        try:
+            self.returncode = self.process.wait(timeout=FFMPEG_CLOSE_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.returncode = self.process.wait()
+            self.error = f"FFmpeg did not exit within {FFMPEG_CLOSE_TIMEOUT_S:g} seconds"
+        stderr_text = ""
+        if self._stderr is not None:
+            self._stderr.seek(0)
+            stderr_text = self._stderr.read().decode("utf-8", errors="replace").strip()
+            self._stderr.close()
+            self._stderr = None
+        if self.returncode != 0 and self.error is None:
+            detail = stderr_text[-2000:] if stderr_text else "no stderr output"
+            self.error = f"FFmpeg exited with code {self.returncode}: {detail}"
+        return EncoderResult(returncode=self.returncode, error=self.error)
 
 
 class RgbVideoRecorder:
@@ -76,12 +258,13 @@ class RgbVideoRecorder:
         startup_timeout_s: float,
         frames_path: Path | None = None,
         camera_info_path: Path | None = None,
+        ffmpeg_executable: str = "ffmpeg",
     ):
         import rclpy
         from rclpy.node import Node
+        from rosgraph_msgs.msg import Clock
         from sensor_msgs.msg import CameraInfo
         from sensor_msgs.msg import Image
-        from rosgraph_msgs.msg import Clock
 
         self.rclpy = rclpy
         self.node = Node("grocery_sim_rgb_video_recorder")
@@ -91,6 +274,7 @@ class RgbVideoRecorder:
         self.camera_info_path = camera_info_path
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
+        self.ffmpeg_executable = ffmpeg_executable
         self.started_wall = time.monotonic()
         self.first_clock_s: float | None = None
         self.target_s: float | None = None
@@ -100,12 +284,17 @@ class RgbVideoRecorder:
         self.last_clock_s: float | None = None
         self.frames_written = 0
         self.invalid_frames = 0
-        self.writer: cv2.VideoWriter | None = None
-        self.codec = "avc1"
+        self.duplicate_frames = 0
+        self.out_of_order_frames = 0
+        self.frames_after_target = 0
+        self.writer: FfmpegVideoWriter | None = None
         self.width: int | None = None
         self.height: int | None = None
         self.encoding: str | None = None
         self.done_reason = "not_started"
+        self.encoder_error: str | None = None
+        self.encoder_returncode: int | None = None
+        self.fatal_error = False
         self.frame_records: list[dict[str, object]] = []
         self.camera_info_record: dict[str, object] | None = None
         self.node.create_subscription(Image, RGB_TOPIC, self._on_image, 5)
@@ -124,16 +313,14 @@ class RgbVideoRecorder:
             self.post_target_deadline = time.monotonic() + POST_TARGET_GRACE_S
             self.done_reason = "simulation_time_reached"
 
-    def _open_writer(self, frame: np.ndarray) -> bool:
-        self.height, self.width = frame.shape[:2]
-        self.output.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
-        self.writer = cv2.VideoWriter(str(self.output), fourcc, 30.0, (self.width, self.height))
-        if not self.writer.isOpened():
-            self.codec = "mp4v"
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            self.writer = cv2.VideoWriter(str(self.output), fourcc, 30.0, (self.width, self.height))
-        return self.writer.isOpened()
+    def _open_writer(self, frame: RawFrame) -> bool:
+        self.width = frame.width
+        self.height = frame.height
+        self.writer = FfmpegVideoWriter(self.output, self.ffmpeg_executable)
+        if self.writer.open(frame):
+            return True
+        self.encoder_error = self.writer.error
+        return False
 
     def _on_camera_info(self, message) -> None:
         if self.camera_info_record is not None:
@@ -154,9 +341,15 @@ class RgbVideoRecorder:
 
     def _on_image(self, message) -> None:
         stamp = _stamp(message)
-        if self.last_image_stamp_s is not None and stamp <= self.last_image_stamp_s:
-            return
+        if self.last_image_stamp_s is not None:
+            if stamp == self.last_image_stamp_s:
+                self.duplicate_frames += 1
+                return
+            if stamp < self.last_image_stamp_s:
+                self.out_of_order_frames += 1
+                return
         if self.target_s is not None and stamp > self.target_s + 0.05:
+            self.frames_after_target += 1
             return
         frame = _decode_image(message)
         if frame is None:
@@ -164,9 +357,14 @@ class RgbVideoRecorder:
             return
         if self.writer is None and not self._open_writer(frame):
             self.done_reason = "video_writer_unavailable"
+            self.fatal_error = True
             return
         assert self.writer is not None
-        self.writer.write(frame)
+        if not self.writer.write(frame):
+            self.encoder_error = self.writer.error
+            self.done_reason = "video_writer_error"
+            self.fatal_error = True
+            return
         self.last_image_stamp_s = stamp
         if self.first_image_stamp_s is None:
             self.first_image_stamp_s = stamp
@@ -183,6 +381,8 @@ class RgbVideoRecorder:
 
     def spin_until_done(self) -> None:
         while self.rclpy.ok():
+            if self.fatal_error:
+                break
             now = time.monotonic()
             if self.post_target_deadline is not None and now >= self.post_target_deadline:
                 break
@@ -193,7 +393,11 @@ class RgbVideoRecorder:
 
     def close(self) -> dict[str, object]:
         if self.writer is not None:
-            self.writer.release()
+            encoder_result = self.writer.close()
+            self.encoder_returncode = encoder_result.returncode
+            self.encoder_error = encoder_result.error
+            if encoder_result.error is not None and self.done_reason == "simulation_time_reached":
+                self.done_reason = "video_encoder_failed"
         file_size = self.output.stat().st_size if self.output.exists() else 0
         duration_s = None
         actual_fps = None
@@ -201,14 +405,31 @@ class RgbVideoRecorder:
             duration_s = self.last_image_stamp_s - self.first_image_stamp_s
             if duration_s > 0 and self.frames_written > 1:
                 actual_fps = (self.frames_written - 1) / duration_s
-        complete = self.frames_written > 0 and self.done_reason == "simulation_time_reached" and file_size > 0
+        complete = (
+            self.frames_written > 0
+            and self.done_reason == "simulation_time_reached"
+            and self.invalid_frames == 0
+            and self.duplicate_frames == 0
+            and self.out_of_order_frames == 0
+            and self.encoder_error is None
+            and self.encoder_returncode == 0
+            and file_size > 0
+        )
         metadata = {
             "status": "complete" if complete else "failed",
             "topic": RGB_TOPIC,
-            "codec": self.codec if self.writer is not None else None,
+            "writer_backend": "ffmpeg",
+            "codec": "h264" if self.writer is not None and self.writer.started else None,
+            "encoder": "libx264" if self.writer is not None and self.writer.started else None,
+            "encoder_preset": ENCODER_PRESET if self.writer is not None and self.writer.started else None,
+            "encoder_crf": ENCODER_CRF if self.writer is not None and self.writer.started else None,
+            "ffmpeg_executable": self.writer.executable_resolved if self.writer is not None else None,
+            "encoder_returncode": self.encoder_returncode,
+            "encoder_error": self.encoder_error,
+            "input_pixel_format": self.writer.pixel_format if self.writer is not None else None,
             "width": self.width,
             "height": self.height,
-            "nominal_fps": 30.0,
+            "nominal_fps": NOMINAL_FPS,
             "actual_fps_from_ros_timestamps": actual_fps,
             "frame_count": self.frames_written,
             "duration_s": duration_s,
@@ -218,6 +439,9 @@ class RgbVideoRecorder:
             "last_clock_s": self.last_clock_s,
             "encoding": self.encoding,
             "invalid_frames": self.invalid_frames,
+            "duplicate_frames": self.duplicate_frames,
+            "out_of_order_frames": self.out_of_order_frames,
+            "frames_after_target": self.frames_after_target,
             "file_size_bytes": file_size,
             "completion_reason": self.done_reason,
         }
@@ -244,6 +468,7 @@ def main() -> None:
     parser.add_argument("--startup-timeout-seconds", type=float, default=90.0)
     parser.add_argument("--frames-jsonl", default="")
     parser.add_argument("--camera-info-json", default="")
+    parser.add_argument("--ffmpeg-executable", default="ffmpeg")
     args = parser.parse_args()
     import rclpy
 
@@ -255,9 +480,20 @@ def main() -> None:
         args.startup_timeout_seconds,
         Path(args.frames_jsonl) if args.frames_jsonl else None,
         Path(args.camera_info_json) if args.camera_info_json else None,
+        args.ffmpeg_executable,
     )
     try:
-        recorder.spin_until_done()
+        try:
+            recorder.spin_until_done()
+        except BaseException as exc:
+            recorder.done_reason = "recorder_exception"
+            if recorder.encoder_error is None:
+                recorder.encoder_error = f"{type(exc).__name__}: {exc}"
+            try:
+                recorder.close()
+            except RuntimeError:
+                pass
+            raise
         recorder.close()
     finally:
         recorder.node.destroy_node()
