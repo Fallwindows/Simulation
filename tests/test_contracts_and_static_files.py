@@ -138,3 +138,6 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn('"--camera-info-json"', capture)
         self.assertIn('$cameraInfo.provenance -ne "configured_intrinsics"', capture)
         self.assertIn('camera_info_provenance="configured_intrinsics"', capture)
+        self.assertIn('"--end-clock-seconds",([string]$duration)', capture)
+        self.assertIn('$recorderExit -ne 0', capture)
+        self.assertIn('$bagExit -ne 0', capture)

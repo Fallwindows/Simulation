@@ -7,8 +7,9 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
-from simulator.capture.rosbag_capture import TOPIC_TYPES, _cdr_time
+from simulator.capture.rosbag_capture import RawCaptureWriter, TOPIC_TYPES, _cdr_time
 
 
 class RosbagCaptureTests(unittest.TestCase):
@@ -27,6 +28,58 @@ class RosbagCaptureTests(unittest.TestCase):
     def test_cdr_clock_decoder_handles_ros_little_endian_payload(self):
         payload = b"\x00\x01\x00\x00\x02\x00\x00\x00\x80\xf0\xfa\x02"
         self.assertAlmostEqual(_cdr_time(payload, 4), 2.05)
+
+    def test_post_start_clock_stall_fails_before_target(self):
+        class FakeRclpy:
+            @staticmethod
+            def ok():
+                return True
+
+            @staticmethod
+            def spin_once(_node, timeout_sec):
+                raise AssertionError(f"stall should be detected before spin_once({timeout_sec})")
+
+        writer = RawCaptureWriter.__new__(RawCaptureWriter)
+        writer.rclpy = FakeRclpy()
+        writer.node = object()
+        writer.target_wall_deadline = None
+        writer.first_clock_s = 0.05
+        writer.last_clock_s = 0.05
+        writer.target_clock_s = 0.10
+        writer.target_reached = False
+        writer.last_clock_progress_wall = time.monotonic() - 1.0
+        writer.clock_stall_timeout_s = 0.01
+        writer.started_wall = time.monotonic() - 1.0
+        writer.startup_timeout_s = 10.0
+        writer.failure_reason = None
+
+        with self.assertRaisesRegex(RuntimeError, "stopped before"):
+            writer.spin_until_done()
+        self.assertEqual(writer.failure_reason, "clock_stalled_before_target")
+
+    def test_close_cannot_label_unreached_horizon_complete(self):
+        writer = RawCaptureWriter.__new__(RawCaptureWriter)
+        writer._closed_result = None
+        writer.subscriptions = []
+        writer.node = None
+        writer.writer = None
+        writer.output = Path("unused")
+        writer.rosbag2_py = object()
+        writer.target_clock_s = 0.10
+        writer.target_reached = False
+        writer.capture_end_clock_s = 0.10
+        writer.failure_reason = "clock_stalled_before_target"
+        counts = {topic: 1 for topic in TOPIC_TYPES}
+        first = {topic: 0.05 for topic in TOPIC_TYPES}
+        last = {topic: 0.05 for topic in TOPIC_TYPES}
+
+        with patch("simulator.capture.rosbag_capture._bag_observations", return_value=(counts, first, last)):
+            metadata = writer.close()
+
+        self.assertEqual(metadata["status"], "incomplete")
+        self.assertFalse(metadata["target_reached"])
+        self.assertEqual(metadata["missing_topics"], [])
+        self.assertEqual(metadata["failure_reason"], "clock_stalled_before_target")
 
     def test_cross_process_zenoh_transport_writes_all_serialized_topics(self):
         if not os.environ.get("AMENT_PREFIX_PATH"):
@@ -67,7 +120,9 @@ class RosbagCaptureTests(unittest.TestCase):
                         "--metadata",
                         str(metadata_path),
                         "--duration-seconds",
-                        "0.1",
+                        "2.1",
+                        "--end-clock-seconds",
+                        "2.1",
                         "--startup-timeout-seconds",
                         "20",
                         "--post-target-wall-seconds",
@@ -107,6 +162,10 @@ class RosbagCaptureTests(unittest.TestCase):
                 self.assertEqual(metadata["missing_topics"], [])
                 self.assertAlmostEqual(metadata["first_clock_s"], 2.0)
                 self.assertAlmostEqual(metadata["last_clock_s"], 2.1)
+                self.assertEqual(metadata["target_clock_s"], 2.1)
+                self.assertTrue(metadata["target_reached"])
+                self.assertEqual(metadata["capture_window_mode"], "absolute_simulation_horizon")
+                self.assertIsNone(metadata["failure_reason"])
                 self.assertFalse(metadata["numpy_loaded"])
                 self.assertNotIn("/sim/camera/rgb/camera_info", metadata["topics"])
 

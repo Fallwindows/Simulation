@@ -152,3 +152,17 @@ remaining blocker: [setup report](review/setup-20260920/report.md).
   for every retained topic into the real writer. Persisted counts and types,
   clean SQLite closure, `ros2 bag info`, and `numpy_loaded=false` all passed.
   No Isaac or GPU workload was run for this repair.
+
+### Fixed-horizon completion correction
+
+- Production capture now gives the raw writer the simulator's absolute
+  trajectory end clock. A nonzero first observed clock therefore no longer
+  moves the target beyond the fixed Isaac frame horizon; relative-duration
+  mode remains available for general replay use.
+- Reaching the requested clock is required for `status=complete`. A bounded
+  post-start clock-progress timeout records an incomplete result and exits on
+  a stopped source instead of waiting for the outer production timeout.
+- The capture wrapper checks both recorder exit codes before reading metadata.
+  A Pixi/Zenoh regression reached an exact `2.1 s` horizon from a first clock
+  of `2.0 s`, retained all five raw topics, and kept NumPy unloaded. CPU-only
+  tests passed; no Isaac or GPU workload was run.

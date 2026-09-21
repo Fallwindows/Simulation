@@ -181,7 +181,15 @@ def _bag_observations(
 
 
 class RawCaptureWriter:
-    def __init__(self, output: Path, duration_s: float, startup_timeout_s: float, post_target_wall_s: float = 2.0):
+    def __init__(
+        self,
+        output: Path,
+        duration_s: float,
+        startup_timeout_s: float,
+        post_target_wall_s: float = 2.0,
+        capture_end_clock_s: float | None = None,
+        clock_stall_timeout_s: float = 30.0,
+    ):
         import rclpy
         import rosbag2_py
         from rclpy.serialization import serialize_message
@@ -194,11 +202,22 @@ class RawCaptureWriter:
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
         self.post_target_wall_s = float(post_target_wall_s)
+        self.capture_end_clock_s = None if capture_end_clock_s is None else float(capture_end_clock_s)
+        self.clock_stall_timeout_s = float(clock_stall_timeout_s)
+        if self.duration_s <= 0.0:
+            raise ValueError("duration_s must be positive")
+        if self.capture_end_clock_s is not None and self.capture_end_clock_s <= 0.0:
+            raise ValueError("capture_end_clock_s must be positive")
+        if self.clock_stall_timeout_s <= 0.0:
+            raise ValueError("clock_stall_timeout_s must be positive")
         self.started_wall = time.monotonic()
         self.first_clock_s: float | None = None
         self.last_clock_s: float | None = None
+        self.last_clock_progress_wall: float | None = None
         self.target_clock_s: float | None = None
         self.target_wall_deadline: float | None = None
+        self.target_reached = False
+        self.failure_reason: str | None = None
         self._closed_result: dict[str, object] | None = None
 
         self.output.parent.mkdir(parents=True, exist_ok=True)
@@ -224,11 +243,18 @@ class RawCaptureWriter:
             if stamp_s is None:
                 stamp_s = self.last_clock_s or 0.0
             if topic == "/clock":
+                if self.last_clock_s is None or stamp_s > self.last_clock_s:
+                    self.last_clock_progress_wall = time.monotonic()
                 self.last_clock_s = stamp_s if self.last_clock_s is None else max(self.last_clock_s, stamp_s)
                 if self.first_clock_s is None:
                     self.first_clock_s = stamp_s
-                    self.target_clock_s = stamp_s + self.duration_s
+                    self.target_clock_s = (
+                        self.capture_end_clock_s
+                        if self.capture_end_clock_s is not None
+                        else stamp_s + self.duration_s
+                    )
                 if self.target_clock_s is not None and stamp_s >= self.target_clock_s and self.target_wall_deadline is None:
+                    self.target_reached = True
                     self.target_wall_deadline = time.monotonic() + self.post_target_wall_s
             self.writer.write(topic, self.serialize_message(message), int(round(stamp_s * 1_000_000_000.0)))
 
@@ -240,7 +266,19 @@ class RawCaptureWriter:
             if self.target_wall_deadline is not None and now >= self.target_wall_deadline:
                 return
             if self.first_clock_s is None and now - self.started_wall >= self.startup_timeout_s:
+                self.failure_reason = "clock_startup_timeout"
                 raise RuntimeError("raw capture did not observe /clock before startup timeout")
+            if (
+                self.first_clock_s is not None
+                and not self.target_reached
+                and self.last_clock_progress_wall is not None
+                and now - self.last_clock_progress_wall >= self.clock_stall_timeout_s
+            ):
+                self.failure_reason = "clock_stalled_before_target"
+                raise RuntimeError(
+                    "raw capture /clock stopped before the requested simulation-time target "
+                    f"({self.last_clock_s} < {self.target_clock_s})"
+                )
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def close(self) -> dict[str, object]:
@@ -260,8 +298,9 @@ class RawCaptureWriter:
 
         counts, first_stamps, last_stamps = _bag_observations(self.output, self.rosbag2_py)
         missing = [topic for topic, count in counts.items() if count == 0]
+        complete = not missing and self.target_reached
         self._closed_result = {
-            "status": "complete" if not missing else "incomplete",
+            "status": "complete" if complete else "incomplete",
             "uri": self.output.name,
             "storage_id": "sqlite3",
             "topics": list(TOPIC_TYPES),
@@ -272,8 +311,11 @@ class RawCaptureWriter:
             "first_clock_s": first_stamps["/clock"],
             "last_clock_s": last_stamps["/clock"],
             "target_clock_s": self.target_clock_s,
+            "target_reached": self.target_reached,
+            "capture_window_mode": "absolute_simulation_horizon" if self.capture_end_clock_s is not None else "duration_after_first_clock",
             "completion_clock_source": "/clock",
             "missing_topics": missing,
+            "failure_reason": self.failure_reason,
             "numpy_loaded": "numpy" in sys.modules,
         }
         return self._closed_result
@@ -285,6 +327,8 @@ def main() -> None:
     parser.add_argument("--duration-seconds", type=float, required=True)
     parser.add_argument("--startup-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--post-target-wall-seconds", type=float, default=2.0)
+    parser.add_argument("--end-clock-seconds", type=float)
+    parser.add_argument("--clock-stall-timeout-seconds", type=float, default=30.0)
     parser.add_argument("--metadata", required=True)
     args = parser.parse_args()
     import rclpy
@@ -297,12 +341,23 @@ def main() -> None:
             args.duration_seconds,
             args.startup_timeout_seconds,
             args.post_target_wall_seconds,
+            args.end_clock_seconds,
+            args.clock_stall_timeout_seconds,
         )
-        writer.spin_until_done()
+        try:
+            writer.spin_until_done()
+        except Exception:
+            result = writer.close()
+            Path(args.metadata).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            raise
         result = writer.close()
         Path(args.metadata).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         if result["status"] != "complete":
-            raise RuntimeError(f"raw capture is missing required topics: {result['missing_topics']}")
+            raise RuntimeError(
+                "raw capture is incomplete: "
+                f"target_reached={result['target_reached']}, "
+                f"missing_topics={result['missing_topics']}"
+            )
     finally:
         if writer is not None:
             writer.close()

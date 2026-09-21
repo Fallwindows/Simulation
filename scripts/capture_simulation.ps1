@@ -44,6 +44,7 @@ function Stop-ProcessTree([int]$RootPid) {
 }
 
 function Wait-ProcessWithTimeout($Process, [int]$TimeoutSeconds, [string]$Name) {
+  if ($null -eq $Process) { throw "$Name process was not started." }
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while (-not $Process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
   if (-not $Process.HasExited) { throw "$Name did not finish within $TimeoutSeconds seconds." }
@@ -78,7 +79,7 @@ try {
   Start-Sleep -Seconds 6
 
   $bagUri = Join-Path $captureDir "sensors_bag"
-  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
+  $bagArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.rosbag_capture","--output",$bagUri,"--metadata",(Join-Path $captureDir "bag_metadata.json"),"--duration-seconds",([string]$duration),"--end-clock-seconds",([string]$duration),"--startup-timeout-seconds","120","--clock-stall-timeout-seconds","30")
   $bag = Start-Process -FilePath $pixi -ArgumentList $bagArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "bag.out.log") -RedirectStandardError (Join-Path $logsDir "bag.err.log")
 
   $recorderArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","evaluation.rgb_video_recorder","--output",(Join-Path $captureDir "rgb_camera.mp4"),"--metadata",(Join-Path $captureDir "rgb_video.json"),"--frames-jsonl",(Join-Path $captureDir "rgb_frames.jsonl"),"--duration-seconds",([string]$duration),"--startup-timeout-seconds","120")
@@ -108,8 +109,10 @@ try {
   if ($isaacExit -ne 0) { throw "Isaac runtime failed with exit code $isaacExit." }
 
   $waitSeconds = [Math]::Max(180, [int]($duration * 15) + 60)
-  Wait-ProcessWithTimeout $recorder $waitSeconds "RGB capture recorder" | Out-Null
-  Wait-ProcessWithTimeout $bag $waitSeconds "raw ROS bag writer" | Out-Null
+  $recorderExit = Wait-ProcessWithTimeout $recorder $waitSeconds "RGB capture recorder"
+  if ($recorderExit -ne 0) { throw "RGB capture recorder failed with exit code $recorderExit." }
+  $bagExit = Wait-ProcessWithTimeout $bag $waitSeconds "raw ROS bag writer"
+  if ($bagExit -ne 0) { throw "Raw ROS bag writer failed with exit code $bagExit." }
   $rgb = Get-Content -LiteralPath (Join-Path $captureDir "rgb_video.json") -Raw | ConvertFrom-Json
   $bagMeta = Get-Content -LiteralPath (Join-Path $captureDir "bag_metadata.json") -Raw | ConvertFrom-Json
   if ($rgb.status -ne "complete") { throw "RGB capture did not complete." }
