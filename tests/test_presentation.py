@@ -1,0 +1,658 @@
+import hashlib
+import json
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from simulator.presentation.complete_bundle import emit_complete_bundle
+from simulator.presentation.render_video import plan_segments, render_presentation
+from simulator.presentation.provenance import DIAGNOSTIC_BASELINE_IDENTITY, ROLE_SPECS, schema_catalog, source_text_sha256
+from simulator.presentation.technical_bundle import validate_technical_delivery
+from simulator.presentation.timeline import EXPECTED_SHOT_BOUNDARIES, inspect_inputs, load_plan
+from tests.presentation_fixture import build_complete_fixture
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PLAN = ROOT / "config" / "presentation" / "storyboard.yaml"
+BASELINE_INPUTS = ROOT / "config" / "presentation" / "diagnostic_baseline_inputs.json"
+BASELINE_VIDEO = ROOT / "demo" / "walking_aisle_final_hifi.mp4"
+FFMPEG = Path(r"C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Library\bin\ffmpeg.exe")
+FFPROBE = FFMPEG.with_name("ffprobe.exe")
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _descriptor(path: Path) -> dict[str, str]:
+    return {"path": str(path), "sha256": _sha256(path)}
+
+
+def _placeholder_role(root: Path, role_name: str, capture_id: str, view_video: Path) -> dict[str, object]:
+    spec = ROLE_SPECS[role_name]
+    artifacts = {}
+    for artifact_name, kind in spec.required_artifacts:
+        if artifact_name == "view_video":
+            artifact = view_video
+        elif kind == "rosbag2":
+            artifact = root / f"{role_name}_{artifact_name}"
+            artifact.mkdir(exist_ok=True)
+            (artifact / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
+            (artifact / "capture.db3").write_bytes(b"not a sqlite database")
+            from simulator.presentation.provenance import sha256_path
+            artifacts[artifact_name] = {"path": str(artifact), "sha256": sha256_path(artifact)}
+            continue
+        else:
+            artifact = root / f"{role_name}_{artifact_name}.dat"
+            artifact.write_text("arbitrary placeholder\n", encoding="utf-8")
+        artifacts[artifact_name] = _descriptor(artifact)
+    return {
+        "contract": role_name,
+        "status": "complete",
+        "provenance": "genuine",
+        "schema_id": spec.schema_id,
+        "producer_id": spec.producer_id,
+        "producer_source_sha256": source_text_sha256(ROOT / spec.producer_source_path),
+        "capture_id": capture_id,
+        "map_version": "0" * 64 if role_name in {"pose", "map", "reconstruction"} else None,
+        "object_state_version": "1" * 64 if role_name == "reconstruction" else None,
+        "artifacts": artifacts,
+    }
+
+
+class PresentationTimelineTests(unittest.TestCase):
+    def test_all_twelve_shots_have_exact_order_and_boundaries(self):
+        plan = load_plan(PLAN)
+        self.assertEqual([shot.number for shot in plan.shots], list(range(1, 13)))
+        self.assertEqual(
+            [(shot.start_frame, shot.end_frame_exclusive) for shot in plan.shots],
+            list(EXPECTED_SHOT_BOUNDARIES),
+        )
+        self.assertEqual(sum(shot.frame_count for shot in plan.shots), 1350)
+        self.assertEqual(plan.shot_for_frame(0).number, 1)
+        self.assertEqual(plan.shot_for_frame(89).number, 1)
+        self.assertEqual(plan.shot_for_frame(90).number, 2)
+        self.assertEqual(plan.shot_for_frame(1349).number, 12)
+        with self.assertRaises(IndexError):
+            plan.shot_for_frame(1350)
+
+    def test_profiles_are_native_delivery_and_preview(self):
+        plan = load_plan(PLAN)
+        self.assertEqual((plan.fps, plan.duration_seconds, plan.frame_count), (30, 45, 1350))
+        self.assertEqual((plan.profiles["delivery"].width, plan.profiles["delivery"].height), (1920, 1080))
+        self.assertEqual((plan.profiles["preview"].width, plan.profiles["preview"].height), (1280, 720))
+        self.assertEqual(plan.profiles["delivery"].frame_count, 1350)
+        self.assertEqual(plan.profiles["preview"].fps, 30)
+
+    def test_invalid_profile_and_boundary_are_rejected(self):
+        source = json.loads(PLAN.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            source["profiles"]["delivery"]["width"] = 1280
+            path.write_text(json.dumps(source), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "delivery profile must be 1920x1080"):
+                load_plan(path)
+            source["profiles"]["delivery"]["width"] = 1920
+            source["shots"][5]["start_frame"] = 541
+            path.write_text(json.dumps(source), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "shot 06 must use boundary"):
+                load_plan(path)
+
+    def test_technical_shots_require_genuine_sensor_and_estimator_roles(self):
+        plan = load_plan(PLAN)
+        expected = {
+            1: {"rgb"},
+            5: {"rgb"},
+            6: {"rgb", "lidar", "pose"},
+            7: {"lidar", "pose"},
+            8: {"map", "pose"},
+            9: {"map", "reconstruction"},
+            10: {"rgb", "map", "reconstruction"},
+            11: {"map", "reconstruction", "pose"},
+            12: {"rgb", "map", "reconstruction", "pose"},
+        }
+        for number, roles in expected.items():
+            self.assertEqual(set(plan.shots[number - 1].required_roles), roles)
+        self.assertEqual(
+            set(plan.role_contracts),
+            {"rgb", "lidar", "pose", "map", "reconstruction"},
+        )
+        for role in ("rgb", "lidar", "map", "reconstruction"):
+            self.assertIn("view_video", plan.role_contracts[role].required_artifacts)
+
+    def test_checked_in_role_schema_catalog_matches_validator(self):
+        catalog = json.loads((ROOT / "config" / "presentation" / "input_schemas.json").read_text(encoding="utf-8"))
+        self.assertEqual(catalog, schema_catalog())
+        accepted = json.loads((ROOT / "config" / "presentation" / "accepted_rgb_captures.json").read_text(encoding="utf-8"))
+        self.assertEqual(accepted["mechanism"], "reviewed_exact_capture_allowlist")
+        self.assertEqual(accepted["captures"], [])
+        self.assertTrue(catalog["roles"]["rgb"]["view_producer_available"])
+        for role in ("lidar", "map", "reconstruction"):
+            self.assertFalse(catalog["roles"][role]["view_producer_available"])
+
+    def test_existing_rgb_baseline_is_diagnostic_and_never_complete(self):
+        plan = load_plan(PLAN)
+        report = inspect_inputs(plan, BASELINE_INPUTS)
+        self.assertFalse(report.complete)
+        self.assertEqual(report.ready_genuine_roles, frozenset())
+        self.assertIn("rgb", report.missing_by_shot[1])
+        segments = plan_segments(plan, report, "diagnostic")
+        self.assertEqual([segment.kind for segment in segments[:5]], ["diagnostic_baseline"] * 5)
+        self.assertEqual([segment.kind for segment in segments[5:]], ["missing_input_slate"] * 7)
+        self.assertTrue(all("references/storyboard" not in str(segment.video_path) for segment in segments))
+        self.assertEqual(_sha256(BASELINE_VIDEO), DIAGNOSTIC_BASELINE_IDENTITY["video_sha256"])
+        with self.assertRaises(ValueError):
+            plan_segments(plan, report, "complete")
+
+    def test_pinned_diagnostic_blob_predates_the_storyboard_manifest(self):
+        subprocess.run(
+            [
+                "git", "merge-base", "--is-ancestor",
+                DIAGNOSTIC_BASELINE_IDENTITY["introduced_commit"],
+                DIAGNOSTIC_BASELINE_IDENTITY["storyboard_manifest_commit"],
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        blob = subprocess.check_output(
+            [
+                "git", "rev-parse",
+                f"{DIAGNOSTIC_BASELINE_IDENTITY['introduced_commit']}:{DIAGNOSTIC_BASELINE_IDENTITY['video_path']}",
+            ],
+            cwd=ROOT,
+            text=True,
+        ).strip()
+        self.assertEqual(blob, DIAGNOSTIC_BASELINE_IDENTITY["video_git_blob"])
+        old_manifest = subprocess.run(
+            [
+                "git", "cat-file", "-e",
+                f"{DIAGNOSTIC_BASELINE_IDENTITY['introduced_commit']}:references/manifest.json",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        self.assertNotEqual(old_manifest.returncode, 0)
+        subprocess.run(
+            [
+                "git", "cat-file", "-e",
+                f"{DIAGNOSTIC_BASELINE_IDENTITY['storyboard_manifest_commit']}:references/manifest.json",
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+
+    def test_alternate_diagnostic_manifest_with_png_transcoded_to_h264_is_rejected_before_render(self):
+        self.assertTrue(FFMPEG.is_file())
+        reference = ROOT / "references" / "storyboard" / "01_enter_aisle_rgb.png"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            transcoded = root / "apparently-new-baseline.mp4"
+            subprocess.run(
+                [
+                    str(FFMPEG), "-hide_banner", "-loglevel", "error", "-loop", "1", "-i", str(reference),
+                    "-frames:v", "3", "-r", "30", "-vf", "scale=1280:720", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-y", str(transcoded),
+                ],
+                check=True,
+            )
+            self.assertNotEqual(_sha256(transcoded), _sha256(reference))
+            self.assertIn(b"ftyp", transcoded.read_bytes()[:32])
+            manifest = root / "alternate_diagnostic.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "label": "transcoded storyboard attack",
+                        "ground_truth_consumed": False,
+                        "roles": {
+                            "rgb_baseline": {
+                                "contract": "rgb",
+                                "status": "complete",
+                                "provenance": "diagnostic_baseline",
+                                "schema_id": "simulation.presentation.diagnostic_baseline.v1",
+                                "producer_id": "repository.demo.baseline.v1",
+                                "capture_id": "forged",
+                                "artifacts": {"view_video": _descriptor(transcoded)},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
+                inspect_inputs(load_plan(PLAN), manifest)
+            with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
+                render_presentation(PLAN, manifest, root / "output", "preview", "diagnostic", "unreachable", "unreachable")
+
+    def test_arbitrary_placeholders_and_missing_hashes_cannot_be_complete(self):
+        plan = load_plan(PLAN)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            roles = {}
+            for name in plan.role_contracts:
+                view = root / f"{name}.mp4"
+                shutil.copyfile(BASELINE_VIDEO, view)
+                with view.open("ab") as handle:
+                    handle.write(name.encode("ascii"))
+                roles[name] = _placeholder_role(root, name, "fixture-capture", view)
+            manifest = root / "inputs.json"
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "adversarial", "ground_truth_consumed": False, "roles": roles}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            self.assertFalse(report.complete)
+            self.assertEqual(report.ready_genuine_roles, frozenset())
+            self.assertTrue(any("placeholder" in error or "must contain" in error or "not a" in error for errors in report.role_errors.values() for error in errors))
+            with self.assertRaisesRegex(ValueError, "complete render inputs are unavailable"):
+                render_presentation(PLAN, manifest, root / "output", "delivery", "complete", "unreachable", "unreachable")
+
+            del roles["rgb"]["artifacts"]["frame_index"]["sha256"]
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "missing-hash", "ground_truth_consumed": False, "roles": roles}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            self.assertTrue(any("must declare a SHA-256" in error for error in report.role_errors["rgb"]))
+
+    def test_cross_capture_and_reused_cross_role_video_are_rejected(self):
+        plan = load_plan(PLAN)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            view = root / "reused.mp4"
+            shutil.copyfile(BASELINE_VIDEO, view)
+            roles = {
+                "rgb": _placeholder_role(root, "rgb", "capture-a", view),
+                "lidar": _placeholder_role(root, "lidar", "capture-b", view),
+            }
+            manifest = root / "inputs.json"
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "cross-role", "ground_truth_consumed": False, "roles": roles}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            for role in ("rgb", "lidar"):
+                self.assertTrue(any("do not share one capture_id" in error for error in report.role_errors[role]))
+                self.assertTrue(any("view video hash is reused across roles" in error for error in report.role_errors[role]))
+
+    def test_view_manifest_must_bind_video_and_all_source_hashes(self):
+        plan = load_plan(PLAN)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            view = root / "view.mp4"
+            shutil.copyfile(BASELINE_VIDEO, view)
+            role = _placeholder_role(root, "rgb", "capture-a", view)
+            view_manifest_path = Path(role["artifacts"]["view_manifest"]["path"])
+            view_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_id": "simulation.presentation.view_derivation.v1",
+                        "producer_id": ROLE_SPECS["rgb"].view_producer_id,
+                        "producer_source_sha256": source_text_sha256(ROOT / ROLE_SPECS["rgb"].view_producer_source_path),
+                        "role": "rgb",
+                        "capture_id": "capture-a",
+                        "output_video_sha256": _sha256(view),
+                        "source_artifact_sha256": {},
+                        "source_time_range_s": [0, 45],
+                        "map_version": None,
+                        "object_state_version": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            role["artifacts"]["view_manifest"] = _descriptor(view_manifest_path)
+            manifest = root / "inputs.json"
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "bad-link", "ground_truth_consumed": False, "roles": {"rgb": role}}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            self.assertTrue(any("source hashes do not match" in error for error in report.role_errors["rgb"]))
+
+    def test_declared_role_and_view_producer_source_hashes_are_verified(self):
+        plan = load_plan(PLAN)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            view = root / "view.mp4"
+            shutil.copyfile(BASELINE_VIDEO, view)
+            role = _placeholder_role(root, "rgb", "capture-a", view)
+            role["producer_source_sha256"] = "0" * 64
+            view_manifest_path = Path(role["artifacts"]["view_manifest"]["path"])
+            view_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_id": "simulation.presentation.view_derivation.v1",
+                        "producer_id": ROLE_SPECS["rgb"].view_producer_id,
+                        "producer_source_sha256": "0" * 64,
+                        "role": "rgb",
+                        "capture_id": "capture-a",
+                        "output_video_sha256": _sha256(view),
+                        "source_artifact_sha256": {
+                            name: value["sha256"]
+                            for name, value in role["artifacts"].items()
+                            if name not in {"view_video", "view_manifest"}
+                        },
+                        "source_time_range_s": [0, 45],
+                        "map_version": None,
+                        "object_state_version": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            role["artifacts"]["view_manifest"] = _descriptor(view_manifest_path)
+            manifest = root / "inputs.json"
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "bad-producer", "ground_truth_consumed": False, "roles": {"rgb": role}}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            errors = report.role_errors["rgb"]
+            self.assertTrue(any("producer source hash does not match" in error for error in errors))
+            self.assertTrue(any("view manifest producer source hash mismatch" in error for error in errors))
+
+    def test_alternate_diagnostic_manifest_is_rejected_even_for_byte_identical_storyboard_content(self):
+        plan = load_plan(PLAN)
+        reference = ROOT / "references" / "storyboard" / "01_enter_aisle_rgb.png"
+        with tempfile.TemporaryDirectory() as directory:
+            copied_reference = Path(directory) / "unrelated-looking-video.mp4"
+            shutil.copyfile(reference, copied_reference)
+            manifest = Path(directory) / "inputs.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "label": "invalid",
+                        "ground_truth_consumed": False,
+                        "roles": {
+                            "rgb_baseline": {
+                                "contract": "rgb",
+                                "status": "complete",
+                                "provenance": "diagnostic_baseline",
+                                "schema_id": "simulation.presentation.diagnostic_baseline.v1",
+                                "producer_id": "repository.demo.baseline.v1",
+                                "capture_id": "invalid",
+                                "artifacts": {
+                                    "view_video": _descriptor(copied_reference),
+                                },
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
+                inspect_inputs(plan, manifest)
+
+    def test_diagnostic_mode_cannot_write_delivery_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "restricted to the 1280x720 preview"):
+                render_presentation(PLAN, BASELINE_INPUTS, directory, "delivery", "diagnostic", "ffmpeg", "ffprobe")
+
+    def test_diagnostic_output_claim_is_limited_to_the_pinned_source_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = render_presentation(
+                PLAN,
+                BASELINE_INPUTS,
+                directory,
+                "preview",
+                "diagnostic",
+                str(FFMPEG),
+                str(FFPROBE),
+            )
+            self.assertNotIn("storyboard_pixels_consumed", manifest)
+            self.assertEqual(manifest["diagnostic_source_identity"]["video_git_blob"], DIAGNOSTIC_BASELINE_IDENTITY["video_git_blob"])
+            self.assertTrue(manifest["provenance_validation"]["exact_storyboard_file_hashes_rejected"])
+
+
+class CompletePresentationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not FFMPEG.is_file() or not FFPROBE.is_file():
+            raise unittest.SkipTest("trusted FFmpeg tools are unavailable")
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        cls.fixture = build_complete_fixture(cls.root / "fixture", ROOT, str(FFMPEG), str(FFPROBE))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temporary.cleanup()
+
+    def _report(self, complete_inputs: Path | None = None, technical_catalog: Path | None = None):
+        return inspect_inputs(
+            load_plan(PLAN),
+            complete_inputs or self.fixture["complete_inputs"],
+            rgb_capture_catalog=self.fixture["rgb_catalog"],
+            technical_source_catalog=technical_catalog or self.fixture["technical_catalog"],
+            ffprobe=str(FFPROBE),
+        )
+
+    def test_v2_five_topic_capture_and_540_frame_rgb_coverage_map_all_shots(self):
+        capture = json.loads(self.fixture["capture_manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(capture["manifest_version"], 2)
+        self.assertEqual(capture["bag"]["topics"], [
+            "/clock", "/sim/camera/rgb/image_raw", "/sim/lidar/points", "/tf", "/tf_static",
+        ])
+        self.assertNotIn("/sim/camera/rgb/camera_info", capture["bag"]["topics"])
+        self.assertEqual(capture["rgb"]["camera_info_provenance"], "configured_intrinsics")
+        self.assertEqual(capture["rgb"]["frame_count"], 615)
+        report = self._report()
+        self.assertTrue(report.complete)
+        segments = plan_segments(load_plan(PLAN), report, "complete")
+        self.assertEqual([item.source_start_frame for item in segments[:5]], [0, 90, 180, 300, 420])
+        self.assertEqual([item.source_start_frame for item in segments[5:]], [0] * 7)
+        self.assertEqual([item.shot.frame_count for item in segments[5:]], [120, 90, 90, 120, 120, 120, 150])
+        self.assertAlmostEqual(segments[4].source_time_range_s[1], 539 / 30.0)
+        self.assertEqual(len({item.video_sha256 for item in segments[5:]}), 7)
+
+    def test_production_catalog_stays_empty_and_fixture_bundle_fails_closed_by_default(self):
+        catalog = json.loads(
+            (ROOT / "config" / "presentation" / "accepted_rgb_captures.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(catalog["captures"], [])
+        with self.assertRaisesRegex(ValueError, "not present exactly once in the reviewed RGB capture allowlist"):
+            inspect_inputs(load_plan(PLAN), self.fixture["complete_inputs"], ffprobe=str(FFPROBE))
+
+    def test_rgb_timestamp_gap_is_rejected_before_render(self):
+        from simulator.presentation.provenance import CONTENT_VALIDATORS
+
+        source = self.fixture["capture_manifest"].parent / "rgb_frames.jsonl"
+        rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()]
+        rows[300]["stamp_s"] += 0.02
+        broken = self.root / "rgb_frames_with_gap.jsonl"
+        broken.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "contiguous 30 fps"):
+            CONTENT_VALIDATORS["rgb_frame_index"](broken)
+
+    def test_technical_hash_revision_and_cross_source_attacks_are_rejected(self):
+        technical = self.fixture["technical_manifest"]
+        forged_hash = technical.with_name("forged_hash_manifest.json")
+        value = json.loads(technical.read_text(encoding="utf-8"))
+        value["outputs"][0]["sha256"] = "0" * 64
+        forged_hash.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            validate_technical_delivery(
+                forged_hash, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+            )
+
+        forged_revision = technical.with_name("forged_revision_manifest.json")
+        value = json.loads(technical.read_text(encoding="utf-8"))
+        value["source"]["producer_revisions"]["slam"] = "f" * 40
+        forged_revision.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "producer revisions"):
+            validate_technical_delivery(
+                forged_revision, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+            )
+
+        catalog_value = json.loads(self.fixture["technical_catalog"].read_text(encoding="utf-8"))
+        catalog_value["sources"][0]["capture_sha256"] = "e" * 64
+        cross_catalog = self.root / "cross_source_catalog.json"
+        cross_catalog.write_text(json.dumps(catalog_value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "source_catalog hash"):
+            emit_complete_bundle(
+                self.fixture["rgb_bundle"], technical, self.root / "cross_inputs.json", ROOT, str(FFPROBE),
+                rgb_capture_catalog=self.fixture["rgb_catalog"], technical_source_catalog=cross_catalog,
+            )
+
+        complete_value = json.loads(self.fixture["complete_inputs"].read_text(encoding="utf-8"))
+        complete_value["capture_id"] = "cross-source-substitution"
+        forged_complete = self.fixture["complete_inputs"].with_name("forged_complete_inputs.json")
+        forged_complete.write_text(json.dumps(complete_value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "capture identity is forged"):
+            self._report(forged_complete)
+
+        complete_value = json.loads(self.fixture["complete_inputs"].read_text(encoding="utf-8"))
+        complete_value["presentation_classification"] = {"kind": "reviewed_production"}
+        forged_classification = self.fixture["complete_inputs"].with_name("forged_classification_inputs.json")
+        forged_classification.write_text(json.dumps(complete_value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "classification is forged"):
+            self._report(forged_classification)
+
+    def test_complete_preview_is_exact_and_applies_declared_rgb_hflip(self):
+        output = self.root / "preview"
+        mutated_inputs = self.fixture["complete_inputs"].with_name("label_mutated_complete_inputs.json")
+        mutated_value = json.loads(self.fixture["complete_inputs"].read_text(encoding="utf-8"))
+        mutated_value["label"] = "validated complete presentation inputs"
+        mutated_inputs.write_text(json.dumps(mutated_value), encoding="utf-8")
+        report = self._report(mutated_inputs)
+        self.assertEqual(report.presentation_classification["kind"], "generated_test_fixture")
+        manifest = render_presentation(
+            PLAN,
+            mutated_inputs,
+            output,
+            "preview",
+            "complete",
+            str(FFMPEG),
+            str(FFPROBE),
+            self.fixture["rgb_catalog"],
+            self.fixture["technical_catalog"],
+        )
+        self.assertEqual(manifest["status"], "test_demonstration")
+        self.assertIn("not production capture", manifest["claim"])
+        self.assertEqual((manifest["probe"]["width"], manifest["probe"]["height"]), (1280, 720))
+        self.assertEqual((manifest["probe"]["frame_count"], manifest["probe"]["audio_stream_count"]), (1350, 0))
+        self.assertEqual(len(manifest["representative_frames"]), 36)
+        self.assertTrue(all(item["presentation_transform"] == "hflip" for item in manifest["shots"][:5]))
+        self.assertTrue(all(item["presentation_transform"] is None for item in manifest["shots"][5:]))
+        from PIL import Image
+
+        frame = Image.open(output / manifest["representative_frames"][0]["path"])
+        left = frame.getpixel((80, 360))
+        right = frame.getpixel((1200, 360))
+        self.assertGreater(left[2], left[0], "hflip must move the blue raw right half to presentation left")
+        self.assertGreater(right[0], right[2], "hflip must move the red raw left half to presentation right")
+
+    def test_delivery_failures_leave_prior_generation_byte_exact_and_remove_staging(self):
+        expected_probe = {
+            "width": 1920, "height": 1080, "fps_num": 30, "fps_den": 1,
+            "real_fps_num": 30, "real_fps_den": 1, "frame_count": 1350,
+            "video_stream_count": 1, "audio_stream_count": 0,
+            "video_codec": "ffv1", "duration_seconds": 45.0,
+        }
+
+        def seed_prior(target: Path) -> dict[str, bytes]:
+            target.mkdir()
+            (target / "presentation_delivery_manifest.json").write_text(
+                '{"status":"complete","generation":"prior"}\n', encoding="utf-8"
+            )
+            (target / "presentation_final.mp4").write_bytes(b"prior-final")
+            prior_frames = target / "presentation_delivery_representative_frames"
+            prior_frames.mkdir()
+            (prior_frames / "prior.png").write_bytes(b"prior-frame")
+            return {
+                path.relative_to(target).as_posix(): path.read_bytes()
+                for path in target.rglob("*") if path.is_file()
+            }
+
+        def assert_prior_unchanged(target: Path, expected: dict[str, bytes]) -> None:
+            observed = {
+                path.relative_to(target).as_posix(): path.read_bytes()
+                for path in target.rglob("*") if path.is_file()
+            }
+            self.assertEqual(observed, expected)
+            leftovers = [
+                path.name for path in target.parent.iterdir()
+                if path.name.startswith(f".{target.name}.staging-")
+                or path.name.startswith(f".{target.name}.previous-")
+            ]
+            self.assertEqual(leftovers, [])
+
+        second_encode = self.root / "atomic_second_encode"
+        prior = seed_prior(second_encode)
+        calls = []
+
+        def fail_second_run(command):
+            calls.append(command)
+            output = Path(command[-1])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"new-partial")
+            if len(calls) == 2:
+                raise RuntimeError("injected second encode failure")
+
+        with patch("simulator.presentation.render_video._run", fail_second_run), patch(
+            "simulator.presentation.render_video._validate_output", return_value=expected_probe
+        ):
+            with self.assertRaisesRegex(RuntimeError, "second encode"):
+                render_presentation(
+                    PLAN, self.fixture["complete_inputs"], second_encode, "delivery", "complete",
+                    str(FFMPEG), str(FFPROBE), self.fixture["rgb_catalog"], self.fixture["technical_catalog"],
+                )
+        assert_prior_unchanged(second_encode, prior)
+
+        late_failure = self.root / "atomic_late_failure"
+        prior = seed_prior(late_failure)
+
+        def fake_run(command):
+            output = Path(command[-1])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"new-output")
+
+        def fake_audio(path, _duration):
+            Path(path).write_bytes(b"new-audio")
+
+        def fake_contact(_video, path, _ffmpeg, _plan):
+            Path(path).write_bytes(b"new-contact")
+
+        with patch("simulator.presentation.render_video._run", fake_run), patch(
+            "simulator.presentation.render_video._validate_output", return_value=expected_probe
+        ), patch("simulator.presentation.render_video._write_deterministic_ambience", fake_audio), patch(
+            "simulator.presentation.render_video._contact_sheet", fake_contact
+        ), patch(
+            "simulator.presentation.render_video._representative_frames",
+            side_effect=RuntimeError("injected representative-frame failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "representative-frame"):
+                render_presentation(
+                    PLAN, self.fixture["complete_inputs"], late_failure, "delivery", "complete",
+                    str(FFMPEG), str(FFPROBE), self.fixture["rgb_catalog"], self.fixture["technical_catalog"],
+                )
+        assert_prior_unchanged(late_failure, prior)
+
+    def test_delivery_package_has_lossless_silent_audio_final_and_review_outputs(self):
+        output = self.root / "delivery"
+        manifest = render_presentation(
+            PLAN,
+            self.fixture["complete_inputs"],
+            output,
+            "delivery",
+            "complete",
+            str(FFMPEG),
+            str(FFPROBE),
+            self.fixture["rgb_catalog"],
+            self.fixture["technical_catalog"],
+        )
+        outputs = manifest["outputs"]
+        self.assertEqual(set(outputs), {"lossless_master", "silent_mp4", "audio_bed", "final_mp4", "review_mp4"})
+        self.assertTrue(outputs["lossless_master"]["lossless"])
+        self.assertEqual(outputs["lossless_master"]["probe"]["video_codec"], "ffv1")
+        self.assertEqual(outputs["silent_mp4"]["probe"]["audio_stream_count"], 0)
+        self.assertEqual(outputs["final_mp4"]["probe"]["audio_stream_count"], 1)
+        self.assertEqual(outputs["review_mp4"]["probe"]["audio_stream_count"], 1)
+        self.assertEqual((outputs["review_mp4"]["probe"]["width"], outputs["review_mp4"]["probe"]["height"]), (1280, 720))
+        self.assertTrue(all(item["probe"]["frame_count"] == 1350 for name, item in outputs.items() if "probe" in item))
+
+
+if __name__ == "__main__":
+    unittest.main()

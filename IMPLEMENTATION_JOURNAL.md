@@ -248,3 +248,47 @@ source bindings, receipts, and generated media are unchanged from r2.
   written and revalidated from canonical temporary bytes before atomic replace.
   Adversarial tests prove invalid staging preserves an existing output exactly
   and leaves no temporary file.
+
+## 2026-09-21 — combined presentation delivery r5
+
+- Complete presentation inputs now combine a reviewed RGB receipt with seven
+  independently validated technical-view receipts. The adapter requires one
+  capture identity and exact hashes, producer revisions, source-catalog
+  identity, map/trajectory/object versions, and local-frame-zero technical
+  clips of 120/90/90/120/120/120/150 frames for shots 6–12.
+- Capture validation consumes manifest v2's exact five raw bag topics. Camera
+  calibration remains a configured artifact. RGB presentation coverage is the
+  contiguous 30 fps source interval through frame 539, so the intended
+  20.5-second capture supplies the five RGB shots without claiming 45 seconds
+  of raw capture. Every film-shot mapping records its actual source frames and
+  simulation-time range.
+- RGB presentation receipts declare a horizontal flip, the source-visible
+  correction for mirrored package labels. The renderer applies that transform
+  without altering capture bytes and records it per RGB shot in the output
+  manifest.
+- Complete delivery writes a 1920x1080 FFV1 lossless master, a high-quality
+  silent H.264 file, a deterministic stereo ambience/footstep/cart bed, the
+  audio-muxed native H.264 final, a 1280x720 review file, a contact sheet, and
+  start/mid/end frames for all 12 shots. Every output is probed for exact CFR,
+  frame count, dimensions, duration, codecs, streams, and hashes. Source-view
+  upscaling is rejected.
+- The checked-in production RGB catalog remains empty until a real capture is
+  reviewed. Generated fixtures can exercise the full pipeline only with
+  explicit test catalogs; their renders are visibly and structurally labeled
+  as non-production demonstrations. Diagnostic rendering remains pinned to the
+  immutable pre-storyboard baseline and rejects storyboard pixels by identity.
+
+### Presentation r6 provenance classification and atomic publication
+
+- Complete-render status now comes from the exact presentation classification
+  in both reviewed source catalogs. Generated fixtures carry a fixed marker ID
+  and marker SHA-256 through the catalog hashes, RGB receipt, technical source
+  receipt, and complete bundle. A mutable display label has no effect on the
+  output claim or fixture watermark; mismatched or forged classifications fail
+  validation.
+- Rendering now builds every video, audio file, contact sheet, representative
+  frame, hash, and completion manifest in a fresh sibling staging directory.
+  Only a fully validated generation is published. Publication swaps the whole
+  directory on the same volume and restores the prior directory if the swap
+  fails. Encode or later evidence-generation failures remove staging and leave
+  a prior completed package byte-for-byte unchanged.
