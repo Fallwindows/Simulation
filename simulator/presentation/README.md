@@ -5,11 +5,22 @@ fixes the half-open frame intervals, the native 1920x1080 delivery profile, and
 the 1280x720 preview profile at 30 fps and 1,350 frames.
 
 Complete rendering accepts timeline-aligned view videos only when their input
-manifest also supplies the genuine data products behind the view. The role
-contracts require timestamped RGB and calibration, LiDAR returns and scan
-index, estimated poses and frame contract, map snapshots and pose association,
-and persistent object records with observation and map-version links. Paths
-under `references/storyboard/` are rejected as presentation inputs.
+manifest also supplies the genuine data products behind the view. The
+machine-readable catalog in `config/presentation/input_schemas.json` names the
+exact schemas, repository producer IDs/source files, and artifact types for
+each role. Every artifact uses a `{path, sha256}` descriptor. The validator
+parses capture, RGB index/calibration, ROS bag, pose, map, and perception
+records; requires one capture plus matching map/object versions; and checks a
+view-derivation receipt that binds the view-video hash to every source hash and
+the producer source hash.
+
+Known storyboard hashes from `references/manifest.json` are rejected regardless
+of an artifact's current filename or directory. Reusing one view across roles,
+mixing captures or SLAM versions, missing hashes, arbitrary placeholder text,
+and incomplete view associations all keep the corresponding role unavailable.
+The technical LiDAR/map/reconstruction view producer flags remain false until
+real data-to-pixels implementations exist, so complete mode currently fails
+closed even if someone writes plausible-looking manifests by hand.
 
 The checked-in `diagnostic_baseline_inputs.json` intentionally supplies only
 `demo/walking_aisle_final_hifi.mp4`. Its provenance is
@@ -34,7 +45,9 @@ C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\python.exe `
 
 The renderer writes the MP4 atomically, verifies its dimensions, frame rate,
 frame count, and duration with ffprobe, and records source hashes plus per-shot
-provenance in `diagnostic_preview_manifest.json`. Complete mode fails before
-rendering until every required genuine role is present. Native delivery also
-rejects source views smaller than 1920x1080 to prevent an upscale from being
-reported as native rendering.
+provenance in `diagnostic_preview_manifest.json`. Its
+`storyboard_pixels_consumed=false` result is emitted only after artifact hashes
+have been checked against the canonical storyboard manifest. Complete mode
+fails before rendering until every required genuine role is present. Native
+delivery also rejects source views smaller than 1920x1080 to prevent an upscale
+from being reported as native rendering.

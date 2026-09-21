@@ -22,23 +22,33 @@
   "role_contracts": {
     "rgb": {
       "description": "Timestamped simulated RGB capture with camera calibration and a derived timeline-aligned view.",
-      "required_artifacts": ["view_video", "frame_index", "camera_info"]
+      "schema_id": "simulation.presentation.rgb_bundle.v1",
+      "producer_id": "scripts.capture_simulation.v1",
+      "required_artifacts": ["view_video", "frame_index", "camera_info", "rgb_metadata", "capture_manifest", "view_manifest"]
     },
     "lidar": {
       "description": "Recorded LiDAR returns with scan index, calibration, and a view derived from the declared returns.",
-      "required_artifacts": ["view_video", "scan_index", "returns", "calibration"]
+      "schema_id": "simulation.presentation.lidar_bundle.v1",
+      "producer_id": "simulator.capture.rosbag_capture.v1",
+      "required_artifacts": ["view_video", "scan_index", "returns", "calibration", "capture_manifest", "view_manifest"]
     },
     "pose": {
       "description": "Estimated pose trajectory and coordinate-frame contract used for rays, map state, and camera path.",
-      "required_artifacts": ["trajectory", "frame_contract"]
+      "schema_id": "simulation.presentation.pose_bundle.v1",
+      "producer_id": "scripts.run_slam_offline.v1",
+      "required_artifacts": ["trajectory", "frame_contract", "capture_manifest", "slam_manifest"]
     },
     "map": {
       "description": "Time-indexed accumulated map states, pose association, and a view derived from those snapshots.",
-      "required_artifacts": ["view_video", "snapshot_index", "map_states", "pose_association"]
+      "schema_id": "simulation.presentation.map_bundle.v1",
+      "producer_id": "scripts.run_slam_offline.v1",
+      "required_artifacts": ["view_video", "snapshot_index", "map_states", "pose_association", "capture_manifest", "slam_manifest", "view_manifest"]
     },
     "reconstruction": {
       "description": "Persistent object records with observation links and map-version association plus a derived view.",
-      "required_artifacts": ["view_video", "object_records", "observation_links", "map_version"]
+      "schema_id": "simulation.presentation.reconstruction_bundle.v1",
+      "producer_id": "simulator.perception.rgb_tracking.v1",
+      "required_artifacts": ["view_video", "object_records", "observation_links", "capture_manifest", "slam_manifest", "perception_manifest", "view_manifest"]
     }
   },
   "shots": [

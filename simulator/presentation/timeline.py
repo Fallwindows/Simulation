@@ -9,11 +9,12 @@ labelled fallbacks.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .provenance import ROLE_SPECS, coherence_errors, storyboard_hashes, validate_role
 
 
 EXPECTED_SHOT_BOUNDARIES = (
@@ -50,20 +51,6 @@ def _positive_int(value: Any, name: str) -> int:
     return result
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _reject_storyboard_source(path: Path) -> None:
-    normalized = path.resolve().as_posix().lower()
-    if "/references/storyboard/" in normalized:
-        raise ValueError(f"storyboard references cannot be presentation inputs: {path}")
-
-
 @dataclass(frozen=True)
 class RenderProfile:
     name: str
@@ -78,6 +65,8 @@ class RenderProfile:
 class RoleContract:
     name: str
     description: str
+    schema_id: str
+    producer_id: str
     required_artifacts: tuple[str, ...]
 
 
@@ -131,6 +120,8 @@ class RoleInput:
     capture_id: str
     artifacts: dict[str, Path]
     artifact_sha256: dict[str, str]
+    map_version: str | None
+    object_state_version: str | None
 
 
 @dataclass(frozen=True)
@@ -141,6 +132,8 @@ class InputReport:
     ready_genuine_roles: frozenset[str]
     role_errors: dict[str, tuple[str, ...]]
     missing_by_shot: dict[int, tuple[str, ...]]
+    storyboard_manifest_sha256: str
+    provenance_validated: bool
 
     @property
     def complete(self) -> bool:
@@ -192,12 +185,24 @@ def load_plan(path: str | Path) -> PresentationPlan:
     for name, item in contracts_data.items():
         if not isinstance(item, dict):
             raise ValueError(f"role contract {name} must be a mapping")
+        spec = ROLE_SPECS.get(str(name))
+        if spec is None:
+            raise ValueError(f"unsupported role contract {name}")
         artifacts = item.get("required_artifacts")
         if not isinstance(artifacts, list) or not artifacts or not all(isinstance(value, str) and value for value in artifacts):
             raise ValueError(f"role contract {name} must list required_artifacts")
-        if "view_video" not in artifacts and name in {"rgb", "lidar", "map", "reconstruction"}:
-            raise ValueError(f"rendered role {name} must require a view_video tied to its data")
-        contracts[str(name)] = RoleContract(str(name), str(item.get("description", "")), tuple(artifacts))
+        expected_artifacts = tuple(artifact_name for artifact_name, _ in spec.required_artifacts)
+        if tuple(artifacts) != expected_artifacts:
+            raise ValueError(f"role contract {name} artifacts must match the built-in {spec.schema_id} schema")
+        if item.get("schema_id") != spec.schema_id or item.get("producer_id") != spec.producer_id:
+            raise ValueError(f"role contract {name} schema/producer does not match the repository stage")
+        contracts[str(name)] = RoleContract(
+            str(name),
+            str(item.get("description", "")),
+            spec.schema_id,
+            spec.producer_id,
+            expected_artifacts,
+        )
 
     shots_data = data.get("shots")
     if not isinstance(shots_data, list) or len(shots_data) != 12:
@@ -254,7 +259,7 @@ def load_plan(path: str | Path) -> PresentationPlan:
 def inspect_inputs(plan: PresentationPlan, path: str | Path) -> InputReport:
     source = Path(path).resolve()
     data = _mapping(source)
-    if int(data.get("schema_version", -1)) != 1:
+    if int(data.get("schema_version", -1)) != 2:
         raise ValueError("unsupported presentation input schema_version")
     if data.get("ground_truth_consumed") is not False:
         raise ValueError("presentation inputs must explicitly declare ground_truth_consumed=false")
@@ -262,67 +267,52 @@ def inspect_inputs(plan: PresentationPlan, path: str | Path) -> InputReport:
     if not isinstance(roles_data, dict):
         raise ValueError("input roles must be a mapping")
 
-    roles: dict[str, RoleInput] = {}
-    ready: set[str] = set()
-    errors: dict[str, tuple[str, ...]] = {}
+    repo_root = plan.path.parents[2]
+    known_storyboard_hashes, storyboard_manifest_sha256 = storyboard_hashes(repo_root)
+    validated_roles = {}
     for role_name, item in roles_data.items():
         if not isinstance(item, dict):
             raise ValueError(f"input role {role_name} must be a mapping")
         contract_name = str(item.get("contract", ""))
-        contract = plan.role_contracts.get(contract_name)
-        if contract is None:
+        if contract_name not in plan.role_contracts:
             raise ValueError(f"input role {role_name} uses unknown contract {contract_name}")
-        artifact_values = item.get("artifacts")
-        if not isinstance(artifact_values, dict):
-            raise ValueError(f"input role {role_name}.artifacts must be a mapping")
-        artifacts: dict[str, Path] = {}
-        for artifact_name, artifact_path in artifact_values.items():
-            resolved = (source.parent / str(artifact_path)).resolve()
-            _reject_storyboard_source(resolved)
-            artifacts[str(artifact_name)] = resolved
-        hashes_value = item.get("artifact_sha256", {})
-        if not isinstance(hashes_value, dict):
-            raise ValueError(f"input role {role_name}.artifact_sha256 must be a mapping")
-        hashes = {str(name): str(value).lower() for name, value in hashes_value.items()}
-        role = RoleInput(
-            str(role_name),
-            contract_name,
-            str(item.get("status", "")),
-            str(item.get("provenance", "")),
-            str(item.get("capture_id", "")),
-            artifacts,
-            hashes,
+        validated_roles[str(role_name)] = validate_role(
+            str(role_name), item, source, repo_root, known_storyboard_hashes
         )
-        roles[role.name] = role
-        role_errors: list[str] = []
-        if role.provenance == "genuine" and role.name != contract_name:
-            role_errors.append("genuine role name must match its contract name")
-        if role.status != "complete":
-            role_errors.append(f"status is {role.status or 'missing'}")
-        if role.provenance != "genuine":
-            role_errors.append(f"provenance is {role.provenance or 'missing'}")
-        if role.provenance == "genuine" and not role.capture_id:
-            role_errors.append("capture_id is missing")
-        for artifact_name in contract.required_artifacts:
-            artifact = role.artifacts.get(artifact_name)
-            if artifact is None:
-                role_errors.append(f"artifact {artifact_name} is undeclared")
-            elif not artifact.exists():
-                role_errors.append(f"artifact {artifact_name} is missing")
-        for artifact_name, expected_hash in hashes.items():
-            artifact = role.artifacts.get(artifact_name)
-            if artifact is None:
-                role_errors.append(f"hash references undeclared artifact {artifact_name}")
-            elif not artifact.is_file():
-                role_errors.append(f"hashed artifact {artifact_name} is not a file")
-            elif _sha256(artifact) != expected_hash:
-                role_errors.append(f"artifact {artifact_name} hash mismatch")
-        errors[role.name] = tuple(role_errors)
-        if not role_errors:
-            ready.add(contract_name)
+
+    coherence = coherence_errors(validated_roles)
+    roles: dict[str, RoleInput] = {}
+    errors: dict[str, tuple[str, ...]] = {}
+    ready: set[str] = set()
+    for name, validated in validated_roles.items():
+        combined_errors = tuple(validated.errors) + tuple(coherence.get(name, ()))
+        role = RoleInput(
+            validated.name,
+            validated.contract,
+            validated.status,
+            validated.provenance,
+            validated.capture_id,
+            {artifact_name: artifact.path for artifact_name, artifact in validated.artifacts.items()},
+            {artifact_name: artifact.sha256 for artifact_name, artifact in validated.artifacts.items()},
+            validated.map_version,
+            validated.object_state_version,
+        )
+        roles[name] = role
+        errors[name] = combined_errors
+        if not combined_errors:
+            ready.add(validated.contract)
 
     missing_by_shot = {
         shot.number: tuple(role for role in shot.required_roles if role not in ready)
         for shot in plan.shots
     }
-    return InputReport(source, str(data.get("label", "")), roles, frozenset(ready), errors, missing_by_shot)
+    return InputReport(
+        source,
+        str(data.get("label", "")),
+        roles,
+        frozenset(ready),
+        errors,
+        missing_by_shot,
+        storyboard_manifest_sha256,
+        True,
+    )

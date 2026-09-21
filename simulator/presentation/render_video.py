@@ -179,6 +179,36 @@ def _validate_source(
     return metadata
 
 
+def _validate_complete_role_views(
+    plan: PresentationPlan,
+    report: InputReport,
+    profile_width: int,
+    profile_height: int,
+    ffprobe: str,
+    cache: dict[Path, dict[str, Any]],
+) -> None:
+    """Require every declared view to cover the complete native timeline."""
+
+    for contract_name, contract in plan.role_contracts.items():
+        if "view_video" not in contract.required_artifacts:
+            continue
+        role = report.roles[contract_name]
+        path = role.artifacts["view_video"]
+        metadata = cache.setdefault(path, probe_video(path, ffprobe))
+        rates = (
+            metadata["fps_num"],
+            metadata["fps_den"],
+            metadata["real_fps_num"],
+            metadata["real_fps_den"],
+        )
+        if rates != (plan.fps, 1, plan.fps, 1):
+            raise ValueError(f"{path} must be constant {plan.fps} fps")
+        if metadata["frame_count"] < plan.frame_count:
+            raise ValueError(f"{path} must contain at least {plan.frame_count} frames")
+        if metadata["width"] < profile_width or metadata["height"] < profile_height:
+            raise ValueError(f"complete {profile_width}x{profile_height} output cannot upscale {path}")
+
+
 def _build_filter(
     plan: PresentationPlan,
     profile_name: str,
@@ -277,6 +307,8 @@ def render_presentation(
 ) -> dict[str, Any]:
     plan = load_plan(plan_path)
     report = inspect_inputs(plan, inputs_path)
+    if not report.provenance_validated:
+        raise ValueError("presentation provenance validation did not complete")
     if profile_name not in plan.profiles:
         raise ValueError(f"unknown profile {profile_name}")
     if mode == "diagnostic" and profile_name != "preview":
@@ -284,6 +316,15 @@ def render_presentation(
     segments = plan_segments(plan, report, mode)
     profile = plan.profiles[profile_name]
     source_probes: dict[Path, dict[str, Any]] = {}
+    if mode == "complete":
+        _validate_complete_role_views(
+            plan,
+            report,
+            profile.width,
+            profile.height,
+            ffprobe,
+            source_probes,
+        )
     for segment in segments:
         if segment.video_path is not None:
             _validate_source(segment, profile.width, profile.height, plan.fps, mode, ffprobe, source_probes)
@@ -326,6 +367,12 @@ def render_presentation(
         "duration_seconds": plan.duration_seconds,
         "ground_truth_consumed": False,
         "storyboard_pixels_consumed": False,
+        "provenance_validation": {
+            "status": "validated",
+            "storyboard_manifest_sha256": report.storyboard_manifest_sha256,
+            "artifact_hashes_verified": True,
+            "known_storyboard_content_hashes_rejected": True,
+        },
         "plan": str(plan.path),
         "plan_sha256": _file_sha256(plan.path),
         "inputs": str(report.manifest_path),
@@ -333,6 +380,7 @@ def render_presentation(
         "renderer_files": {
             str(Path(__file__).resolve()): _file_sha256(Path(__file__).resolve()),
             str(Path(__file__).with_name("timeline.py").resolve()): _file_sha256(Path(__file__).with_name("timeline.py").resolve()),
+            str(Path(__file__).with_name("provenance.py").resolve()): _file_sha256(Path(__file__).with_name("provenance.py").resolve()),
         },
         "video": video.name,
         "video_sha256": _file_sha256(video),

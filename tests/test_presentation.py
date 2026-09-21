@@ -1,15 +1,59 @@
+import hashlib
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from simulator.presentation.render_video import plan_segments, render_presentation
+from simulator.presentation.provenance import ROLE_SPECS, schema_catalog
 from simulator.presentation.timeline import EXPECTED_SHOT_BOUNDARIES, inspect_inputs, load_plan
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "config" / "presentation" / "storyboard.yaml"
 BASELINE_INPUTS = ROOT / "config" / "presentation" / "diagnostic_baseline_inputs.json"
+BASELINE_VIDEO = ROOT / "demo" / "walking_aisle_final_hifi.mp4"
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _descriptor(path: Path) -> dict[str, str]:
+    return {"path": str(path), "sha256": _sha256(path)}
+
+
+def _placeholder_role(root: Path, role_name: str, capture_id: str, view_video: Path) -> dict[str, object]:
+    spec = ROLE_SPECS[role_name]
+    artifacts = {}
+    for artifact_name, kind in spec.required_artifacts:
+        if artifact_name == "view_video":
+            artifact = view_video
+        elif kind == "rosbag2":
+            artifact = root / f"{role_name}_{artifact_name}"
+            artifact.mkdir(exist_ok=True)
+            (artifact / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
+            (artifact / "capture.db3").write_bytes(b"not a sqlite database")
+            from simulator.presentation.provenance import sha256_path
+            artifacts[artifact_name] = {"path": str(artifact), "sha256": sha256_path(artifact)}
+            continue
+        else:
+            artifact = root / f"{role_name}_{artifact_name}.dat"
+            artifact.write_text("arbitrary placeholder\n", encoding="utf-8")
+        artifacts[artifact_name] = _descriptor(artifact)
+    return {
+        "contract": role_name,
+        "status": "complete",
+        "provenance": "genuine",
+        "schema_id": spec.schema_id,
+        "producer_id": spec.producer_id,
+        "producer_source_sha256": _sha256(ROOT / spec.producer_source_path),
+        "capture_id": capture_id,
+        "map_version": "0" * 64 if role_name in {"pose", "map", "reconstruction"} else None,
+        "object_state_version": "1" * 64 if role_name == "reconstruction" else None,
+        "artifacts": artifacts,
+    }
 
 
 class PresentationTimelineTests(unittest.TestCase):
@@ -72,6 +116,13 @@ class PresentationTimelineTests(unittest.TestCase):
         for role in ("rgb", "lidar", "map", "reconstruction"):
             self.assertIn("view_video", plan.role_contracts[role].required_artifacts)
 
+    def test_checked_in_role_schema_catalog_matches_validator(self):
+        catalog = json.loads((ROOT / "config" / "presentation" / "input_schemas.json").read_text(encoding="utf-8"))
+        self.assertEqual(catalog, schema_catalog())
+        self.assertTrue(catalog["roles"]["rgb"]["view_producer_available"])
+        for role in ("lidar", "map", "reconstruction"):
+            self.assertFalse(catalog["roles"][role]["view_producer_available"])
+
     def test_existing_rgb_baseline_is_diagnostic_and_never_complete(self):
         plan = load_plan(PLAN)
         report = inspect_inputs(plan, BASELINE_INPUTS)
@@ -85,60 +136,155 @@ class PresentationTimelineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan_segments(plan, report, "complete")
 
-    def test_complete_contract_fixture_requires_every_declared_artifact(self):
+    def test_arbitrary_placeholders_and_missing_hashes_cannot_be_complete(self):
         plan = load_plan(PLAN)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             roles = {}
-            for name, contract in plan.role_contracts.items():
-                artifacts = {}
-                for artifact_name in contract.required_artifacts:
-                    artifact = root / f"{name}_{artifact_name}.dat"
-                    artifact.write_text(f"{name}:{artifact_name}\n", encoding="utf-8")
-                    artifacts[artifact_name] = artifact.name
-                roles[name] = {
-                    "contract": name,
-                    "status": "complete",
-                    "provenance": "genuine",
-                    "capture_id": "fixture-capture",
-                    "artifacts": artifacts,
-                }
+            for name in plan.role_contracts:
+                view = root / f"{name}.mp4"
+                shutil.copyfile(BASELINE_VIDEO, view)
+                with view.open("ab") as handle:
+                    handle.write(name.encode("ascii"))
+                roles[name] = _placeholder_role(root, name, "fixture-capture", view)
             manifest = root / "inputs.json"
             manifest.write_text(
-                json.dumps({"schema_version": 1, "label": "fixture", "ground_truth_consumed": False, "roles": roles}),
+                json.dumps({"schema_version": 2, "label": "adversarial", "ground_truth_consumed": False, "roles": roles}),
                 encoding="utf-8",
             )
             report = inspect_inputs(plan, manifest)
-            self.assertTrue(report.complete)
-            self.assertEqual(report.ready_genuine_roles, set(plan.role_contracts))
-            self.assertTrue(all(not missing for missing in report.missing_by_shot.values()))
-            missing_artifact = root / "lidar_scan_index.dat"
-            missing_artifact.unlink()
-            incomplete = inspect_inputs(plan, manifest)
-            self.assertFalse(incomplete.complete)
-            self.assertIn("lidar", incomplete.missing_by_shot[6])
+            self.assertFalse(report.complete)
+            self.assertEqual(report.ready_genuine_roles, frozenset())
+            self.assertTrue(any("placeholder" in error or "must contain" in error or "not a" in error for errors in report.role_errors.values() for error in errors))
+            with self.assertRaisesRegex(ValueError, "complete render inputs are unavailable"):
+                render_presentation(PLAN, manifest, root / "output", "delivery", "complete", "unreachable", "unreachable")
+
+            del roles["rgb"]["artifacts"]["frame_index"]["sha256"]
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "missing-hash", "ground_truth_consumed": False, "roles": roles}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            self.assertTrue(any("must declare a SHA-256" in error for error in report.role_errors["rgb"]))
+
+    def test_cross_capture_and_reused_cross_role_video_are_rejected(self):
+        plan = load_plan(PLAN)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            view = root / "reused.mp4"
+            shutil.copyfile(BASELINE_VIDEO, view)
+            roles = {
+                "rgb": _placeholder_role(root, "rgb", "capture-a", view),
+                "lidar": _placeholder_role(root, "lidar", "capture-b", view),
+            }
+            manifest = root / "inputs.json"
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "cross-role", "ground_truth_consumed": False, "roles": roles}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            for role in ("rgb", "lidar"):
+                self.assertTrue(any("do not share one capture_id" in error for error in report.role_errors[role]))
+                self.assertTrue(any("view video hash is reused across roles" in error for error in report.role_errors[role]))
+
+    def test_view_manifest_must_bind_video_and_all_source_hashes(self):
+        plan = load_plan(PLAN)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            view = root / "view.mp4"
+            shutil.copyfile(BASELINE_VIDEO, view)
+            role = _placeholder_role(root, "rgb", "capture-a", view)
+            view_manifest_path = Path(role["artifacts"]["view_manifest"]["path"])
+            view_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_id": "simulation.presentation.view_derivation.v1",
+                        "producer_id": "evaluation.rgb_video_recorder.v1",
+                        "producer_source_sha256": _sha256(ROOT / "evaluation" / "rgb_video_recorder.py"),
+                        "role": "rgb",
+                        "capture_id": "capture-a",
+                        "output_video_sha256": _sha256(view),
+                        "source_artifact_sha256": {},
+                        "source_time_range_s": [0, 45],
+                        "map_version": None,
+                        "object_state_version": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            role["artifacts"]["view_manifest"] = _descriptor(view_manifest_path)
+            manifest = root / "inputs.json"
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "bad-link", "ground_truth_consumed": False, "roles": {"rgb": role}}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            self.assertTrue(any("source hashes do not match" in error for error in report.role_errors["rgb"]))
+
+    def test_declared_role_and_view_producer_source_hashes_are_verified(self):
+        plan = load_plan(PLAN)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            view = root / "view.mp4"
+            shutil.copyfile(BASELINE_VIDEO, view)
+            role = _placeholder_role(root, "rgb", "capture-a", view)
+            role["producer_source_sha256"] = "0" * 64
+            view_manifest_path = Path(role["artifacts"]["view_manifest"]["path"])
+            view_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_id": "simulation.presentation.view_derivation.v1",
+                        "producer_id": "evaluation.rgb_video_recorder.v1",
+                        "producer_source_sha256": "0" * 64,
+                        "role": "rgb",
+                        "capture_id": "capture-a",
+                        "output_video_sha256": _sha256(view),
+                        "source_artifact_sha256": {
+                            name: value["sha256"]
+                            for name, value in role["artifacts"].items()
+                            if name not in {"view_video", "view_manifest"}
+                        },
+                        "source_time_range_s": [0, 45],
+                        "map_version": None,
+                        "object_state_version": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            role["artifacts"]["view_manifest"] = _descriptor(view_manifest_path)
+            manifest = root / "inputs.json"
+            manifest.write_text(
+                json.dumps({"schema_version": 2, "label": "bad-producer", "ground_truth_consumed": False, "roles": {"rgb": role}}),
+                encoding="utf-8",
+            )
+            report = inspect_inputs(plan, manifest)
+            errors = report.role_errors["rgb"]
+            self.assertTrue(any("producer source hash does not match" in error for error in errors))
+            self.assertTrue(any("view manifest producer source hash mismatch" in error for error in errors))
 
     def test_storyboard_pixels_are_rejected_as_inputs(self):
         plan = load_plan(PLAN)
         reference = ROOT / "references" / "storyboard" / "01_enter_aisle_rgb.png"
-        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+        with tempfile.TemporaryDirectory() as directory:
+            copied_reference = Path(directory) / "unrelated-looking-video.mp4"
+            shutil.copyfile(reference, copied_reference)
             manifest = Path(directory) / "inputs.json"
             manifest.write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "label": "invalid",
                         "ground_truth_consumed": False,
                         "roles": {
-                            "rgb": {
+                            "rgb_baseline": {
                                 "contract": "rgb",
                                 "status": "complete",
-                                "provenance": "genuine",
+                                "provenance": "diagnostic_baseline",
+                                "schema_id": "simulation.presentation.diagnostic_baseline.v1",
+                                "producer_id": "repository.demo.baseline.v1",
                                 "capture_id": "invalid",
                                 "artifacts": {
-                                    "view_video": str(reference),
-                                    "frame_index": str(reference),
-                                    "camera_info": str(reference),
+                                    "view_video": _descriptor(copied_reference),
                                 },
                             }
                         },
@@ -146,7 +292,7 @@ class PresentationTimelineTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ValueError, "storyboard references cannot be presentation inputs"):
+            with self.assertRaisesRegex(ValueError, "known storyboard content is forbidden"):
                 inspect_inputs(plan, manifest)
 
     def test_diagnostic_mode_cannot_write_delivery_profile(self):
