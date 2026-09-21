@@ -158,15 +158,25 @@ Before starting, open a terminal for each long-running process, keep logs visibl
 **Evidence:** Config snapshot, point counts, and metric comparison.
 **Stop/cleanup:** Stop scenario and return to baseline.
 
+### Production 4K sensor capture
+
+Keep `walking_baseline.yaml` at 1280×720 for previews and routine tests. The production sensor capture uses native 3840×2160 RGB at 30 Hz with the same accepted LiDAR and 20.5-second walking trajectory:
+
+```powershell
+.\scripts\capture_simulation.ps1 -Scenario config/scenarios/production_walking_4k.yaml -Headless
+```
+
+The completed capture must report 3840×2160 in `camera_info.json` and `rgb_video.json`; verify `capture_manifest.json` before using the bag or video downstream.
+
 ## 15. Scenario switching
 
 **Goal:** Verify composition of environment, sensors, trajectory, and mapping config.
 **Prerequisites:** Layers 2–14.
-**Commands:** Run preflight for each scenario: `python -m simulator.runtime.sim_runner --scenario config/scenarios/baseline_straight.yaml`, then `walking_baseline.yaml`, then `sensor_realism.yaml`.
-**What should open:** Three valid preflight summaries with expected trajectory/noise differences.
+**Commands:** Run preflight for each scenario: `python -m simulator.runtime.sim_runner --scenario config/scenarios/baseline_straight.yaml`, then `walking_baseline.yaml`, `sensor_realism.yaml`, and `production_walking_4k.yaml`.
+**What should open:** Four valid preflight summaries with expected trajectory, noise, and production-resolution differences.
 **What success looks like:** No hard-coded paths or stale configuration leaks.
 **What failure looks like:** One scenario changes the public contract or cannot resolve its components.
-**Evidence:** Three JSON summaries.
+**Evidence:** Four JSON summaries.
 **Stop/cleanup:** None.
 
 ## 16. Full baseline launch
