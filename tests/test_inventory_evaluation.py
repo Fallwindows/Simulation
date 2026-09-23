@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +18,8 @@ from simulator.perception.inventory_evaluation import (
     _slam_start_timestamp,
     _start_relative_truth_rows,
     _write_inventory_map,
+    _validate_eligibility_manifest,
+    _load_eligibility_manifest,
 )
 
 
@@ -42,6 +47,16 @@ class InventoryEvaluationTests(unittest.TestCase):
         self.assertIsNone(rows[0]["relative_y_m"])
         self.assertEqual(rows[0]["spatially_associated_gt_id"], "")
 
+    def test_assignment_maximizes_cardinality_before_minimizing_distance(self):
+        estimates = [
+            {"track_id": "1", "estimated_x_m": "0.16", "estimated_y_m": "0", "estimated_z_m": "0"},
+            {"track_id": "2", "estimated_x_m": "-0.17", "estimated_y_m": "0", "estimated_z_m": "0"},
+        ]
+        gt = [truth("left", (0.0, 0.0, 0.0)), truth("right", (0.34, 0.0, 0.0))]
+        rows, metrics = _match_rows(estimates, gt, threshold_m=0.35)
+        self.assertEqual(metrics["spatially_associated_estimate_count"], 2)
+        self.assertEqual({row["spatially_associated_gt_id"] for row in rows}, {"left", "right"})
+
     def test_visible_eligibility_is_supplied_independently_of_match_success(self):
         estimates = [
             {"track_id": "1", "estimated_x_m": "0.02", "estimated_y_m": "0", "estimated_z_m": "0"},
@@ -53,6 +68,91 @@ class InventoryEvaluationTests(unittest.TestCase):
         self.assertEqual(metrics["eligible_ground_truth_count"], 1)
         self.assertEqual(metrics["eligible_ground_truth_association_count"], 1)
         self.assertEqual(metrics["eligible_recall"], 1.0)
+        self.assertEqual(metrics["category_agreement_evaluated_count"], 0)
+
+    def test_assignment_minimizes_distance_after_cardinality(self):
+        estimates = [
+            {"track_id": "1", "estimated_x_m": "1", "estimated_y_m": "0", "estimated_z_m": "0"},
+            {"track_id": "2", "estimated_x_m": "-1.1", "estimated_y_m": "0", "estimated_z_m": "0"},
+        ]
+        gt = [truth("left", (0.0, 0.0, 0.0)), truth("right", (3.0, 0.0, 0.0))]
+        rows, metrics = _match_rows(estimates, gt, threshold_m=4.2)
+        self.assertEqual(metrics["spatially_associated_estimate_count"], 2)
+        self.assertEqual({row["spatially_associated_gt_id"] for row in rows}, {"left", "right"})
+        self.assertAlmostEqual(sum(row["spatial_association_error_m"] for row in rows), 3.1)
+
+    def test_evaluate_inventory_persists_validated_eligibility_evidence(self):
+        estimates = [{"track_id": "1", "estimated_x_m": "0", "estimated_y_m": "0", "estimated_z_m": "0"}]
+        slam_poses = [{"timestamp_s": "100.2", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "1"}]
+        aligned_truth = [truth("eligible", (0.0, 0.0, 0.0)), truth("occluded", (5.0, 0.0, 0.0))]
+        evidence = {"schema_version": 1, "capture_id": "run", "method": "manual review", "source_sha256": "source-hash", "eligible_truth_ids": ["eligible"], "ineligible_truth_ids": ["occluded"]}
+        with (
+            patch("simulator.perception.inventory_evaluation._load_csv", side_effect=[estimates, slam_poses]),
+            patch("simulator.perception.inventory_evaluation._gt_start_relative", return_value=aligned_truth),
+            patch("simulator.perception.inventory_evaluation._load_eligibility_manifest", return_value=({"eligible"}, evidence)),
+            patch("simulator.perception.inventory_evaluation._write_csv"),
+            patch("simulator.perception.inventory_evaluation._write_xlsx"),
+            patch("simulator.perception.inventory_evaluation._write_inventory_map", return_value=0),
+            patch.object(Path, "write_text"),
+        ):
+            result = evaluate_inventory("run/capture", "run/slam", "run/perception", eligibility_manifest_path="labels.json")
+        self.assertEqual(result["eligibility_evidence"], evidence)
+        self.assertEqual(result["metrics"]["eligible_ground_truth_count"], 1)
+
+    def test_eligibility_manifest_binds_capture_rule_hash_and_exhaustive_ids(self):
+        source = {
+            "schema_version": 1,
+            "capture_id": "capture-42",
+            "labels": {"visible": "eligible", "occluded": "ineligible"},
+        }
+        source_bytes = json.dumps(source, sort_keys=True).encode("utf-8")
+        source_hash = hashlib.sha256(source_bytes).hexdigest()
+        manifest = {
+            "schema_version": 1,
+            "capture_id": "capture-42",
+            "method": "manual visibility review v1",
+            "rule": "eligible when visible area and dwell criteria are met",
+            "frozen_at_utc": "2026-09-20T12:00:00Z",
+            "source": {"path": "visibility-labels.json", "sha256": source_hash},
+            "eligible_truth_ids": ["visible"],
+            "ineligible_truth_ids": ["occluded"],
+        }
+        manifest_bytes = json.dumps(manifest, sort_keys=True).encode("utf-8")
+        with patch.object(Path, "read_bytes", side_effect=[manifest_bytes, source_bytes]):
+            eligible, evidence = _load_eligibility_manifest(
+                Path("eligibility.json"),
+                "capture-42",
+                {"visible", "occluded"},
+                datetime(2026, 9, 22, tzinfo=timezone.utc),
+            )
+        self.assertEqual(eligible, {"visible"})
+        self.assertEqual(evidence["ineligible_truth_ids"], ["occluded"])
+        self.assertEqual(evidence["source_sha256"], source_hash)
+        self.assertEqual(evidence["manifest_sha256"], hashlib.sha256(manifest_bytes).hexdigest())
+        self.assertEqual(evidence["method"], manifest["method"])
+
+    def test_eligibility_manifest_must_precede_evaluation(self):
+        source = {
+            "schema_version": 1,
+            "capture_id": "capture-42",
+            "labels": {"visible": "eligible"},
+        }
+        source_hash = hashlib.sha256(json.dumps(source, sort_keys=True).encode("utf-8")).hexdigest()
+        manifest = {
+            "schema_version": 1,
+            "capture_id": "capture-42",
+            "method": "manual review",
+            "rule": "declared visibility rule",
+            "frozen_at_utc": "2026-09-23T12:00:00Z",
+            "source": {"path": "visibility-labels.json", "sha256": source_hash},
+            "eligible_truth_ids": ["visible"],
+            "ineligible_truth_ids": [],
+        }
+        with self.assertRaisesRegex(ValueError, "frozen before evaluation"):
+            _validate_eligibility_manifest(
+                manifest, source, "manifest-hash", source_hash, Path("eligibility.json"),
+                "capture-42", {"visible"}, datetime(2026, 9, 22, tzinfo=timezone.utc),
+            )
 
     def test_unknown_visibility_keeps_eligible_metrics_unavailable(self):
         _, metrics = _match_rows(
@@ -81,13 +181,18 @@ class InventoryEvaluationTests(unittest.TestCase):
 
     def test_slam_start_timestamp_selects_actual_first_estimate_stamp(self):
         with patch("simulator.perception.inventory_evaluation._load_csv", return_value=[
-            {"timestamp_s": "100.4"}, {"timestamp_s": "100.2"}, {"timestamp_s": "bad"},
+            {"timestamp_s": "100.0", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "0"},
+            {"timestamp_s": "100.2", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "1"},
+            {"timestamp_s": "100.4", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "bad", "qy": "0", "qz": "0", "qw": "1"},
         ]):
             self.assertEqual(_slam_start_timestamp(Path("unused")), 100.2)
 
     def test_evaluation_aligns_truth_to_slam_start_timestamp(self):
         estimates = [{"track_id": "1", "estimated_x_m": "0", "estimated_y_m": "0", "estimated_z_m": "0"}]
-        slam_poses = [{"timestamp_s": "100.4"}, {"timestamp_s": "100.2"}]
+        slam_poses = [
+            {"timestamp_s": "100.4", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "1"},
+            {"timestamp_s": "100.2", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "1"},
+        ]
         aligned_truth = [truth("item", (0.0, 0.0, 0.0))]
         with (
             patch("simulator.perception.inventory_evaluation._load_csv", side_effect=[estimates, slam_poses]),
