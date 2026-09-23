@@ -108,3 +108,9 @@ Five independent exact-candidate reviews approved the source tree, including the
 Recorded checks on the exact candidate: independent full discovery 127/127; evaluator 22/22; reviewer integration selections 81/81 and 71/71; runtime capture 18/18; tracking 31/31; runtime-review span 22/22; runtime-to-tracker and reversed-order probes passed; 69/69 generated retail files were byte-identical; Python compileall passed; PowerShell parsing passed for ten scripts; and `git diff --check` passed. The first orchestrator attempt could not create its worktree-scoped temporary directory, and a second isolated exact-tree copy run under the authorized main workspace produced 46 Windows fixture-`TEMP` permission errors with no assertion failures; an independent exact-tree reviewer completed 127/127 successfully.
 
 Installed Isaac/ROS production replay and restart validation were blocked by Windows Application Control. No 45-second/1,350-frame or 1080p full film, silent master, twelve-shot acceptance package, product-recognition model, evidence-backed full 3D extents, or time-indexed map-history presentation was produced. Visual evidence remains bounded to comparable 1280×720 stills at 0 s and 8 s. No owner acceptance, merge to `master`, push, release, or publication is recorded.
+
+## 2026-09-23 — forensic report and evidence delivery
+
+The independent report/evidence audit passed. Local delivery commit `0310fcf0762fe178d93c3109857c6ed16ad9e263` (tree `a625659c2f650bcb8d87077054ce1eafe0ac2943`) contains the reviewed forensic report, review README, journal snapshot current at that commit, and 11 preview evidence files. This delivery entry supersedes the earlier “documentation/evidence commit is pending” state.
+
+The accepted source commit remains `2b8fb77aa12ff649bf5fc0eaaccb5efc2007cb25`; the delivery commit changed no source code. Nothing was pushed or merged.
