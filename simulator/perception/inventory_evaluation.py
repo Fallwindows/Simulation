@@ -11,6 +11,7 @@ import argparse
 import csv
 import html
 import hashlib
+import io
 import json
 import math
 import subprocess
@@ -125,13 +126,21 @@ def _load_csv(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def _load_csv_with_fields(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    with path.open(newline="", encoding="utf-8") as handle:
+def _load_csv_bytes(name: str, content: bytes) -> tuple[list[str], list[dict[str, str]]]:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{name} is not valid UTF-8 CSV") from exc
+    with io.StringIO(text, newline="") as handle:
         reader = csv.DictReader(handle)
         fields = list(reader.fieldnames or [])
         if len(fields) != len(set(fields)):
-            raise ValueError(f"{path.name} contains duplicate CSV column names")
+            raise ValueError(f"{name} contains duplicate CSV column names")
         return fields, list(reader)
+
+
+def _load_csv_with_fields(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    return _load_csv_bytes(path.name, path.read_bytes())
 
 
 def _sha256(content: bytes) -> str:
@@ -182,8 +191,8 @@ def _canonical_artifact_identity(path: str) -> str:
     return normalized.casefold()
 
 
-def _validate_map_provenance(slam_dir: Path, perception_dir: Path) -> tuple[dict[str, object], bytes]:
-    """Verify the complete optimized map input and retain its validated cloud bytes."""
+def _validate_map_provenance(slam_dir: Path, perception_dir: Path) -> tuple[dict[str, object], bytes, bytes]:
+    """Verify optimized map inputs and retain validated cloud and pose bytes."""
     slam_manifest_path = slam_dir / "slam_manifest.json"
     perception_manifest_path = perception_dir / "perception_manifest.json"
     slam_manifest, slam_bytes = _read_complete_manifest(slam_manifest_path, "slam_manifest.json")
@@ -273,13 +282,29 @@ def _validate_map_provenance(slam_dir: Path, perception_dir: Path) -> tuple[dict
     if not isinstance(perception_cloud_size, int) or isinstance(perception_cloud_size, bool) or perception_cloud_size != expected_cloud_size:
         raise ValueError("perception manifest slam cloud size does not match slam_map.ply")
 
+    pose_records = [record for record in artifacts if record.get("path") == "slam_poses.csv"]
+    if len(pose_records) != 1:
+        raise ValueError("SLAM manifest must contain exactly one artifact record for slam_poses.csv")
+    pose_record = pose_records[0]
+    if pose_record.get("role") != "legacy_map_trajectory" or pose_record.get("frame_id") != "map" or pose_record.get("optimized") is not True or pose_record.get("map_version") != map_version:
+        raise ValueError("slam_poses.csv is not declared as the optimized map trajectory for this map_version")
+    pose_path = slam_dir / "slam_poses.csv"
+    if not pose_path.is_file():
+        raise ValueError("SLAM estimator pose stream is missing: slam_poses.csv")
+    pose_bytes = pose_path.read_bytes()
+    expected_pose_size = pose_record.get("size_bytes")
+    expected_pose_hash = pose_record.get("sha256")
+    if not isinstance(expected_pose_size, int) or isinstance(expected_pose_size, bool) or expected_pose_size != len(pose_bytes) or not _valid_sha256(expected_pose_hash) or expected_pose_hash != _sha256(pose_bytes):
+        raise ValueError("slam_poses.csv size or SHA-256 does not match its SLAM manifest record")
+
     provenance = {
         "map_version": map_version,
         "slam_manifest": {"path": "../slam/slam_manifest.json", "size_bytes": len(slam_bytes), "sha256": _sha256(slam_bytes)},
         "perception_manifest": {"path": "perception_manifest.json", "size_bytes": len(perception_bytes), "sha256": _sha256(perception_bytes)},
         "slam_map_cloud": {"path": "../slam/slam_map.ply", "size_bytes": len(cloud_bytes), "sha256": _sha256(cloud_bytes), "frame_id": "map", "role": "final_optimized_cloud"},
+        "slam_poses": {"path": "../slam/slam_poses.csv", "size_bytes": len(pose_bytes), "sha256": _sha256(pose_bytes), "frame_id": "map", "role": "legacy_map_trajectory"},
     }
-    return provenance, cloud_bytes
+    return provenance, cloud_bytes, pose_bytes
 
 
 def _validate_estimate_map_versions(fields: list[str], estimates: list[dict[str, str]], map_version: str) -> None:
@@ -560,10 +585,15 @@ def _write_inventory_map(path: Path, slam_map_bytes: bytes, rows: list[dict[str,
     return len(centers)
 
 
-def _slam_start_timestamp(slam_dir: Path) -> float:
+def _slam_start_timestamp(slam_dir: Path, pose_csv_bytes: bytes | None = None) -> float:
     """Use the estimator's pose ordering, then reject an invalid selected start."""
     poses: list[PoseSample] = []
-    for row in _load_csv(slam_dir / "slam_poses.csv"):
+    pose_rows = (
+        _load_csv_bytes("slam_poses.csv", pose_csv_bytes)[1]
+        if pose_csv_bytes is not None
+        else _load_csv(slam_dir / "slam_poses.csv")
+    )
+    for row in pose_rows:
         orientation = safe_quaternion(tuple(float(row[key]) for key in ("qx", "qy", "qz", "qw")))
         if orientation is None:
             continue
@@ -699,10 +729,10 @@ def evaluate_inventory(
     capture = Path(capture_dir).resolve()
     slam = Path(slam_dir).resolve()
     perception = Path(perception_dir).resolve()
-    input_provenance, validated_cloud_bytes = _validate_map_provenance(slam, perception)
+    input_provenance, validated_cloud_bytes, validated_pose_bytes = _validate_map_provenance(slam, perception)
     estimate_fields, estimates = _load_csv_with_fields(perception / "estimated_inventory.csv")
     _validate_estimate_map_versions(estimate_fields, estimates, str(input_provenance["map_version"]))
-    start_timestamp_s = _slam_start_timestamp(slam)
+    start_timestamp_s = _slam_start_timestamp(slam, validated_pose_bytes)
     truth = _gt_start_relative(capture, start_timestamp_s)
     eligibility_evidence = None
     if eligibility_manifest_path is None:

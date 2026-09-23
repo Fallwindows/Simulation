@@ -91,7 +91,7 @@ class InventoryEvaluationTests(unittest.TestCase):
         aligned_truth = [truth("eligible", (0.0, 0.0, 0.0)), truth("occluded", (5.0, 0.0, 0.0))]
         evidence = {"schema_version": 1, "capture_id": "run", "method": "manual review", "source_sha256": "source-hash", "eligible_truth_ids": ["eligible"], "ineligible_truth_ids": ["occluded"]}
         with (
-            patch("simulator.perception.inventory_evaluation._validate_map_provenance", return_value=({"map_version": "a" * 64}, b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n")),
+            patch("simulator.perception.inventory_evaluation._validate_map_provenance", return_value=({"map_version": "a" * 64}, b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n", b"timestamp_s,x_m,y_m,z_m,qx,qy,qz,qw\n100.2,0,0,0,0,0,0,1\n")),
             patch("simulator.perception.inventory_evaluation._load_csv_with_fields", return_value=(["track_id", "estimated_x_m", "estimated_y_m", "estimated_z_m", "map_version"], estimates)),
             patch("simulator.perception.inventory_evaluation._load_csv", return_value=slam_poses),
             patch("simulator.perception.inventory_evaluation._gt_start_relative", return_value=aligned_truth),
@@ -212,7 +212,7 @@ class InventoryEvaluationTests(unittest.TestCase):
         ]
         aligned_truth = [truth("item", (0.0, 0.0, 0.0))]
         with (
-            patch("simulator.perception.inventory_evaluation._validate_map_provenance", return_value=({"map_version": "a" * 64}, b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n")),
+            patch("simulator.perception.inventory_evaluation._validate_map_provenance", return_value=({"map_version": "a" * 64}, b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n", b"timestamp_s,x_m,y_m,z_m,qx,qy,qz,qw\n100.2,0,0,0,0,0,0,1\n")),
             patch("simulator.perception.inventory_evaluation._load_csv_with_fields", return_value=(["track_id", "estimated_x_m", "estimated_y_m", "estimated_z_m", "map_version"], estimates)),
             patch("simulator.perception.inventory_evaluation._load_csv", return_value=slam_poses),
             patch("simulator.perception.inventory_evaluation._gt_start_relative", return_value=aligned_truth) as make_truth,
@@ -386,6 +386,39 @@ class InventoryEvaluationProvenanceTests(unittest.TestCase):
             output = (slam / "slam_map_with_inventory.ply").read_bytes()
             self.assertIn(b"1 2 3 150 150 150", output)
             self.assertNotIn(b"91 92 93 150 150 150", output)
+
+    def test_pose_csv_replacement_after_manifest_fails_before_truth(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            capture, slam, perception = self._fixture(Path(temporary))
+            (slam / "slam_poses.csv").write_text(
+                "timestamp_s,x_m,y_m,z_m,qx,qy,qz,qw,frame_id\n999,0,0,0,0,0,0,1,map\n",
+                encoding="ascii",
+            )
+            with patch.object(evaluation, "_gt_start_relative", side_effect=AssertionError("truth opened with an unverified pose stream")):
+                with self.assertRaisesRegex(ValueError, "slam_poses.csv size or SHA-256"):
+                    evaluation.evaluate_inventory(capture, slam, perception)
+
+    def test_timestamp_uses_pose_bytes_validated_before_later_source_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            capture, slam, perception = self._fixture(Path(temporary))
+            original_validator = evaluation._validate_map_provenance
+            aligned_truth = [truth("truth-1", (1.0, 2.0, 3.0), "cereal")]
+
+            def validate_then_replace(slam_dir: Path, perception_dir: Path):
+                result = original_validator(slam_dir, perception_dir)
+                (slam / "slam_poses.csv").write_text(
+                    "timestamp_s,x_m,y_m,z_m,qx,qy,qz,qw,frame_id\n999,0,0,0,0,0,0,1,map\n",
+                    encoding="ascii",
+                )
+                return result
+
+            with (
+                patch.object(evaluation, "_validate_map_provenance", side_effect=validate_then_replace),
+                patch.object(evaluation, "_gt_start_relative", return_value=aligned_truth) as make_truth,
+            ):
+                result = evaluation.evaluate_inventory(capture, slam, perception)
+            self.assertEqual(result["evaluation_start_timestamp_s"], 1.0)
+            self.assertEqual(make_truth.call_args.args[1], 1.0)
 
     def test_duplicate_estimate_header_fails_before_truth_and_map_version_must_match(self):
         cases = (("duplicate", "duplicate CSV column"), ("mismatch", "inconsistent map_version"), ("missing", "missing the required map_version column"))
