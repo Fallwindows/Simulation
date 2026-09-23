@@ -39,6 +39,7 @@ class Detection:
     mean_hue: float
     mean_saturation: float
     confidence: float
+    image_size_px: tuple[int, int] | None = None
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Track:
     area_px: float = 0.0
     mean_hue: float = 0.0
     mean_saturation: float = 0.0
+    image_size_px: tuple[int, int] | None = None
     detections: list[dict[str, object]] = field(default_factory=list)
 
     def update(self, frame_index: int, detection: Detection) -> None:
@@ -76,7 +78,8 @@ class Track:
         self.mean_saturation = alpha * detection.mean_saturation + (1.0 - alpha) * self.mean_saturation
         self.last_frame_index = frame_index
         self.detection_count += 1
-        self.missed_frames = max(0, elapsed_frames - 1)
+        self.missed_frames = 0
+        self.image_size_px = detection.image_size_px or self.image_size_px
         self.detections.append(_detection_record(self.track_id, detection))
 
 
@@ -92,6 +95,7 @@ def _detection_record(track_id: int, detection: Detection) -> dict[str, object]:
         "center_px": [round(detection.center_px[0], 3), round(detection.center_px[1], 3)],
         "area_px": detection.area_px,
         "confidence": round(detection.confidence, 4),
+        "image_size_px": list(detection.image_size_px) if detection.image_size_px else None,
         "class": "unknown_product",
         "source": "rgb_color_connected_component",
     }
@@ -99,7 +103,12 @@ def _detection_record(track_id: int, detection: Detection) -> dict[str, object]:
 
 def _resolution_scaled_component_limits(width: int, height: int) -> tuple[float, float, float]:
     area_scale = (float(width) * float(height)) / (1280.0 * 720.0)
-    return 70.0 * area_scale, 9000.0 * area_scale, 5.0 * math.sqrt(area_scale)
+    # Keep the minimum evidence threshold tied to the reference pixel count,
+    # while allowing large coherent product faces.  Width/height limits below
+    # still reject aisle-scale regions; a low fixed max-area cap discarded
+    # hero products solely because the input resolution was higher.
+    image_area = float(width) * float(height)
+    return 70.0 * area_scale, 0.14 * image_area, 5.0 * math.sqrt(area_scale)
 
 
 def _budget_detections_spatially(
@@ -181,7 +190,10 @@ def detect_product_blobs(
         mean_sat = float(np.mean(component_hsv[:, 1]))
         # Confidence is evidence quality, not a learned probability.
         confidence = min(1.0, 0.35 + 0.35 * min(1.0, fill) + 0.30 * min(1.0, area / 1500.0))
-        detections.append(Detection((x, y, x + w - 1, y + h - 1), (cx, cy), area, mean_hue, mean_sat, confidence))
+        detections.append(Detection(
+            (x, y, x + w - 1, y + h - 1), (cx, cy), area, mean_hue, mean_sat, confidence,
+            image_size_px=(width, height),
+        ))
     detections.sort(key=lambda item: (item.center_px[1], item.center_px[0]))
     if max_detections < 0:
         raise ValueError("max_detections must be nonnegative")
@@ -216,12 +228,14 @@ class BlobTracker:
                 track.center_px[1] + track.velocity_px[1] * elapsed_frames,
             )
             for detection_index, detection in enumerate(detections):
+                image_size = detection.image_size_px or track.image_size_px or (1280, 720)
+                distance_scale = math.sqrt((float(image_size[0]) * float(image_size[1])) / (1280.0 * 720.0))
                 distance = math.hypot(predicted[0] - detection.center_px[0], predicted[1] - detection.center_px[1])
                 area_ratio = max(detection.area_px, 1) / max(track.area_px, 1.0)
                 hue_distance = abs(detection.mean_hue - track.mean_hue)
                 hue_distance = min(hue_distance, 180.0 - hue_distance)
                 cost = distance + 10.0 * abs(math.log(area_ratio)) + 0.20 * hue_distance
-                if distance <= self.max_match_distance_px and area_ratio < 6.0 and area_ratio > (1.0 / 6.0):
+                if distance <= self.max_match_distance_px * distance_scale and area_ratio < 6.0 and area_ratio > (1.0 / 6.0):
                     candidates.append((cost, track_id, detection_index))
         candidates.sort()
         assigned_tracks: set[int] = set()
@@ -252,6 +266,7 @@ class BlobTracker:
                 area_px=float(detection.area_px),
                 mean_hue=detection.mean_hue,
                 mean_saturation=detection.mean_saturation,
+                image_size_px=detection.image_size_px,
                 detections=[_detection_record(track_id, detection)],
             )
             self.tracks[track_id] = track
@@ -441,7 +456,6 @@ def _augment_with_lidar_estimates(
     start_r = _quat_to_matrix(poses[0].orientation_xyzw)
     frame_timestamps = [float(frame["stamp_s"]) for frame in frames]
     annotations_by_frame = {int(record["frame_index"]): record for record in frame_annotations}
-    observations_start: dict[int, list[np.ndarray]] = {}
     observations_map: dict[int, list[np.ndarray]] = {}
     observation_support: dict[int, dict[str, object]] = {}
     seen_scan_stamps: set[float] = set()
@@ -474,14 +488,12 @@ def _augment_with_lidar_estimates(
         world_r = _quat_to_matrix(pose.orientation_xyzw)
         pose_t = np.asarray(pose.position_m, dtype=np.float64)
         points_world = points_rig @ world_r.T + pose_t
-        points_start = (points_world - start_t) @ start_r
         # LiDAR and RGB callbacks have independent timestamps.  Project each
         # return through its measurement-time world pose and then into the
         # camera pose at the selected RGB image timestamp.
         points_optical = _world_points_to_camera(points_world, rgb_pose, geometry)
         positive = (points_optical[:, 2] > 0.25) & (points_optical[:, 2] < 45.0)
         points_world = points_world[positive]
-        points_start = points_start[positive]
         points_optical = points_optical[positive]
         if not len(points_optical):
             continue
@@ -489,7 +501,6 @@ def _augment_with_lidar_estimates(
         v = geometry["fy"] * points_optical[:, 1] / points_optical[:, 2] + geometry["cy"]
         in_image = (u >= 0.0) & (u < float(frames[frame_index]["width"])) & (v >= 0.0) & (v < float(frames[frame_index]["height"]))
         points_world = points_world[in_image]
-        points_start = points_start[in_image]
         points_optical = points_optical[in_image]
         u = u[in_image]
         v = v[in_image]
@@ -526,10 +537,13 @@ def _augment_with_lidar_estimates(
             selected_indices = index_array[depths <= front_cutoff]
             if len(selected_indices) < 3:
                 selected_indices = index_array
-            estimate = np.median(points_start[selected_indices], axis=0)
+            # Form one robust estimate in the declared map/SLAM frame, then
+            # derive its start-relative representation by the exact inverse
+            # transform.  Independent median-vs-mean aggregation made the two
+            # exported coordinates disagree even under identity alignment.
+            estimate_map = np.median(points_world[selected_indices], axis=0)
             track_id = int(detection["track_id"])
-            observations_start.setdefault(track_id, []).append(estimate)
-            observations_map.setdefault(track_id, []).append(points_world[selected_indices].mean(axis=0))
+            observations_map.setdefault(track_id, []).append(estimate_map)
             support = observation_support.setdefault(track_id, {
                 "scan_stamps_s": set(),
                 "unique_retained_depth_return_count": 0,
@@ -546,8 +560,11 @@ def _augment_with_lidar_estimates(
 
         scan_count += 1
 
-    track_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations_start.items() if values}
     map_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations_map.items() if values}
+    track_estimates = {
+        track_id: (estimate_map - start_t) @ start_r
+        for track_id, estimate_map in map_estimates.items()
+    }
     support_timestamps = {
         track_id: sorted(float(value) for value in support["scan_stamps_s"])
         for track_id, support in observation_support.items()
@@ -585,6 +602,8 @@ def _augment_with_lidar_estimates(
         "status": "complete",
         "start_pose_world_m": [round(float(value), 6) for value in start_t],
         "start_pose_orientation_xyzw": [round(float(value), 8) for value in poses[0].orientation_xyzw],
+        "start_pose_world_m_exact": [float(value) for value in start_t],
+        "start_pose_orientation_xyzw_exact": [float(value) for value in poses[0].orientation_xyzw],
         "coordinate_frame": "start-relative sensor-rig frame; x forward, y left, z up",
         "position_quantity": "median_of_associated_front_surface_lidar_returns",
         "lidar_pose_time_reference": "PointCloud2 header timestamp; per-return timing and deskew are unavailable",
@@ -679,6 +698,16 @@ def _set_canonical_track_identity(detection: dict[str, object], raw_track_id: in
     detection["track_id"] = int(canonical_id)
 
 
+def _set_unassigned_persistent_identity(detection: dict[str, object], raw_track_id: int) -> None:
+    """Export an RGB-only proposal without aliasing its raw ID as persistent."""
+
+    detection["raw_track_id"] = int(raw_track_id)
+    detection["persistent_track_id"] = None
+    detection["canonical_track_id"] = None
+    detection["id_namespace"] = "raw_rgb"
+    detection["track_id"] = None
+
+
 def _spatial_grid_candidate_indices(
     point: np.ndarray, merge_radius_m: float, grid: dict[tuple[int, int, int], list[int]]
 ) -> list[int]:
@@ -743,23 +772,25 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         capture, slam, frames_index, frame_annotations
     )
     co_visible_pairs = _co_visible_raw_track_pairs(frame_annotations)
-    raw_to_canonical, canonical_estimates, canonical_members = _consolidate_track_estimates(
-        track_estimates, co_visible_pairs=co_visible_pairs
+    raw_to_canonical, canonical_map_estimates, canonical_members = _consolidate_track_estimates(
+        map_estimates, co_visible_pairs=co_visible_pairs
     )
-    canonical_map_estimates: dict[int, np.ndarray] = {}
-    for canonical_id, raw_members in canonical_members.items():
-        values = [map_estimates[raw_id] for raw_id in raw_members if raw_id in map_estimates]
-        if values:
-            canonical_map_estimates[canonical_id] = np.median(np.stack(values), axis=0)
+    start_t = np.asarray(localization.get("start_pose_world_m_exact", (0.0, 0.0, 0.0)), dtype=np.float64)
+    start_r = _quat_to_matrix(tuple(localization.get("start_pose_orientation_xyzw_exact", (0.0, 0.0, 0.0, 1.0))))
+    canonical_estimates = {
+        canonical_id: (map_estimate - start_t) @ start_r
+        for canonical_id, map_estimate in canonical_map_estimates.items()
+    }
     localization["canonical_track_count"] = len(canonical_estimates)
     localization["canonicalization_radius_m"] = 0.21
 
     # Replace fragment IDs in the output stream with stable 3D-associated IDs.
     for frame in frame_annotations:
         for detection in frame["detections"]:
-            raw_track_id = int(detection["track_id"])
+            raw_track_id = int(detection["raw_track_id"])
             canonical_id = raw_to_canonical.get(raw_track_id)
             if canonical_id is None:
+                _set_unassigned_persistent_identity(detection, raw_track_id)
                 continue
             _set_canonical_track_identity(detection, raw_track_id, canonical_id)
             detection["estimated_center_start_relative_m"] = [

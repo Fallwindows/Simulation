@@ -17,6 +17,7 @@ from simulator.perception.rgb_tracking import (
     _decode_pointcloud2_xyz,
     _finite_xyz_points,
     _set_canonical_track_identity,
+    _set_unassigned_persistent_identity,
     _resolution_scaled_component_limits,
     _spatial_grid_candidate_indices,
     _world_points_to_camera,
@@ -88,6 +89,17 @@ class PerceptionTests(unittest.TestCase):
         self.assertEqual(tracker.tracks[1].missed_frames, 2)
         third_row = tracker.update(6, [returned])[0]
         self.assertEqual(third_row["raw_track_id"], first_row["raw_track_id"])
+        self.assertEqual(tracker.tracks[1].missed_frames, 0)
+
+    def test_association_gate_scales_for_equivalent_motion_at_multiple_resolutions(self):
+        for width, height, displacement in ((1280, 720, 60.0), (1920, 1080, 90.0)):
+            image_size = (width, height)
+            first = Detection((0, 0, 30, 30), (300.0, 300.0), 900, 0.0, 240.0, 0.9, image_size)
+            moved = Detection((0, 0, 30, 30), (300.0 + displacement, 300.0), 900, 0.0, 240.0, 0.9, image_size)
+            tracker = BlobTracker()
+            first_row = tracker.update(0, [first])[0]
+            moved_row = tracker.update(1, [moved])[0]
+            self.assertEqual(first_row["raw_track_id"], moved_row["raw_track_id"], (width, height))
 
     def test_detector_area_limits_scale_with_image_resolution(self):
         for width, height in ((640, 360), (1280, 720), (1920, 1080)):
@@ -101,13 +113,26 @@ class PerceptionTests(unittest.TestCase):
             self.assertEqual(diagnostics["budget_rejected_count"], 0)
             self.assertEqual(diagnostics["returned_proposal_count"], 1)
 
+    def test_large_hero_blob_survives_area_filter_and_bounded_budget(self):
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        cv2.rectangle(image, (200, 200), (549, 399), (0, 0, 220), -1)
+        diagnostics = {}
+        detections = detect_product_blobs(image, diagnostics=diagnostics)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].area_px, 350 * 200)
+        self.assertEqual(diagnostics["eligible_proposal_count"], 1)
+        self.assertLessEqual(diagnostics["returned_proposal_count"], diagnostics["budget_limit"])
+
     def test_component_area_and_extent_limits_follow_resolution_scale(self):
         small = _resolution_scaled_component_limits(640, 360)
         reference = _resolution_scaled_component_limits(1280, 720)
         large = _resolution_scaled_component_limits(1920, 1080)
-        self.assertEqual(small, (17.5, 2250.0, 2.5))
-        self.assertEqual(reference, (70.0, 9000.0, 5.0))
-        self.assertEqual(large, (157.5, 20250.0, 7.5))
+        for actual, expected in (
+            (small, (17.5, 32256.0, 2.5)),
+            (reference, (70.0, 129024.0, 5.0)),
+            (large, (157.5, 290304.0, 7.5)),
+        ):
+            np.testing.assert_allclose(actual, expected)
 
     def test_co_visible_neighboring_instances_are_not_consolidated(self):
         annotations = [{"detections": [{"raw_track_id": 4}, {"raw_track_id": 9}]}]
@@ -131,7 +156,10 @@ class PerceptionTests(unittest.TestCase):
         self.assertEqual(detection["track_id"], 3)
         self.assertEqual(detection["id_namespace"], "canonical_localized")
         raw_only = {"track_id": 3, "raw_track_id": 3, "persistent_track_id": None, "canonical_track_id": None, "id_namespace": "raw_rgb"}
+        _set_unassigned_persistent_identity(raw_only, 3)
         self.assertIsNone(raw_only["persistent_track_id"])
+        self.assertIsNone(raw_only["canonical_track_id"])
+        self.assertIsNone(raw_only["track_id"])
         self.assertEqual(raw_only["raw_track_id"], detection["persistent_track_id"])
 
     def test_detection_budget_preserves_spatial_coverage_and_is_deterministic(self):
@@ -188,11 +216,11 @@ class PerceptionTests(unittest.TestCase):
         }
         frames = [{"frame_index": i, "stamp_s": i / 30.0, "width": 100, "height": 100} for i in range(20)]
         annotations = [{"frame_index": i, "detections": [{"track_id": 2, "raw_track_id": 2, "bbox_xyxy": [0, 0, 99, 99]}]} for i in range(20)]
-        points = np.asarray([[0.0, 0.0, 2.0], [0.01, 0.0, 2.0], [-0.01, 0.0, 2.0], [0.0, 0.01, 2.0], [0.0, -0.01, 2.0]])
+        points = np.asarray([[0.0, 0.0, 2.0], [0.01, 0.0, 2.0], [0.02, 0.0, 2.0], [0.03, 0.0, 2.0], [0.50, 0.0, 2.0]])
         with patch("simulator.perception.rgb_tracking._load_slam_poses", return_value=poses), \
              patch("simulator.perception.rgb_tracking._load_sensor_geometry", return_value=geometry), \
              patch("simulator.perception.rgb_tracking._read_lidar_scans", return_value=[(0.01, points), (0.01, points)]):
-            _, _, _, scan_counts = _augment_with_lidar_estimates(
+            start_estimates, map_estimates, _, scan_counts = _augment_with_lidar_estimates(
                 __import__("pathlib").Path("capture"), __import__("pathlib").Path("slam"), frames, annotations
             )
         backfilled = sum(
@@ -204,6 +232,8 @@ class PerceptionTests(unittest.TestCase):
         self.assertEqual(scan_counts[2]["unique_retained_depth_return_count"], 5)
         self.assertEqual(scan_counts[2]["3d_update_event_count"], 1)
         self.assertEqual(scan_counts[2]["observation_duration_s"], 0.0)
+        np.testing.assert_allclose(start_estimates[2], map_estimates[2])
+        np.testing.assert_allclose(start_estimates[2], [0.02, 0.0, 2.0])
         self.assertEqual(annotations[0]["detections"][0]["supporting_lidar_scan_timestamps_s"], [0.01])
         self.assertNotIn("supporting_lidar_scan_timestamps_s", annotations[1]["detections"][0])
         self.assertFalse(annotations[0]["detections"][0]["estimate_is_track_level_backfill"])
