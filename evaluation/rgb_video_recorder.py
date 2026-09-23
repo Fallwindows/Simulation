@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -15,6 +16,36 @@ RGB_TOPIC = "/sim/camera/rgb/image_raw"
 CLOCK_TOPIC = "/clock"
 SIM_CLOCK_START_TOLERANCE_S = 1.0
 POST_TARGET_GRACE_S = 1.0
+WRITER_CLOSE_TIMEOUT_S = 5.0
+
+
+def _bounded_resource_close(resource, method_name: str, timeout_s: float) -> BaseException | None:
+    """Give one daemon worker sole ownership of a possibly stalled native close."""
+
+    finished = threading.Event()
+    errors: list[BaseException] = []
+
+    def close_owned_resource(owned_resource) -> None:
+        try:
+            method = getattr(owned_resource, method_name, None)
+            if callable(method):
+                method()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(
+        target=close_owned_resource,
+        args=(resource,),
+        name=f"rgb-video-{method_name}",
+        daemon=True,
+    )
+    worker.start()
+    worker.join(max(0.0, timeout_s))
+    if worker.is_alive():
+        return TimeoutError(f"VideoWriter.{method_name} exceeded {timeout_s:.3f}s close deadline")
+    return errors[0] if errors else None
 
 
 def _stamp(message) -> float:
@@ -108,6 +139,9 @@ class RgbVideoRecorder:
         self.done_reason = "not_started"
         self.frame_records: list[dict[str, object]] = []
         self.camera_info_record: dict[str, object] | None = None
+        self._closed = False
+        self._close_metadata: dict[str, object] | None = None
+        self.close_timeout_s = WRITER_CLOSE_TIMEOUT_S
         self.node.create_subscription(Image, RGB_TOPIC, self._on_image, 5)
         self.node.create_subscription(CameraInfo, "/sim/camera/rgb/camera_info", self._on_camera_info, 10)
         self.node.create_subscription(Clock, CLOCK_TOPIC, self._on_clock, 20)
@@ -192,8 +226,19 @@ class RgbVideoRecorder:
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def close(self) -> dict[str, object]:
+        if self._closed:
+            if self._close_metadata is None:
+                raise RuntimeError("RGB recorder was closed without metadata")
+            if self._close_metadata["status"] != "complete":
+                raise RuntimeError(f"RGB video recording failed: {self._close_metadata}")
+            return self._close_metadata
+        release_error: BaseException | None = None
         if self.writer is not None:
-            self.writer.release()
+            writer = self.writer
+            release_error = _bounded_resource_close(writer, "release", self.close_timeout_s)
+            self.writer = None
+            if release_error is not None:
+                self.done_reason = "video_writer_release_failed"
         file_size = self.output.stat().st_size if self.output.exists() else 0
         duration_s = None
         actual_fps = None
@@ -201,11 +246,16 @@ class RgbVideoRecorder:
             duration_s = self.last_image_stamp_s - self.first_image_stamp_s
             if duration_s > 0 and self.frames_written > 1:
                 actual_fps = (self.frames_written - 1) / duration_s
-        complete = self.frames_written > 0 and self.done_reason == "simulation_time_reached" and file_size > 0
+        complete = (
+            self.frames_written > 0
+            and self.done_reason == "simulation_time_reached"
+            and file_size > 0
+            and release_error is None
+        )
         metadata = {
             "status": "complete" if complete else "failed",
             "topic": RGB_TOPIC,
-            "codec": self.codec if self.writer is not None else None,
+            "codec": self.codec if self.width is not None else None,
             "width": self.width,
             "height": self.height,
             "nominal_fps": 30.0,
@@ -221,6 +271,8 @@ class RgbVideoRecorder:
             "file_size_bytes": file_size,
             "completion_reason": self.done_reason,
         }
+        if release_error is not None:
+            metadata["writer_error"] = f"{type(release_error).__name__}: {release_error}"
         self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         if self.frames_path is not None:
@@ -231,9 +283,30 @@ class RgbVideoRecorder:
         if self.camera_info_path is not None and self.camera_info_record is not None:
             self.camera_info_path.parent.mkdir(parents=True, exist_ok=True)
             self.camera_info_path.write_text(json.dumps(self.camera_info_record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self._close_metadata = metadata
+        self._closed = True
         if not complete:
             raise RuntimeError(f"RGB video recording failed: {metadata}")
         return metadata
+
+
+def _cleanup_recorder(recorder: RgbVideoRecorder, rclpy) -> BaseException | None:
+    """Always release a failed or successful recording after callbacks stop."""
+
+    error: BaseException | None = None
+    try:
+        recorder.node.destroy_node()
+    except BaseException as exc:
+        error = exc
+    try:
+        recorder.close()
+    except BaseException as exc:
+        if error is None:
+            error = exc
+    finally:
+        if rclpy.ok():
+            rclpy.shutdown()
+    return error
 
 
 def main() -> None:
@@ -256,13 +329,18 @@ def main() -> None:
         Path(args.frames_jsonl) if args.frames_jsonl else None,
         Path(args.camera_info_json) if args.camera_info_json else None,
     )
+    error: BaseException | None = None
     try:
         recorder.spin_until_done()
-        recorder.close()
-    finally:
-        recorder.node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    except BaseException as exc:
+        error = exc
+    cleanup_error = _cleanup_recorder(recorder, rclpy)
+    if error is not None:
+        if cleanup_error is not None and hasattr(error, "add_note"):
+            error.add_note(f"Recorder cleanup also failed: {cleanup_error}")
+        raise error
+    if cleanup_error is not None:
+        raise cleanup_error
 
 
 if __name__ == "__main__":

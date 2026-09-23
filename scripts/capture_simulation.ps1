@@ -137,6 +137,8 @@ try {
   $canonical = $manifest | ConvertTo-Json -Depth 20 -Compress
   $manifest.capture_sha256 = ([System.BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace("-","")).ToLowerInvariant()
   $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $captureDir "capture_manifest.json") -Encoding UTF8
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.manifest --validate-archive $captureDir | Set-Content -LiteralPath (Join-Path $logsDir "capture_archive_validation.json") -Encoding UTF8
+  if ($LASTEXITCODE -ne 0) { throw "Full capture archive validation failed." }
   New-Item -ItemType File -Force -Path (Join-Path $captureDir "CAPTURE_COMPLETE") | Out-Null
   Write-Host "Capture complete: $captureDir"
 } finally {
@@ -144,5 +146,8 @@ try {
     if ($process -and -not $process.HasExited) { Stop-ProcessTree -RootPid $process.Id }
   }
   if ($router -and -not $router.HasExited) { Stop-ProcessTree -RootPid $router.Id }
+  if (-not (Test-Path -LiteralPath (Join-Path $captureDir "CAPTURE_COMPLETE"))) {
+    Remove-Item -LiteralPath (Join-Path $captureDir "capture_manifest.json") -Force -ErrorAction SilentlyContinue
+  }
   Pop-Location
 }

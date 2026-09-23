@@ -3,7 +3,8 @@ param(
   [string]$RunDir = "",
   [string]$CaptureDir = "",
   [string]$PixiPath = "",
-  [string]$RosWorkspace = ""
+  [string]$RosWorkspace = "",
+  [switch]$PerceptionOnly
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")
@@ -17,6 +18,13 @@ if (-not $RunDir) { $RunDir = Split-Path -Parent $capture }
 $run = (Resolve-Path -LiteralPath $RunDir).Path
 $manifest = Get-Content -LiteralPath (Join-Path $capture "capture_manifest.json") -Raw | ConvertFrom-Json
 if ($manifest.status -ne "complete") { throw "Capture is not complete." }
+if ($PerceptionOnly) {
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.manifest --validate-for-slam $capture
+  if ($LASTEXITCODE -ne 0) { throw "Sensor-only capture validation failed." }
+} else {
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.manifest --validate-archive $capture
+  if ($LASTEXITCODE -ne 0) { throw "Full evaluation archive validation failed." }
+}
 $slam = Join-Path $run "slam"
 $slamManifestPath = Join-Path $slam "slam_manifest.json"
 if (-not (Test-Path -LiteralPath $slamManifestPath)) { throw "Offline SLAM manifest is missing: $slamManifestPath" }
@@ -32,6 +40,10 @@ try {
 } finally { Pop-Location }
 $result = Get-Content -LiteralPath (Join-Path $perception "perception_manifest.json") -Raw | ConvertFrom-Json
 if ($result.status -ne "complete" -or -not (Test-Path -LiteralPath (Join-Path $perception "estimated_inventory.csv"))) { throw "Offline RGB perception did not produce a complete estimate." }
+if ($PerceptionOnly) {
+  Write-Host "Offline RGB perception complete without evaluation ground truth: $perception"
+  return
+}
 $evaluationArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.perception.inventory_evaluation","--capture-dir",$capture,"--slam-dir",$slam,"--perception-dir",$perception,"--repo-root",$repo)
 Push-Location $repo
 try {

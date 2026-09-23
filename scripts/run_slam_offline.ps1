@@ -25,12 +25,16 @@ New-Item -ItemType Directory -Force -Path $slamDir,$logsDir | Out-Null
 $manifestPath = Join-Path $captureDir "capture_manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Capture manifest not found: $manifestPath" }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-if ($manifest.status -ne "complete") { throw "Capture is not complete." }
-$required = @("/clock","/sim/camera/rgb/image_raw","/sim/camera/rgb/camera_info","/sim/lidar/points","/tf","/tf_static")
-foreach ($topic in $required) { if (@($manifest.bag.topics) -notcontains $topic) { throw "Capture bag is missing required topic $topic." } }
+& $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.manifest --validate-for-slam $captureDir | Set-Content -LiteralPath (Join-Path $logsDir "sensor_capture_validation.json") -Encoding UTF8
+if ($LASTEXITCODE -ne 0) { throw "Sensor-only capture validation failed." }
 $bagUri = Join-Path $captureDir ([string]$manifest.bag.uri)
-if (-not (Test-Path -LiteralPath $bagUri -PathType Container)) { throw "Capture bag not found: $bagUri" }
 $duration = [double]$manifest.duration_s
+$bagMetadata = Get-Content -LiteralPath (Join-Path $captureDir "bag_metadata.json") -Raw | ConvertFrom-Json
+$lastLidarProperty = $bagMetadata.last_stamp_s.PSObject.Properties["/sim/lidar/points"]
+if (-not $lastLidarProperty -or $null -eq $lastLidarProperty.Value) { throw "Capture bag metadata has no final LiDAR timestamp." }
+$lastLidarStamp = [double]$lastLidarProperty.Value
+$effectiveConfig = Get-Content -LiteralPath (Join-Path $captureDir "effective_config.json") -Raw | ConvertFrom-Json
+$scanPeriod = 1.0 / [double]$effectiveConfig.lidar.hz
 $database = Join-Path $slamDir "rtabmap.db"
 $mappingPath = (Join-Path $repo "config/mapping/rtabmap/params.yaml").Replace([char]92, "/")
 $databaseArg = $database.Replace([char]92, "/")
@@ -49,6 +53,7 @@ function Wait-ProcessWithTimeout($Process, [int]$TimeoutSeconds, [string]$Name) 
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while (-not $Process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
   if (-not $Process.HasExited) { throw "$Name did not finish within $TimeoutSeconds seconds." }
+  if ($Process.ExitCode -ne 0) { throw "$Name exited with code $($Process.ExitCode)." }
   return $Process.ExitCode
 }
 
@@ -60,33 +65,63 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($prefix -join ""))) { throw "Required ROS package '$packageName' is unavailable." }
   }
   $router = Start-Process -FilePath $pixi -ArgumentList @($baseArgs + @("run","rmw_zenoh_cpp","rmw_zenohd")) -WorkingDirectory $workspace -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_zenoh.out.log") -RedirectStandardError (Join-Path $logsDir "offline_zenoh.err.log")
-  Start-Sleep -Seconds 6
+  # Start mapping immediately; the bounded ROS graph probe below, not a delay,
+  # gates bag playback on both estimator nodes being visible.
   $mapping = Start-Process -FilePath $pixi -ArgumentList $mappingArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_mapping.out.log") -RedirectStandardError (Join-Path $logsDir "offline_mapping.err.log")
   $nodeDeadline = (Get-Date).AddSeconds(90)
   do {
-    Start-Sleep -Seconds 2
+    Start-Sleep -Milliseconds 250
     $nodes = (& $pixi @baseArgs node list 2>$null) -join "`n"
   } while ((($nodes -notmatch "icp_odometry") -or ($nodes -notmatch "rtabmap")) -and (Get-Date) -lt $nodeDeadline)
   if (($nodes -notmatch "icp_odometry") -or ($nodes -notmatch "rtabmap")) { throw "RTAB-Map nodes did not become ready. Nodes: $nodes" }
 
-  $observerArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.slam_observer","--output-dir",$slamDir,"--duration-seconds",([string]$duration),"--startup-timeout-seconds","180")
+  $observerArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.slam_observer","--output-dir",$slamDir,"--duration-seconds",([string]$duration),"--startup-timeout-seconds","180","--expected-sensor-last-stamp-seconds",([string]$lastLidarStamp),"--sensor-scan-period-seconds",([string]$scanPeriod),"--database-path",$database)
+  $replaySignal = Join-Path $slamDir "bag_replay.complete"
+  Remove-Item -LiteralPath $replaySignal -Force -ErrorAction SilentlyContinue
+  $observerArgs += @("--replay-complete-signal",$replaySignal)
   $observer = Start-Process -FilePath $pixi -ArgumentList $observerArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_observer.out.log") -RedirectStandardError (Join-Path $logsDir "offline_observer.err.log")
-  Start-Sleep -Seconds 1
-  $player = Start-Process -FilePath $pixi -ArgumentList @($baseArgs + @("bag","play",$bagUri.Replace([char]92, "/"),"--clock")) -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_bag_play.out.log") -RedirectStandardError (Join-Path $logsDir "offline_bag_play.err.log")
+  $observerReadyDeadline = (Get-Date).AddSeconds(45)
+  do {
+    Start-Sleep -Milliseconds 250
+    $observerNodes = (& $pixi @baseArgs node list 2>$null) -join "`n"
+  } while (($observerNodes -notmatch "grocery_sim_offline_slam_observer") -and (Get-Date) -lt $observerReadyDeadline -and -not $observer.HasExited)
+  if ($observer.HasExited -or $observerNodes -notmatch "grocery_sim_offline_slam_observer") { throw "Offline SLAM observer did not become ready before replay." }
+  # /clock has exactly one source: rosbag2's playback clock. Keep the recorded
+  # /clock topic out of the bag topic selection to prevent a second publisher.
+  $replayTopics = @("--topics","/sim/camera/rgb/image_raw","/sim/camera/rgb/camera_info","/sim/lidar/points","/tf","/tf_static")
+  $player = Start-Process -FilePath $pixi -ArgumentList @($baseArgs + @("bag","play",$bagUri.Replace([char]92, "/"),"--clock") + $replayTopics) -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_bag_play.out.log") -RedirectStandardError (Join-Path $logsDir "offline_bag_play.err.log")
   $waitSeconds = [Math]::Max(240, [int]($duration * 20) + 120)
   Wait-ProcessWithTimeout $player $waitSeconds "bag replay" | Out-Null
+  New-Item -ItemType File -Force -Path $replaySignal | Out-Null
   Wait-ProcessWithTimeout $observer $waitSeconds "offline SLAM observer" | Out-Null
 
-  $publishRequest = "{global_map: true, optimized: true, graph_only: false}"
-  & $pixi @baseArgs service call /rtabmap/publish_map rtabmap_msgs/srv/PublishMap $publishRequest | Set-Content -LiteralPath (Join-Path $slamDir "publish_map_response.txt") -Encoding UTF8
-  $publishExit = $LASTEXITCODE
-  Start-Sleep -Seconds 2
   if (Test-Path -LiteralPath (Join-Path $slamDir "slam_observer.json")) {
     $observerMeta = Get-Content -LiteralPath (Join-Path $slamDir "slam_observer.json") -Raw | ConvertFrom-Json
   } else { throw "SLAM observer metadata is missing." }
   if (-not $observerMeta.fresh_odom -or -not $observerMeta.fresh_map) { throw "Offline SLAM did not produce fresh odom and map data." }
+  if (-not $observerMeta.replay_complete_signal_observed -or -not $observerMeta.clock_target_reached -or -not $observerMeta.replay_drained -or -not $observerMeta.processed_sensor_span) { throw "Offline SLAM did not confirm replay completion, target clock coverage, ROS drain, and mapper input processing." }
+  if (-not $observerMeta.publish_map_acknowledged -or -not $observerMeta.final_map_span -or -not $observerMeta.mapper_database_span) { throw "RTAB-Map did not acknowledge and commit the final optimized map across the captured sensor span." }
+  if (-not $observerMeta.map_pose_correction_complete -or [int]$observerMeta.map_pose_sample_count -le 0 -or [int]$observerMeta.uncorrected_odom_sample_count -ne 0 -or $observerMeta.map_pose_frame_id -ne "map") { throw "RTAB-Map map-to-odom correction did not cover every captured odometry pose." }
+  foreach ($poseArtifact in @("slam_map_poses.csv","slam_odom_poses.csv","map_to_odom.csv","slam_poses.csv")) {
+    $artifactPath = Join-Path $slamDir $poseArtifact
+    $artifactRecord = @($observerMeta.files | Where-Object { $_.path -eq $poseArtifact }) | Select-Object -First 1
+    if (-not (Test-Path -LiteralPath $artifactPath) -or -not $artifactRecord) { throw "SLAM pose artifact is missing from observer manifest: $poseArtifact" }
+    $artifactInfo = Get-Item -LiteralPath $artifactPath
+    $artifactHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ([long]$artifactInfo.Length -ne [long]$artifactRecord.size_bytes -or $artifactHash -ne [string]$artifactRecord.sha256) { throw "SLAM pose artifact failed observer manifest verification: $poseArtifact" }
+  }
+  $mapPoseRows = @(Import-Csv -LiteralPath (Join-Path $slamDir "slam_map_poses.csv"))
+  if ($mapPoseRows.Count -ne [int]$observerMeta.odom_sample_count -or @($mapPoseRows | Where-Object { $_.frame_id -ne "map" }).Count -ne 0) { throw "Corrected map pose artifact does not cover odometry in the map frame." }
+  $rawOdomRows = @(Import-Csv -LiteralPath (Join-Path $slamDir "slam_odom_poses.csv"))
+  if ($rawOdomRows.Count -ne [int]$observerMeta.odom_sample_count -or @($rawOdomRows | Where-Object { $_.frame_id -ne "odom" }).Count -ne 0) { throw "Raw odometry diagnostic artifact is incomplete or mislabeled." }
+  if ([int]$observerMeta.clock_regressions -ne 0) { throw "Offline replay clock regressed $($observerMeta.clock_regressions) time(s)." }
+  if ([double]$observerMeta.last_clock_s -lt [double]$observerMeta.target_clock_s - 0.001) { throw "Offline replay ended before the target simulation time." }
+  if ([double]$observerMeta.last_odom_stamp_s -lt [double]$observerMeta.expected_sensor_last_stamp_s - [double]$observerMeta.sensor_scan_period_s - 0.001) { throw "SLAM odometry did not process the final captured LiDAR scan span." }
   if (-not (Test-Path -LiteralPath $database)) { throw "RTAB-Map database was not created." }
-  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python (Join-Path $repo "scripts/validate_rtabmap_db.py") $database | Set-Content -LiteralPath (Join-Path $slamDir "database_validation.txt") -Encoding UTF8
+  # Reopen the DB after stopping the mapper to verify persisted input-span rows.
+  Stop-ProcessTree -RootPid $mapping.Id
+  $mapping = $null
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python (Join-Path $repo "scripts/validate_rtabmap_db.py") $database --minimum-node-stamp $lastLidarStamp --scan-period-seconds $scanPeriod | Set-Content -LiteralPath (Join-Path $slamDir "database_validation.txt") -Encoding UTF8
   if ($LASTEXITCODE -ne 0) { throw "RTAB-Map database validation failed." }
   [ordered]@{
     ros_distro="jazzy"; rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID
@@ -97,7 +132,7 @@ try {
   [ordered]@{
     status="complete"; experiment=$ExperimentName; capture_id=$manifest.capture_id; capture_sha256=$manifest.capture_sha256
     git_sha=(& git -C $repo rev-parse HEAD).Trim(); rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID
-    bag_replayed=$bagUri; ground_truth_subscribed=$false; publish_map_service_exit=$publishExit; database_path=$database
+    bag_replayed=$bagUri; ground_truth_subscribed=$false; publish_map_service_acknowledged=$observerMeta.publish_map_acknowledged; database_path=$database
     observer=(Get-Content -LiteralPath (Join-Path $slamDir "slam_observer.json") -Raw | ConvertFrom-Json)
   } | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $slamDir "slam_manifest.json") -Encoding UTF8
   Write-Host "Offline SLAM complete: $slamDir"
