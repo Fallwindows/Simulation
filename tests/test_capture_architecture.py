@@ -3,6 +3,7 @@ import shutil
 import csv
 import importlib.util
 import math
+import re
 import sqlite3
 import subprocess
 import sys
@@ -191,9 +192,14 @@ class CaptureArchitectureTests(unittest.TestCase):
             usd.write_bytes(authored_geometry)
 
             interpolation_before = build_experiment_hashes(scenario, root)
-            interpolation = b'uniform token[] normals:interpolation = ["uniform"]'
-            self.assertIn(interpolation, authored_geometry)
-            usd.write_bytes(authored_geometry.replace(interpolation, b'uniform token[] normals:interpolation = ["vertex"]', 1))
+            normal_interpolation = re.compile(
+                rb'(normal3f\[\]\s+normals\s*=\s*\[[^\]]*\]\s*\(\s*interpolation\s*=\s*")uniform("\s*\))'
+            )
+            vertex_interpolation_geometry, replacement_count = normal_interpolation.subn(
+                rb'\1vertex\2', authored_geometry, count=1
+            )
+            self.assertEqual(replacement_count, 1, "expected an authored normals property with uniform interpolation")
+            usd.write_bytes(vertex_interpolation_geometry)
             interpolation_after = build_experiment_hashes(scenario, root)
             self.assertEqual(interpolation_before["geometry_sha256"], interpolation_after["geometry_sha256"])
             self.assertNotEqual(interpolation_before["appearance_sha256"], interpolation_after["appearance_sha256"])
