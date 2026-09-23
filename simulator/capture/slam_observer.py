@@ -539,10 +539,11 @@ class SlamObserver:
         if len({float(row["timestamp_s"]) for row in optimized_rows}) != len(optimized_rows):
             raise RuntimeError("RTAB-Map optimized graph has duplicate node timestamps")
         dense_map_rows: list[dict[str, object]] = []
-        odom_stamps = [float(row["timestamp_s"]) for row in self.odom_rows]
+        ordered_odom_rows = sorted(self.odom_rows, key=lambda row: float(row["timestamp_s"]))
+        odom_stamps = [float(row["timestamp_s"]) for row in ordered_odom_rows]
         if len(odom_stamps) != len(set(odom_stamps)):
             raise RuntimeError("raw odometry contains duplicate timestamps")
-        for odom in self.odom_rows:
+        for odom in ordered_odom_rows:
             correction = _interpolate_map_to_odom(correction_rows, float(odom["timestamp_s"]))
             if correction is None:
                 raise RuntimeError("final optimized graph does not bracket every raw odometry timestamp")
@@ -556,7 +557,7 @@ class SlamObserver:
         from simulator.capture.manifest import sha256_json
         self.dense_pose_version = sha256_json({
             "graph_pose_version": self.graph_pose_version,
-            "raw_odom_poses": self.odom_rows,
+            "raw_odom_poses": [{**row, "frame_id": "odom"} for row in ordered_odom_rows],
             "dense_map_poses": dense_map_rows,
             "correction_policy": "derive optimized_node_pose * inverse(raw_node_odom_pose); linear translation + quaternion slerp between node timestamps; no extrapolation",
         })
@@ -618,7 +619,7 @@ class SlamObserver:
 
     def close(self) -> dict[str, object]:
         odom_fields = ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "quaternion_valid", "frame_id"]
-        raw_rows = [{**row, "frame_id": "odom"} for row in self.odom_rows]
+        raw_rows = [{**row, "frame_id": "odom"} for row in sorted(self.odom_rows, key=lambda row: float(row["timestamp_s"]))]
         with (self.output_dir / "slam_odom_poses.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=odom_fields)
             writer.writeheader()
@@ -635,7 +636,7 @@ class SlamObserver:
             with (self.output_dir / filename).open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=map_fields)
                 writer.writeheader()
-                writer.writerows(self.map_pose_rows)
+                writer.writerows(sorted(self.map_pose_rows, key=lambda row: float(row["timestamp_s"])))
 
         keyframe_fields = [
             "node_id", "timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "frame_id",

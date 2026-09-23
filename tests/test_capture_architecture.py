@@ -714,7 +714,12 @@ $global:LASTEXITCODE = 0
             observer.database_path = database; observer.database_node_count = 0; observer.database_last_stamp_s = None
             observer.expected_sensor_last_stamp_s = 12.0; observer.sensor_scan_period_s = 0.1
             observer.last_odom_stamp_s = 11.95
-            observer.odom_rows = [{"timestamp_s": 11.95, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0, "quaternion_valid": 1.0}]
+            # Deliberately append unique samples out of timestamp order, as can
+            # happen when callbacks are delivered late during replay.
+            observer.odom_rows = [
+                {"timestamp_s": 11.95, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0, "quaternion_valid": 1.0},
+                {"timestamp_s": 11.8, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0, "quaternion_valid": 1.0},
+            ]
             observer.map_to_odom_rows = []
             def transform_message(seconds, x):
                 stamp = type("Stamp", (), {"sec": int(seconds), "nanosec": int((seconds % 1) * 1_000_000_000)})()
@@ -764,6 +769,11 @@ $global:LASTEXITCODE = 0
             self.assertFalse(observer.publish_map_client.request.graph_only)
             self.assertTrue(observer.map_graph_matches_final_cloud)
             self.assertTrue(observer.optimized_pose_graph_complete)
+            dense_version_before_repeat = observer.dense_pose_version
+            map_version_before_repeat = observer.map_version
+            observer._capture_final_optimized_graph()
+            self.assertEqual(observer.dense_pose_version, dense_version_before_repeat)
+            self.assertEqual(observer.map_version, map_version_before_repeat)
             observer.output_dir = Path(directory) / "observer_output"
             observer.output_dir.mkdir()
             result = observer.close()
@@ -782,11 +792,22 @@ $global:LASTEXITCODE = 0
                 corrected = list(csv.DictReader(handle))
             with (observer.output_dir / "slam_odom_poses.csv").open(encoding="utf-8") as handle:
                 raw = list(csv.DictReader(handle))
+            with (observer.output_dir / "slam_poses.csv").open(encoding="utf-8") as handle:
+                legacy_map = list(csv.DictReader(handle))
             self.assertEqual(corrected[0]["frame_id"], "map")
             self.assertAlmostEqual(float(corrected[0]["x_m"]), 4.0, places=6)
             self.assertAlmostEqual(float(corrected[0]["x_m"]), observer.latest_map[0][0], places=6)
             self.assertNotAlmostEqual(float(corrected[0]["x_m"]), 2.0, places=6, msg="final optimized graph pose must supersede historical incremental TF correction")
             self.assertEqual(raw[0]["frame_id"], "odom")
+            expected_timestamps = [11.8, 11.95]
+            raw_timestamps = [float(row["timestamp_s"]) for row in raw]
+            corrected_timestamps = [float(row["timestamp_s"]) for row in corrected]
+            legacy_map_timestamps = [float(row["timestamp_s"]) for row in legacy_map]
+            self.assertEqual(raw_timestamps, expected_timestamps)
+            self.assertEqual(corrected_timestamps, expected_timestamps)
+            self.assertEqual(legacy_map_timestamps, expected_timestamps)
+            self.assertEqual([float(row["x_m"]) for row in raw], [0.0, 0.0])
+            self.assertEqual(len(raw), len(observer.odom_rows))
             artifact_record = next(item for item in result["files"] if item["path"] == "slam_map_poses.csv")
             self.assertEqual(artifact_record["sha256"], sha256_file(observer.output_dir / "slam_map_poses.csv"))
             self.assertEqual(artifact_record["map_version"], result["map_version"])
@@ -805,6 +826,11 @@ $global:LASTEXITCODE = 0
             self.assertEqual(result["graph_pose_version"], result["pre_publish_graph_version"])
             self.assertTrue(result["dense_pose_version"])
             self.assertTrue(result["map_version"])
+            for filename in ("slam_odom_poses.csv", "slam_map_poses.csv", "slam_poses.csv"):
+                record = next(item for item in result["files"] if item["path"] == filename)
+                output_path = observer.output_dir / filename
+                self.assertEqual(record["size_bytes"], output_path.stat().st_size)
+                self.assertEqual(record["sha256"], sha256_file(output_path))
 
             # A later loop closure changes node 1's optimized pose while raw
             # odometry stays fixed; the production exporter follows the final graph.
@@ -812,7 +838,8 @@ $global:LASTEXITCODE = 0
             observer.map_data_message = loop_closed_data
             observer.map_graph_message = loop_closed_graph
             observer._capture_final_optimized_graph()
-            self.assertAlmostEqual(float(observer.map_pose_rows[0]["x_m"]), 4.2, places=6)
+            loop_closed_latest_sample = next(row for row in observer.map_pose_rows if float(row["timestamp_s"]) == 11.95)
+            self.assertAlmostEqual(float(loop_closed_latest_sample["x_m"]), 4.2, places=6)
             self.assertNotEqual(observer.graph_pose_version, result["pre_publish_graph_version"])
 
             data, graph_message = optimized_graph_response(4.0)
