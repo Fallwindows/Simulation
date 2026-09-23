@@ -217,7 +217,7 @@ def _material(name: str, color: tuple[float, float, float], texture_path: str | 
             '                uniform token info:id = "UsdUVTexture"',
             f'                asset inputs:file = @{texture_path}@',
             '                float2 inputs:st.connect = </Asset/Looks/' + safe + '/StReader.outputs:result>',
-            '                token outputs:rgb',
+            '                float3 outputs:rgb',
             '            }',
         ]
     lines += [
@@ -242,9 +242,12 @@ def _front_panel(width: float, depth: float, height: float) -> str:
         ) {{
             point3f[] points = [(-{w:.5f}, {y:.5f}, -{h:.5f}), ({w:.5f}, {y:.5f}, -{h:.5f}), ({w:.5f}, {y:.5f}, {h:.5f}), (-{w:.5f}, {y:.5f}, {h:.5f})]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
-            normal3f[] normals = [(0, 1, 0)]
-            uniform token[] normals:interpolation = ["uniform"]
+            # Winding and the authored +Y normal must agree; viewed from the
+            # local front (+Y), this order faces outward and preserves upright UVs.
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(0, 1, 0)] (
+                interpolation = "uniform"
+            )
             texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
                 interpolation = "vertex"
             )
@@ -311,6 +314,39 @@ def _cylinder(name: str, radius: float, height: float, material: str, translate_
         }}'''
 
 
+def _frustum(name: str, radius_bottom: float, radius_top: float, height: float, material: str, translate_z: float, vertices: int = 40) -> str:
+    """Author a closed, tapered shoulder mesh without invalid cone fields."""
+    bottom = [
+        (radius_bottom * math.cos(2.0 * math.pi * index / vertices),
+         radius_bottom * math.sin(2.0 * math.pi * index / vertices),
+         translate_z - height / 2.0)
+        for index in range(vertices)
+    ]
+    top = [
+        (radius_top * math.cos(2.0 * math.pi * index / vertices),
+         radius_top * math.sin(2.0 * math.pi * index / vertices),
+         translate_z + height / 2.0)
+        for index in range(vertices)
+    ]
+    points = bottom + top
+    faces = [list(reversed(range(vertices))), list(range(vertices, 2 * vertices))]
+    faces.extend(
+        [index, (index + 1) % vertices, (index + 1) % vertices + vertices, index + vertices]
+        for index in range(vertices)
+    )
+    counts = ", ".join(str(len(face)) for face in faces)
+    indices = ", ".join(str(vertex) for face in faces for vertex in face)
+    point_text = ", ".join(f"({x:.6f}, {y:.6f}, {z:.6f})" for x, y, z in points)
+    return f'''        def Mesh "{name}" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {{
+            point3f[] points = [{point_text}]
+            int[] faceVertexCounts = [{counts}]
+            int[] faceVertexIndices = [{indices}]
+            rel material:binding = </Asset/Looks/{material}>
+        }}'''
+
+
 def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
     width, depth, height = spec.dimensions_m
     body_material = "Body"
@@ -324,35 +360,28 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
         geometry.append(_cube("BottomTrim", (width * 0.82, 0.010, height * 0.025), (0.0, depth / 2.0 + 0.009, -height * 0.40), "Metal"))
         if spec.model_type == "carton":
             geometry.append(_beveled_box("CartonTop", (width * 0.84, depth * 0.88, height * 0.075), min(width, depth) * 0.05, front_material))
-            geometry.append(_cylinder("PourCap", width * 0.15, height * 0.055, "Metal", height * 0.505, vertices=24))
+            geometry.append(_cylinder("PourCap", width * 0.15, height * 0.055, "Metal", height * 0.4725, vertices=24))
     elif spec.model_type in {"can", "jar"}:
         radius = min(width, depth) / 2.0
         geometry.append(_cylinder("Body", radius, height, body_material, vertices=40))
         if spec.model_type == "jar":
             geometry.append(_cylinder("Shoulder", radius * 0.92, height * 0.08, body_material, height * 0.39, vertices=40))
-            geometry.append(_cylinder("Lid", radius * 0.90, height * 0.07, "Metal", height * 0.51, vertices=40))
+            geometry.append(_cylinder("Lid", radius * 0.90, height * 0.07, "Metal", height * 0.465, vertices=40))
             geometry.append(_cylinder("LidBand", radius * 0.94, height * 0.025, front_material, height * 0.475, vertices=40))
         else:
-            geometry.append(_cylinder("TopRim", radius * 0.97, height * 0.035, "Metal", height * 0.515, vertices=40))
-            geometry.append(_cylinder("BottomRim", radius * 0.97, height * 0.025, "Metal", -height * 0.515, vertices=40))
+            geometry.append(_cylinder("TopRim", radius * 0.97, height * 0.035, "Metal", height * 0.4825, vertices=40))
+            geometry.append(_cylinder("BottomRim", radius * 0.97, height * 0.025, "Metal", -height * 0.4875, vertices=40))
         geometry.append(_front_panel(width, depth, height * 0.65))
     elif spec.model_type == "bottle":
         radius = min(width, depth) / 2.0
-        geometry.append(_cylinder("Body", radius * 0.91, height * 0.64, body_material, -height * 0.12, vertices=40))
-        geometry.append(f'''        def Cone "Shoulder" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {{
-            int vertices = 40
-            double radius = {radius * 0.91:.5f}
-            double radius2 = {radius * 0.57:.5f}
-            double height = {height * 0.095:.5f}
-            double3 xformOp:translate = (0, 0, {height * 0.245:.5f})
-            uniform token[] xformOpOrder = ["xformOp:translate"]
-            rel material:binding = </Asset/Looks/{body_material}>
-        }}''')
+        geometry.append(_cylinder("Body", radius * 0.91, height * 0.70, body_material, -height * 0.15, vertices=40))
+        geometry.append(_frustum(
+            "Shoulder", radius * 0.91, radius * 0.57,
+            height * 0.095, body_material, height * 0.245,
+        ))
         geometry.append(_cylinder("Neck", radius * 0.57, height * 0.17, body_material, height * 0.36, vertices=32))
         geometry.append(_front_panel(width, depth, height * 0.42))
-        geometry.append(_cylinder("Cap", radius * 0.60, height * 0.055, "Metal", height * 0.49, vertices=32))
+        geometry.append(_cylinder("Cap", radius * 0.60, height * 0.05, "Metal", height * 0.475, vertices=32))
         geometry.append(_cylinder("CapRidge", radius * 0.63, height * 0.014, "Metal", height * 0.46, vertices=32))
     elif spec.model_type == "fruit":
         geometry.append(f'''        def Xform "Fruit" {{
@@ -365,24 +394,28 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
                 rel material:binding = </Asset/Looks/{body_material}>
             }}
         }}''')
-        geometry.append(_cylinder("Stem", width * 0.055, height * 0.20, "Stem", height * 0.56, vertices=12))
+        # Keep the small stalk inside the declared fruit bounds so shelf and
+        # crate contact calculations include the entire authored mesh.
+        geometry.append(_cylinder("Stem", width * 0.055, height * 0.10, "Stem", height * 0.45, vertices=12))
     elif spec.model_type == "crate":
-        geometry.append(_cube("Base", spec.dimensions_m, (0.0, 0.0, 0.0), body_material))
-        for index, x in enumerate((-width * 0.38, width * 0.38)):
-            geometry.append(_cube(f"SlatX{index}", (width * 0.08, depth * 1.03, height * 1.25), (x, 0.0, 0.0), front_material))
-        for index, z in enumerate((-height * 0.28, height * 0.28)):
-            geometry.append(_cube(f"SlatZ{index}", (width * 1.03, depth * 0.08, height * 0.10), (0.0, 0.0, z), front_material))
-        geometry.append(f'''        def Xform "Fruit" {{
-            double3 xformOp:translate = (0, 0, {height * 0.66:.5f})
-            double3 xformOp:scale = ({width * 0.23:.5f}, {depth * 0.23:.5f}, {height * 0.45:.5f})
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Sphere "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {{
-                double radius = 0.5
-                rel material:binding = </Asset/Looks/Front>
-            }}
-        }}''')
+        post = min(width, depth) * 0.05
+        rail = min(width, depth) * 0.075
+        geometry.append(_cube("Base", (width, depth, 0.025), (0.0, 0.0, -height / 2.0 + 0.0125), body_material))
+        # Four corner posts and two open rows of rails make an actual bin
+        # rather than a solid box with a fruit-colored sphere embedded in it.
+        for ix, x in enumerate((-width / 2.0 + post / 2.0, width / 2.0 - post / 2.0)):
+            for iy, y in enumerate((-depth / 2.0 + post / 2.0, depth / 2.0 - post / 2.0)):
+                geometry.append(_cube(f"CornerPost{ix}{iy}", (post, post, height), (x, y, 0.0), body_material))
+        # The lower rail row sits on the crate base perimeter, below the
+        # bottom layer of fruit. Thin upper rails end flush with the posts;
+        # their lower edge clears the packed upper fruit layer.
+        for level, z in enumerate((-height / 2.0 + rail / 2.0, height / 2.0 - 0.008 / 2.0)):
+            for side, y in enumerate((-depth / 2.0 + rail / 2.0, depth / 2.0 - rail / 2.0)):
+                rail_height = rail if level == 0 else 0.008
+                geometry.append(_cube(f"LongRail{level}{side}", (width - 2.0 * post, rail, rail_height), (0.0, y, z), front_material))
+            for side, x in enumerate((-width / 2.0 + rail / 2.0, width / 2.0 - rail / 2.0)):
+                rail_height = rail if level == 0 else 0.008
+                geometry.append(_cube(f"EndRail{level}{side}", (rail, depth - 2.0 * post, rail_height), (x, 0.0, z), front_material))
     else:
         raise ValueError(spec.model_type)
     return f'''#usda 1.0

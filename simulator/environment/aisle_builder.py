@@ -140,6 +140,8 @@ def _make_asset(
     position: tuple[float, float, float],
     identity_parts: tuple[object, ...],
     name: str,
+    scale_xyz: tuple[float, float, float] | None = None,
+    semantic_id_asset_key: str | None = None,
 ) -> AssetInstance:
     pose_rng = _stable_rng(config.seed, "pose", *identity_parts)
     yaw = 0.0 if row_y < 0.0 else 180.0
@@ -147,11 +149,12 @@ def _make_asset(
     # Small per-object offsets make a row read as hand-stocked while remaining
     # safely inside the shelf footprint.  The RNG key is the semantic identity,
     # so inserting a facing cannot shift every later object's pose.
-    x_offset = 0.0 if record.model_type == "crate" else pose_rng.uniform(-0.011, 0.011)
-    depth_offset = 0.0 if record.model_type == "crate" else pose_rng.uniform(-0.014, 0.014)
+    exact_support_placement = record.model_type == "crate" or (record.model_type == "fruit" and scale_xyz is not None)
+    x_offset = 0.0 if exact_support_placement else pose_rng.uniform(-0.011, 0.011)
+    depth_offset = 0.0 if exact_support_placement else pose_rng.uniform(-0.014, 0.014)
     px, py, pz = position
-    scale = (1.0, 1.0, 1.0)
-    if record.model_type == "fruit":
+    scale = scale_xyz or (1.0, 1.0, 1.0)
+    if record.model_type == "fruit" and scale_xyz is None:
         # Fruit is intentionally less uniform than packaged goods.  Keep the
         # center fixed so the sampled shelf support remains valid.
         sx = pose_rng.uniform(0.93, 1.07)
@@ -166,7 +169,7 @@ def _make_asset(
         position_m=(px + x_offset, py + depth_offset, pz),
         rotation_rpy_deg=(0.0, 0.0, yaw),
         scale_xyz=scale,
-        semantic_id=f"retail/{record.asset_key}/{suffix}",
+        semantic_id=f"retail/{semantic_id_asset_key or record.asset_key}/{suffix}",
     )
 
 
@@ -212,13 +215,22 @@ def _populate_shelf_products(
     # shelf section and still gives every physical facing its own identity.
     start = _stable_rng(config.seed, "asset_start", row_index, bay, level).randrange(len(candidates))
     selected = [candidates[(start + facing) % len(candidates)] for facing in range(facing_count)]
-    total_width = sum(asset.dimensions_m[0] for asset in selected) + config.facing_gap_m * (facing_count - 1)
+    # Reserve one existing non-box package family in the first near-row bay.
+    # Keep its original box slot width and semantic ID
+    # so this bounded family change does not move neighboring slots or
+    # reidentify physical instances. The actual asset_key/category still name
+    # the referenced bottle for capture and catalog consumers.
+    original_slot_asset_keys = [asset.asset_key for asset in selected]
+    if row_index == 0 and bay == 0 and selected:
+        selected[0] = catalog.by_category("soda")[0]
+    slot_widths = [candidates[(start + facing) % len(candidates)].dimensions_m[0] for facing in range(facing_count)]
+    total_width = sum(slot_widths) + config.facing_gap_m * (facing_count - 1)
     cursor = -total_width / 2.0
     max_depth = max(asset.dimensions_m[1] for asset in selected)
     depth_offsets = _depth_offsets(config, max_depth)
     front_sign = 1.0 if row_y < 0.0 else -1.0
     for facing, record in enumerate(selected):
-        width = record.dimensions_m[0]
+        width = slot_widths[facing]
         px = (config.bay_width_m / 2.0) + bay * config.bay_width_m + cursor + width / 2.0
         cursor += width + config.facing_gap_m
         for depth, depth_offset in enumerate(depth_offsets):
@@ -235,6 +247,7 @@ def _populate_shelf_products(
                 (px, py, shelf_z + SHELF_THICKNESS_M / 2.0 + record.dimensions_m[2] / 2.0),
                 identity,
                 "product_" + "_".join(identity),
+                semantic_id_asset_key=original_slot_asset_keys[facing],
             ))
 
 
@@ -255,21 +268,47 @@ def _populate_produce(
     x = config.bay_width_m / 2.0 + bay * config.bay_width_m
     crate_identity = ("bin", "r" + str(row_index), "b" + str(bay), "i" + str(bin_index))
     crate_position = (x, row_y, shelf_z + SHELF_THICKNESS_M / 2.0 + crate.dimensions_m[2] / 2.0)
-    assets.append(_make_asset(crate, config, row_index, row_y, crate_position, crate_identity, "produce_bin_" + "_".join(crate_identity[1:])))
+    crate_instance = _make_asset(crate, config, row_index, row_y, crate_position, crate_identity, "produce_bin_" + "_".join(crate_identity[1:]))
+    assets.append(crate_instance)
 
-    x_offsets = (-0.085, -0.028, 0.028, 0.085)
-    y_offsets = (-0.025, 0.0, 0.025)
+    # Two 4x3 layers fit inside the 44x32x22 cm bin.  Fruit is scaled to a
+    # deterministic near-spherical 9.2-9.4 cm diameter so grid spacing leaves
+    # real clearance instead of the severe pairwise intersections in the old
+    # full-size pile.
+    x_offsets = (-0.15, -0.05, 0.05, 0.15)
+    y_offsets = (-0.10, 0.0, 0.10)
+    layer_capacity = len(x_offsets) * len(y_offsets)
+    if config.produce_items_per_crate > 2 * layer_capacity:
+        raise ValueError("produce_items_per_crate exceeds the non-overlapping two-layer crate capacity of 24")
+    crate_base_thickness = 0.025
+    lower_centers: dict[int, tuple[float, float, float]] = {}
+    crate_yaw = math.radians(crate_instance.rotation_rpy_deg[2])
+    crate_cos, crate_sin = math.cos(crate_yaw), math.sin(crate_yaw)
     for fruit_index in range(config.produce_items_per_crate):
-        layer, remainder = divmod(fruit_index, len(x_offsets) * len(y_offsets))
+        layer, remainder = divmod(fruit_index, layer_capacity)
         x_index, y_index = divmod(remainder, len(y_offsets))
-        jitter = _stable_rng(config.seed, "fruit_jitter", row_index, bay, bin_index, fruit_index)
-        # A deterministic, bounded scatter keeps the recognizable crate
-        # footprint but removes the rigid lattice look of a point grid.
-        px = x + x_offsets[x_index] + jitter.uniform(-0.020, 0.020)
-        py = row_y + y_offsets[y_index] + jitter.uniform(-0.014, 0.014)
-        pz = crate_position[2] + crate.dimensions_m[2] / 2.0 + fruit.dimensions_m[2] / 2.0 + layer * 0.07
         identity = ("bin", "r" + str(row_index), "b" + str(bay), "i" + str(bin_index), "fruit" + str(fruit_index))
-        assets.append(_make_asset(fruit, config, row_index, row_y, (px, py, pz), identity, "fruit_" + "_".join(identity[1:])))
+        size_rng = _stable_rng(config.seed, "fruit_size", row_index, bay, bin_index, remainder)
+        diameter = 0.093 + size_rng.uniform(-0.001, 0.001)
+        # Correct for catalog axis differences (notably lemons) so the USD
+        # sphere remains spherical after instance scaling.
+        scale = tuple(diameter / dimension for dimension in fruit.dimensions_m)
+        local_x = x_offsets[x_index]
+        local_y = y_offsets[y_index]
+        px = x + crate_cos * local_x - crate_sin * local_y
+        py = row_y + crate_sin * local_x + crate_cos * local_y
+        half_height = diameter / 2.0
+        crate_bottom = crate_position[2] - crate.dimensions_m[2] / 2.0
+        if layer == 0:
+            pz = crate_bottom + crate_base_thickness + half_height
+            lower_centers[remainder] = (px, py, pz)
+        else:
+            support = lower_centers[remainder]
+            pz = support[2] + half_height + fruit.dimensions_m[2] * scale[2] / 2.0
+        assets.append(_make_asset(
+            fruit, config, row_index, row_y, (px, py, pz), identity,
+            "fruit_" + "_".join(identity[1:]), scale_xyz=scale,
+        ))
 
 
 def build_aisle_layout(config: AisleConfig) -> AisleLayout:

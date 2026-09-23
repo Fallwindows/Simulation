@@ -9,8 +9,8 @@ def Xform "Asset" (
 ) {
     def Xform "Geometry" {
         def Xform "Base" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.00000)
-            double3 xformOp:scale = (0.22000, 0.16000, 0.11000)
+            double3 xformOp:translate = (0.00000, 0.00000, -0.09750)
+            double3 xformOp:scale = (0.22000, 0.16000, 0.01250)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Cube "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -19,9 +19,53 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Body>
             }
         }
-        def Xform "SlatX0" {
-            double3 xformOp:translate = (-0.16720, 0.00000, 0.00000)
-            double3 xformOp:scale = (0.01760, 0.16480, 0.13750)
+        def Xform "CornerPost00" {
+            double3 xformOp:translate = (-0.21200, -0.15200, 0.00000)
+            double3 xformOp:scale = (0.00800, 0.00800, 0.11000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "CornerPost01" {
+            double3 xformOp:translate = (-0.21200, 0.15200, 0.00000)
+            double3 xformOp:scale = (0.00800, 0.00800, 0.11000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "CornerPost10" {
+            double3 xformOp:translate = (0.21200, -0.15200, 0.00000)
+            double3 xformOp:scale = (0.00800, 0.00800, 0.11000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "CornerPost11" {
+            double3 xformOp:translate = (0.21200, 0.15200, 0.00000)
+            double3 xformOp:scale = (0.00800, 0.00800, 0.11000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "LongRail00" {
+            double3 xformOp:translate = (0.00000, -0.14800, -0.09800)
+            double3 xformOp:scale = (0.20400, 0.01200, 0.01200)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Cube "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -30,9 +74,9 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Front>
             }
         }
-        def Xform "SlatX1" {
-            double3 xformOp:translate = (0.16720, 0.00000, 0.00000)
-            double3 xformOp:scale = (0.01760, 0.16480, 0.13750)
+        def Xform "LongRail01" {
+            double3 xformOp:translate = (0.00000, 0.14800, -0.09800)
+            double3 xformOp:scale = (0.20400, 0.01200, 0.01200)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Cube "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -41,9 +85,9 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Front>
             }
         }
-        def Xform "SlatZ0" {
-            double3 xformOp:translate = (0.00000, 0.00000, -0.06160)
-            double3 xformOp:scale = (0.22660, 0.01280, 0.01100)
+        def Xform "EndRail00" {
+            double3 xformOp:translate = (-0.20800, 0.00000, -0.09800)
+            double3 xformOp:scale = (0.01200, 0.14400, 0.01200)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Cube "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -52,9 +96,9 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Front>
             }
         }
-        def Xform "SlatZ1" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.06160)
-            double3 xformOp:scale = (0.22660, 0.01280, 0.01100)
+        def Xform "EndRail01" {
+            double3 xformOp:translate = (0.20800, 0.00000, -0.09800)
+            double3 xformOp:scale = (0.01200, 0.14400, 0.01200)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Cube "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -63,14 +107,47 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Front>
             }
         }
-        def Xform "Fruit" {
-            double3 xformOp:translate = (0, 0, 0.14520)
-            double3 xformOp:scale = (0.10120, 0.07360, 0.09900)
+        def Xform "LongRail10" {
+            double3 xformOp:translate = (0.00000, -0.14800, 0.10600)
+            double3 xformOp:scale = (0.20400, 0.01200, 0.00400)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Sphere "Shape" (
+            def Cube "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
             ) {
-                double radius = 0.5
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Front>
+            }
+        }
+        def Xform "LongRail11" {
+            double3 xformOp:translate = (0.00000, 0.14800, 0.10600)
+            double3 xformOp:scale = (0.20400, 0.01200, 0.00400)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Front>
+            }
+        }
+        def Xform "EndRail10" {
+            double3 xformOp:translate = (-0.20800, 0.00000, 0.10600)
+            double3 xformOp:scale = (0.01200, 0.14400, 0.00400)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Front>
+            }
+        }
+        def Xform "EndRail11" {
+            double3 xformOp:translate = (0.20800, 0.00000, 0.10600)
+            double3 xformOp:scale = (0.01200, 0.14400, 0.00400)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
                 rel material:binding = </Asset/Looks/Front>
             }
         }
@@ -97,7 +174,7 @@ def Xform "Asset" (
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/produce_crate_green.png@
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
-                token outputs:rgb
+                float3 outputs:rgb
             }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
