@@ -391,20 +391,24 @@ def _write_inventory_map(path: Path, slam_map: Path, rows: list[dict[str, object
 
 
 def _slam_start_timestamp(slam_dir: Path) -> float:
-    """Return the first timestamp accepted by the estimator's SLAM pose loader."""
-    valid: list[float] = []
+    """Use the estimator's pose ordering, then reject an invalid selected start."""
+    poses: list[PoseSample] = []
     for row in _load_csv(slam_dir / "slam_poses.csv"):
-        timestamp = _float_or_none(row.get("timestamp_s"))
-        try:
-            orientation = safe_quaternion(tuple(float(row[key]) for key in ("qx", "qy", "qz", "qw")))
-            position = tuple(float(row[key]) for key in ("x_m", "y_m", "z_m"))
-        except (KeyError, TypeError, ValueError):
+        orientation = safe_quaternion(tuple(float(row[key]) for key in ("qx", "qy", "qz", "qw")))
+        if orientation is None:
             continue
-        if timestamp is not None and orientation is not None and all(math.isfinite(value) for value in position):
-            valid.append(timestamp)
-    if not valid:
-        raise RuntimeError("SLAM pose stream has no valid timestamps for evaluation alignment")
-    return min(valid)
+        poses.append(PoseSample(
+            float(row["timestamp_s"]),
+            tuple(float(row[key]) for key in ("x_m", "y_m", "z_m")),
+            orientation,
+        ))
+    poses.sort(key=lambda item: item.timestamp_s)
+    if not poses:
+        raise RuntimeError("SLAM pose stream has no valid orientations for evaluation alignment")
+    selected = poses[0]
+    if not math.isfinite(selected.timestamp_s) or not all(math.isfinite(value) for value in selected.position_m):
+        raise RuntimeError("SLAM estimator's first accepted pose has a nonfinite timestamp or position")
+    return selected.timestamp_s
 
 
 def _validate_eligibility_manifest(

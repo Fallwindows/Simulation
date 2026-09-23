@@ -183,9 +183,20 @@ class InventoryEvaluationTests(unittest.TestCase):
         with patch("simulator.perception.inventory_evaluation._load_csv", return_value=[
             {"timestamp_s": "100.0", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "0"},
             {"timestamp_s": "100.2", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "1"},
-            {"timestamp_s": "100.4", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "bad", "qy": "0", "qz": "0", "qw": "1"},
         ]):
             self.assertEqual(_slam_start_timestamp(Path("unused")), 100.2)
+
+    def test_nonfinite_position_on_first_valid_quaternion_fails_closed(self):
+        for bad_position in ("nan", "inf"):
+            with self.subTest(position=bad_position), patch(
+                "simulator.perception.inventory_evaluation._load_csv",
+                return_value=[
+                    {"timestamp_s": "100.0", "x_m": bad_position, "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "1"},
+                    {"timestamp_s": "100.2", "x_m": "0", "y_m": "0", "z_m": "0", "qx": "0", "qy": "0", "qz": "0", "qw": "1"},
+                ],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "first accepted pose"):
+                    _slam_start_timestamp(Path("unused"))
 
     def test_evaluation_aligns_truth_to_slam_start_timestamp(self):
         estimates = [{"track_id": "1", "estimated_x_m": "0", "estimated_y_m": "0", "estimated_z_m": "0"}]
