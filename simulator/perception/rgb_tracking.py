@@ -28,6 +28,8 @@ import numpy as np
 
 from evaluation.metrics import PoseSample, interpolate_pose, safe_quaternion
 
+LIDAR_POINT_DECIMATION_STRIDE = 8
+
 
 @dataclass(frozen=True)
 class Detection:
@@ -56,9 +58,14 @@ class Track:
     def update(self, frame_index: int, detection: Detection) -> None:
         previous = self.center_px
         alpha = 0.65
+        elapsed_frames = max(1, int(frame_index) - self.last_frame_index)
+        measured_velocity = (
+            (detection.center_px[0] - previous[0]) / elapsed_frames,
+            (detection.center_px[1] - previous[1]) / elapsed_frames,
+        )
         self.velocity_px = (
-            0.7 * self.velocity_px[0] + 0.3 * (detection.center_px[0] - previous[0]),
-            0.7 * self.velocity_px[1] + 0.3 * (detection.center_px[1] - previous[1]),
+            0.7 * self.velocity_px[0] + 0.3 * measured_velocity[0],
+            0.7 * self.velocity_px[1] + 0.3 * measured_velocity[1],
         )
         self.center_px = (
             alpha * detection.center_px[0] + (1.0 - alpha) * previous[0],
@@ -69,7 +76,7 @@ class Track:
         self.mean_saturation = alpha * detection.mean_saturation + (1.0 - alpha) * self.mean_saturation
         self.last_frame_index = frame_index
         self.detection_count += 1
-        self.missed_frames = 0
+        self.missed_frames = max(0, elapsed_frames - 1)
         self.detections.append(_detection_record(self.track_id, detection))
 
 
@@ -77,6 +84,10 @@ def _detection_record(track_id: int, detection: Detection) -> dict[str, object]:
     x0, y0, x1, y1 = detection.bbox_xyxy
     return {
         "track_id": track_id,
+        "raw_track_id": track_id,
+        "persistent_track_id": None,
+        "canonical_track_id": None,
+        "id_namespace": "raw_rgb",
         "bbox_xyxy": [x0, y0, x1, y1],
         "center_px": [round(detection.center_px[0], 3), round(detection.center_px[1], 3)],
         "area_px": detection.area_px,
@@ -86,7 +97,50 @@ def _detection_record(track_id: int, detection: Detection) -> dict[str, object]:
     }
 
 
-def detect_product_blobs(frame_bgr: np.ndarray, max_detections: int = 160) -> list[Detection]:
+def _resolution_scaled_component_limits(width: int, height: int) -> tuple[float, float, float]:
+    area_scale = (float(width) * float(height)) / (1280.0 * 720.0)
+    return 70.0 * area_scale, 9000.0 * area_scale, 5.0 * math.sqrt(area_scale)
+
+
+def _budget_detections_spatially(
+    detections: list[Detection], width: int, height: int, limit: int
+) -> list[Detection]:
+    """Keep a deterministic, image-wide sample when proposal count is capped."""
+
+    if limit <= 0:
+        return []
+    columns, rows = 8, 4
+    buckets: dict[tuple[int, int], list[Detection]] = {}
+    for detection in detections:
+        x = min(columns - 1, max(0, int(detection.center_px[0] * columns / max(1, width))))
+        y = min(rows - 1, max(0, int(detection.center_px[1] * rows / max(1, height))))
+        buckets.setdefault((y, x), []).append(detection)
+    for bucket in buckets.values():
+        bucket.sort(key=lambda item: (-item.confidence, -item.area_px, item.center_px[1], item.center_px[0]))
+
+    selected: list[Detection] = []
+    cells = sorted(buckets)
+    depth = 0
+    while len(selected) < limit:
+        found_at_depth = False
+        for cell in cells:
+            bucket = buckets[cell]
+            if depth < len(bucket):
+                selected.append(bucket[depth])
+                found_at_depth = True
+                if len(selected) == limit:
+                    break
+        if not found_at_depth:
+            break
+        depth += 1
+    return sorted(selected, key=lambda item: (item.center_px[1], item.center_px[0]))
+
+
+def detect_product_blobs(
+    frame_bgr: np.ndarray,
+    max_detections: int = 160,
+    diagnostics: dict[str, object] | None = None,
+) -> list[Detection]:
     """Detect visible saturated product faces without scene metadata.
 
     Grey shelving, floor, and walls are suppressed by the saturation gate.
@@ -106,9 +160,12 @@ def detect_product_blobs(frame_bgr: np.ndarray, max_detections: int = 160) -> li
     count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
     detections: list[Detection] = []
     height, width = mask.shape
+    # Thresholds are defined at a 1280x720 reference image and scale with
+    # pixel area so capture resolution does not change proposal coverage.
+    min_area, max_area, min_extent = _resolution_scaled_component_limits(width, height)
     for label in range(1, count):
         x, y, w, h, area = (int(value) for value in stats[label])
-        if area < 70 or area > 9000 or w < 5 or h < 5:
+        if area < min_area or area > max_area or w < min_extent or h < min_extent:
             continue
         if w > width * 0.35 or h > height * 0.45:
             continue
@@ -126,7 +183,18 @@ def detect_product_blobs(frame_bgr: np.ndarray, max_detections: int = 160) -> li
         confidence = min(1.0, 0.35 + 0.35 * min(1.0, fill) + 0.30 * min(1.0, area / 1500.0))
         detections.append(Detection((x, y, x + w - 1, y + h - 1), (cx, cy), area, mean_hue, mean_sat, confidence))
     detections.sort(key=lambda item: (item.center_px[1], item.center_px[0]))
-    return detections[:max_detections]
+    if max_detections < 0:
+        raise ValueError("max_detections must be nonnegative")
+    selected = _budget_detections_spatially(detections, width, height, max_detections)
+    if diagnostics is not None:
+        diagnostics.update({
+            "eligible_proposal_count": len(detections),
+            "returned_proposal_count": len(selected),
+            "budget_rejected_count": len(detections) - len(selected),
+            "budget_limit": max_detections,
+            "budget_policy": "round_robin_8x4_image_grid_by_confidence_then_area",
+        })
+    return selected
 
 
 class BlobTracker:
@@ -140,9 +208,13 @@ class BlobTracker:
         detections = list(detections)
         candidates: list[tuple[float, int, int]] = []
         for track_id, track in self.tracks.items():
-            if track.missed_frames > self.max_missed_frames:
+            elapsed_frames = max(1, frame_index - track.last_frame_index)
+            if elapsed_frames - 1 > self.max_missed_frames:
                 continue
-            predicted = (track.center_px[0] + track.velocity_px[0], track.center_px[1] + track.velocity_px[1])
+            predicted = (
+                track.center_px[0] + track.velocity_px[0] * elapsed_frames,
+                track.center_px[1] + track.velocity_px[1] * elapsed_frames,
+            )
             for detection_index, detection in enumerate(detections):
                 distance = math.hypot(predicted[0] - detection.center_px[0], predicted[1] - detection.center_px[1])
                 area_ratio = max(detection.area_px, 1) / max(track.area_px, 1.0)
@@ -163,14 +235,25 @@ class BlobTracker:
 
         for track_id, track in self.tracks.items():
             if track_id not in assigned_tracks:
-                track.missed_frames += 1
+                track.missed_frames = max(0, frame_index - track.last_frame_index)
         for detection_index, detection in enumerate(detections):
             if detection_index in assigned_detections:
                 continue
             track_id = self.next_track_id
             self.next_track_id += 1
-            track = Track(track_id, frame_index, frame_index)
-            track.update(frame_index, detection)
+            # Initialize from the first measurement.  Calling update here
+            # would blend it with the default origin and invent velocity.
+            track = Track(
+                track_id,
+                frame_index,
+                frame_index,
+                detection_count=1,
+                center_px=detection.center_px,
+                area_px=float(detection.area_px),
+                mean_hue=detection.mean_hue,
+                mean_saturation=detection.mean_saturation,
+                detections=[_detection_record(track_id, detection)],
+            )
             self.tracks[track_id] = track
 
         return [
@@ -246,6 +329,53 @@ def _load_sensor_geometry(path: Path) -> dict[str, object]:
     }
 
 
+def _decode_pointcloud2_xyz(message) -> np.ndarray | None:
+    """Decode FLOAT32/FLOAT64 XYZ PointCloud2, validating endian and row layout."""
+
+    fields = {field.name: field for field in message.fields}
+    if not all(name in fields for name in ("x", "y", "z")):
+        raise ValueError("PointCloud2 is missing one or more XYZ fields")
+    width, height = int(message.width), int(message.height)
+    point_step, row_step = int(message.point_step), int(message.row_step)
+    if width == 0 or height == 0:
+        return None
+    if width < 0 or height < 0 or point_step <= 0 or row_step < width * point_step:
+        raise ValueError("PointCloud2 has invalid width, height, point_step, or row_step")
+    raw = np.frombuffer(message.data, dtype=np.uint8)
+    if raw.size < row_step * height:
+        raise ValueError("PointCloud2 data is shorter than row_step * height")
+
+    values = []
+    byte_order = ">" if bool(message.is_bigendian) else "<"
+    for name in ("x", "y", "z"):
+        field = fields[name]
+        datatype = int(field.datatype)
+        dtype = {7: np.dtype(byte_order + "f4"), 8: np.dtype(byte_order + "f8")}.get(datatype)
+        offset = int(field.offset)
+        if dtype is None:
+            raise ValueError(f"Unsupported PointCloud2 datatype {datatype} for field {name}")
+        if int(field.count) != 1:
+            raise ValueError(f"PointCloud2 field {name} has unsupported count {field.count}")
+        if offset < 0 or offset + dtype.itemsize > point_step:
+            raise ValueError(f"PointCloud2 field {name} is outside point_step")
+        try:
+            array = np.ndarray(
+                shape=(height, width),
+                dtype=dtype,
+                buffer=raw,
+                offset=offset,
+                strides=(row_step, point_step),
+            )
+        except (TypeError, ValueError, BufferError) as exc:
+            raise ValueError(f"Could not decode PointCloud2 field {name}") from exc
+        values.append(array.reshape(-1))
+    return np.column_stack(values).astype(np.float64, copy=False)
+
+
+def _finite_xyz_points(points: np.ndarray) -> np.ndarray:
+    return points[np.isfinite(points).all(axis=1)]
+
+
 def _read_lidar_scans(bag_dir: Path):
     """Yield decimated raw PointCloud2 xyz arrays without using truth topics."""
 
@@ -263,24 +393,11 @@ def _read_lidar_scans(bag_dir: Path):
         if topic != "/sim/lidar/points":
             continue
         message = deserialize_message(serialized, PointCloud2)
-        fields = {field.name: field for field in message.fields}
-        if not all(name in fields for name in ("x", "y", "z")):
+        points = _decode_pointcloud2_xyz(message)
+        if points is None:
             continue
-        point_step = int(message.point_step)
-        raw = np.frombuffer(bytes(message.data), dtype=np.uint8)
-        if point_step <= 0 or raw.size < point_step:
-            continue
-        rows = raw[: (raw.size // point_step) * point_step].reshape((-1, point_step))
-        try:
-            points = np.stack([
-                rows[:, int(fields[name].offset):int(fields[name].offset) + 4].copy().view("<f4").reshape(-1)
-                for name in ("x", "y", "z")
-            ], axis=1).astype(np.float64, copy=False)
-        except (TypeError, ValueError):
-            continue
-        points = points[::8]
-        finite = np.isfinite(points).all(axis=1)
-        points = points[finite]
+        points = points[::LIDAR_POINT_DECIMATION_STRIDE]
+        points = _finite_xyz_points(points)
         if len(points):
             stamp = float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0
             yield stamp, points
@@ -298,17 +415,27 @@ def _nearest_frame_index(frames: list[dict[str, object]], timestamps: list[float
     return selected if abs(timestamps[selected] - timestamp_s) <= 0.08 else None
 
 
+def _world_points_to_camera(points_world: np.ndarray, camera_pose: PoseSample, geometry: dict[str, object]) -> np.ndarray:
+    """Express world points in the RGB camera optical frame at image time."""
+
+    world_r = _quat_to_matrix(camera_pose.orientation_xyzw)
+    pose_t = np.asarray(camera_pose.position_m, dtype=np.float64)
+    points_rig = (points_world - pose_t) @ world_r
+    points_link = (points_rig - geometry["rig_camera_t"]) @ geometry["rig_camera_r"]
+    return points_link @ geometry["link_optical_r"]
+
+
 def _augment_with_lidar_estimates(
     capture: Path,
     slam: Path,
     frames: list[dict[str, object]],
     frame_annotations: list[dict[str, object]],
-) -> tuple[dict[int, np.ndarray], dict[int, np.ndarray], dict[str, object]]:
+) -> tuple[dict[int, np.ndarray], dict[int, np.ndarray], dict[str, object], dict[int, dict[str, object]]]:
     """Associate projected LiDAR returns with RGB proposals and make start-relative estimates."""
 
     poses = _load_slam_poses(slam / "slam_poses.csv")
     if not poses:
-        return {}, {}, {"status": "unavailable", "reason": "no_valid_slam_poses"}
+        return {}, {}, {"status": "unavailable", "reason": "no_valid_slam_poses"}, {}
     geometry = _load_sensor_geometry(capture / "sensor_transforms.json")
     start_t = np.asarray(poses[0].position_m, dtype=np.float64)
     start_r = _quat_to_matrix(poses[0].orientation_xyzw)
@@ -316,10 +443,18 @@ def _augment_with_lidar_estimates(
     annotations_by_frame = {int(record["frame_index"]): record for record in frame_annotations}
     observations_start: dict[int, list[np.ndarray]] = {}
     observations_map: dict[int, list[np.ndarray]] = {}
+    observation_support: dict[int, dict[str, object]] = {}
+    seen_scan_stamps: set[float] = set()
     scan_count = 0
     projected_point_count = 0
 
     for stamp_s, lidar_points in _read_lidar_scans(capture / "sensors_bag"):
+        # A repeated bag message at the same sensor timestamp is one scan of
+        # evidence and must not produce a duplicate estimate/update count.
+        scan_stamp = round(float(stamp_s), 9)
+        if scan_stamp in seen_scan_stamps:
+            continue
+        seen_scan_stamps.add(scan_stamp)
         pose = interpolate_pose(poses, stamp_s, max_gap_s=0.5)
         if pose is None:
             continue
@@ -329,33 +464,38 @@ def _augment_with_lidar_estimates(
         frame_record = annotations_by_frame.get(int(frames[frame_index]["frame_index"]))
         if frame_record is None or not frame_record["detections"]:
             continue
+        rgb_stamp_s = frame_timestamps[frame_index]
+        rgb_pose = interpolate_pose(poses, rgb_stamp_s, max_gap_s=0.5)
+        if rgb_pose is None:
+            continue
         rig_lidar_t = geometry["rig_lidar_t"]
         rig_lidar_r = geometry["rig_lidar_r"]
-        rig_camera_t = geometry["rig_camera_t"]
-        rig_camera_r = geometry["rig_camera_r"]
-        link_optical_r = geometry["link_optical_r"]
         points_rig = lidar_points @ rig_lidar_r.T + rig_lidar_t
-        points_link = (points_rig - rig_camera_t) @ rig_camera_r
-        points_optical = points_link @ link_optical_r
+        world_r = _quat_to_matrix(pose.orientation_xyzw)
+        pose_t = np.asarray(pose.position_m, dtype=np.float64)
+        points_world = points_rig @ world_r.T + pose_t
+        points_start = (points_world - start_t) @ start_r
+        # LiDAR and RGB callbacks have independent timestamps.  Project each
+        # return through its measurement-time world pose and then into the
+        # camera pose at the selected RGB image timestamp.
+        points_optical = _world_points_to_camera(points_world, rgb_pose, geometry)
         positive = (points_optical[:, 2] > 0.25) & (points_optical[:, 2] < 45.0)
-        points_rig = points_rig[positive]
+        points_world = points_world[positive]
+        points_start = points_start[positive]
         points_optical = points_optical[positive]
         if not len(points_optical):
             continue
         u = geometry["fx"] * points_optical[:, 0] / points_optical[:, 2] + geometry["cx"]
         v = geometry["fy"] * points_optical[:, 1] / points_optical[:, 2] + geometry["cy"]
         in_image = (u >= 0.0) & (u < float(frames[frame_index]["width"])) & (v >= 0.0) & (v < float(frames[frame_index]["height"]))
-        points_rig = points_rig[in_image]
+        points_world = points_world[in_image]
+        points_start = points_start[in_image]
         points_optical = points_optical[in_image]
         u = u[in_image]
         v = v[in_image]
         if not len(points_optical):
             continue
         projected_point_count += len(points_optical)
-        world_r = _quat_to_matrix(pose.orientation_xyzw)
-        pose_t = np.asarray(pose.position_m, dtype=np.float64)
-        points_world = points_rig @ world_r.T + pose_t
-        points_start = (points_world - start_t) @ start_r
         # Index detections into coarse image cells first.  This avoids creating
         # a full boolean cloud mask for every box on every LiDAR scan.
         cell_size = 32
@@ -390,61 +530,102 @@ def _augment_with_lidar_estimates(
             track_id = int(detection["track_id"])
             observations_start.setdefault(track_id, []).append(estimate)
             observations_map.setdefault(track_id, []).append(points_world[selected_indices].mean(axis=0))
+            support = observation_support.setdefault(track_id, {
+                "scan_stamps_s": set(),
+                "unique_retained_depth_return_count": 0,
+                "3d_update_event_count": 0,
+            })
+            support["scan_stamps_s"].add(scan_stamp)
+            support["unique_retained_depth_return_count"] += int(len(selected_indices))
+            support["3d_update_event_count"] += 1
             detection["depth_point_count"] = int(len(selected_indices))
+            detection["depth_scan_observation_count"] = int(detection.get("depth_scan_observation_count", 0)) + 1
+            supporting_stamps = detection.setdefault("supporting_lidar_scan_timestamps_s", [])
+            if scan_stamp not in supporting_stamps:
+                supporting_stamps.append(scan_stamp)
 
         scan_count += 1
 
     track_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations_start.items() if values}
     map_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations_map.items() if values}
+    support_timestamps = {
+        track_id: sorted(float(value) for value in support["scan_stamps_s"])
+        for track_id, support in observation_support.items()
+    }
     for frame_record in frame_annotations:
         for detection in frame_record["detections"]:
-            estimate = track_estimates.get(int(detection["track_id"]))
+            track_id = int(detection["track_id"])
+            estimate = track_estimates.get(track_id)
             if estimate is None:
                 detection["coordinate_source"] = "rgb_only_no_lidar_association"
                 continue
             rounded = [round(float(value), 3) for value in estimate]
             detection["estimated_center_start_relative_m"] = rounded
+            detection["position_quantity"] = "median_of_associated_front_surface_lidar_returns"
+            detection["track_supporting_lidar_scan_timestamps_s"] = support_timestamps.get(track_id, [])
+            detection["estimate_is_track_level_backfill"] = not bool(detection.get("depth_scan_observation_count", 0))
             detection["coordinate_source"] = "lidar_projected_with_slam_pose"
     for frame_record in frame_annotations:
         for detection in frame_record["detections"]:
             estimate = map_estimates.get(int(detection["track_id"]))
             if estimate is not None:
                 detection["estimated_center_map_m"] = [round(float(value), 3) for value in estimate]
+                detection["position_quantity"] = "median_of_associated_front_surface_lidar_returns"
+    support_summary: dict[int, dict[str, object]] = {}
+    for track_id, support in observation_support.items():
+        stamps = sorted(float(value) for value in support["scan_stamps_s"])
+        support_summary[track_id] = {
+            "scan_timestamps_s": stamps,
+            "unique_supporting_scan_count": len(stamps),
+            "unique_retained_depth_return_count": int(support["unique_retained_depth_return_count"]),
+            "3d_update_event_count": int(support["3d_update_event_count"]),
+            "observation_duration_s": round(stamps[-1] - stamps[0], 6) if len(stamps) > 1 else 0.0,
+        }
     return track_estimates, map_estimates, {
         "status": "complete",
         "start_pose_world_m": [round(float(value), 6) for value in start_t],
         "start_pose_orientation_xyzw": [round(float(value), 8) for value in poses[0].orientation_xyzw],
         "coordinate_frame": "start-relative sensor-rig frame; x forward, y left, z up",
+        "position_quantity": "median_of_associated_front_surface_lidar_returns",
+        "lidar_pose_time_reference": "PointCloud2 header timestamp; per-return timing and deskew are unavailable",
+        "lidar_point_decimation_stride": LIDAR_POINT_DECIMATION_STRIDE,
+        "lidar_point_decimation_policy": "every eighth decoded point in PointCloud2 serialization order",
         "scan_count_used": scan_count,
         "projected_point_count": projected_point_count,
         "track_count_with_3d_estimate": len(track_estimates),
-    }
+    }, support_summary
 
 
 def _consolidate_track_estimates(
     track_estimates: dict[int, np.ndarray],
     merge_radius_m: float = 0.21,
+    co_visible_pairs: set[tuple[int, int]] | None = None,
 ) -> tuple[dict[int, int], dict[int, np.ndarray], dict[int, list[int]]]:
-    """Merge RGB track fragments using estimated 3D position only.
+    """Merge RGB track fragments by 3D proximity, subject to co-visibility vetoes.
 
     RGB components can split when a product crosses a shelf edge or changes
-    apparent size.  The canonical ID is therefore assigned from the estimated
-    start-relative center, never from simulator identity or ground truth.
+    apparent size. The canonical ID is assigned from sensor estimates, while
+    raw tracks observed together in one RGB frame are never merged. Simulator
+    identity and ground truth are not consumed.
     """
 
     clusters: list[dict[str, object]] = []
     grid: dict[tuple[int, int, int], list[int]] = {}
+    cluster_cells: dict[int, tuple[int, int, int]] = {}
+    co_visible_pairs = co_visible_pairs or set()
     for raw_track_id in sorted(track_estimates):
         point = np.asarray(track_estimates[raw_track_id], dtype=np.float64)
         cell = tuple(np.floor(point / merge_radius_m).astype(int))
-        candidates: list[int] = []
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    candidates.extend(grid.get((cell[0] + dx, cell[1] + dy, cell[2] + dz), []))
+        candidates = _spatial_grid_candidate_indices(point, merge_radius_m, grid)
         selected = None
         selected_distance = float("inf")
         for cluster_index in candidates:
+            members = clusters[cluster_index]["members"]
+            if any(
+                (min(raw_track_id, int(member)), max(raw_track_id, int(member))) in co_visible_pairs
+                for member in members
+            ):
+                continue
             center = np.asarray(clusters[cluster_index]["center"], dtype=np.float64)
             distance = float(np.linalg.norm(center - point))
             if distance <= merge_radius_m and distance < selected_distance:
@@ -454,12 +635,24 @@ def _consolidate_track_estimates(
             selected = len(clusters)
             clusters.append({"center": point.copy(), "count": 1, "members": [raw_track_id]})
             grid.setdefault(cell, []).append(selected)
+            cluster_cells[selected] = cell
         else:
             cluster = clusters[selected]
             count = int(cluster["count"]) + 1
             cluster["center"] = (np.asarray(cluster["center"]) * (count - 1) + point) / count
             cluster["count"] = count
             cluster["members"].append(raw_track_id)
+            # The index is keyed by cluster center.  Move the entry whenever
+            # the centroid crosses a voxel so later lookups remain complete.
+            center = np.asarray(cluster["center"], dtype=np.float64)
+            new_cell = tuple(np.floor(center / merge_radius_m).astype(int))
+            old_cell = cluster_cells[selected]
+            if new_cell != old_cell:
+                grid[old_cell].remove(selected)
+                if not grid[old_cell]:
+                    del grid[old_cell]
+                grid.setdefault(new_cell, []).append(selected)
+                cluster_cells[selected] = new_cell
 
     order = sorted(range(len(clusters)), key=lambda index: tuple(float(value) for value in clusters[index]["center"]))
     raw_to_canonical: dict[int, int] = {}
@@ -473,6 +666,41 @@ def _consolidate_track_estimates(
         for raw_track_id in members:
             raw_to_canonical[raw_track_id] = canonical_id
     return raw_to_canonical, canonical_estimates, canonical_members
+
+
+def _set_canonical_track_identity(detection: dict[str, object], raw_track_id: int, canonical_id: int) -> None:
+    """Retain the RGB track namespace while exposing the localized ID explicitly."""
+
+    detection["raw_track_id"] = int(raw_track_id)
+    detection["persistent_track_id"] = int(canonical_id)
+    detection["canonical_track_id"] = int(canonical_id)
+    detection["id_namespace"] = "canonical_localized"
+    # Compatibility alias used by existing overlay and evaluation consumers.
+    detection["track_id"] = int(canonical_id)
+
+
+def _spatial_grid_candidate_indices(
+    point: np.ndarray, merge_radius_m: float, grid: dict[tuple[int, int, int], list[int]]
+) -> list[int]:
+    cell = tuple(np.floor(np.asarray(point, dtype=np.float64) / merge_radius_m).astype(int))
+    candidates: set[int] = set()
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                candidates.update(grid.get((cell[0] + dx, cell[1] + dy, cell[2] + dz), ()))
+    return sorted(candidates)
+
+
+def _co_visible_raw_track_pairs(frame_annotations: list[dict[str, object]]) -> set[tuple[int, int]]:
+    pairs: set[tuple[int, int]] = set()
+    for frame in frame_annotations:
+        track_ids = sorted({
+            int(detection["raw_track_id"] if "raw_track_id" in detection else detection["track_id"])
+            for detection in frame["detections"]
+        })
+        for index, first in enumerate(track_ids):
+            pairs.update((first, second) for second in track_ids[index + 1 :])
+    return pairs
 
 
 def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: str | Path, repo_root: str | Path | None = None) -> dict[str, object]:
@@ -496,21 +724,28 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             if decoded >= len(frames_index):
                 break
             image = frame.to_ndarray(format="bgr24")
-            detections = detect_product_blobs(image)
+            proposal_diagnostics: dict[str, object] = {}
+            detections = detect_product_blobs(image, diagnostics=proposal_diagnostics)
             records = tracker.update(int(frames_index[decoded]["frame_index"]), detections)
             frame_annotations.append({
                 "frame_index": int(frames_index[decoded]["frame_index"]),
                 "stamp_s": float(frames_index[decoded]["stamp_s"]),
                 "width": int(frames_index[decoded]["width"]),
                 "height": int(frames_index[decoded]["height"]),
+                "proposal_budget": proposal_diagnostics,
                 "detections": records,
             })
             decoded += 1
     if decoded != len(frames_index):
         raise RuntimeError(f"RGB frame/index mismatch: decoded={decoded}, indexed={len(frames_index)}")
 
-    track_estimates, map_estimates, localization = _augment_with_lidar_estimates(capture, slam, frames_index, frame_annotations)
-    raw_to_canonical, canonical_estimates, canonical_members = _consolidate_track_estimates(track_estimates)
+    track_estimates, map_estimates, localization, lidar_scan_observation_counts = _augment_with_lidar_estimates(
+        capture, slam, frames_index, frame_annotations
+    )
+    co_visible_pairs = _co_visible_raw_track_pairs(frame_annotations)
+    raw_to_canonical, canonical_estimates, canonical_members = _consolidate_track_estimates(
+        track_estimates, co_visible_pairs=co_visible_pairs
+    )
     canonical_map_estimates: dict[int, np.ndarray] = {}
     for canonical_id, raw_members in canonical_members.items():
         values = [map_estimates[raw_id] for raw_id in raw_members if raw_id in map_estimates]
@@ -519,14 +754,6 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     localization["canonical_track_count"] = len(canonical_estimates)
     localization["canonicalization_radius_m"] = 0.21
 
-    observation_counts: dict[int, int] = {}
-    for frame in frame_annotations:
-        for detection in frame["detections"]:
-            if detection.get("coordinate_source") != "lidar_projected_with_slam_pose":
-                continue
-            track_id = int(detection["track_id"])
-            observation_counts[track_id] = observation_counts.get(track_id, 0) + 1
-
     # Replace fragment IDs in the output stream with stable 3D-associated IDs.
     for frame in frame_annotations:
         for detection in frame["detections"]:
@@ -534,11 +761,11 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             canonical_id = raw_to_canonical.get(raw_track_id)
             if canonical_id is None:
                 continue
-            detection["raw_track_id"] = raw_track_id
-            detection["track_id"] = canonical_id
+            _set_canonical_track_identity(detection, raw_track_id, canonical_id)
             detection["estimated_center_start_relative_m"] = [
                 round(float(value), 3) for value in canonical_estimates[canonical_id]
             ]
+            detection["position_quantity"] = "median_of_associated_front_surface_lidar_returns"
             if canonical_id in canonical_map_estimates:
                 detection["estimated_center_map_m"] = [
                     round(float(value), 3) for value in canonical_map_estimates[canonical_id]
@@ -551,16 +778,29 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         member_tracks = [tracker.tracks[raw_id] for raw_id in raw_members if raw_id in tracker.tracks]
         if not member_tracks:
             continue
+        member_support = [lidar_scan_observation_counts.get(raw_id, {}) for raw_id in raw_members]
+        supporting_stamps = sorted({
+            float(stamp)
+            for support in member_support
+            for stamp in support.get("scan_timestamps_s", [])
+        })
+        retained_return_count = sum(int(support.get("unique_retained_depth_return_count", 0)) for support in member_support)
+        update_event_count = sum(int(support.get("3d_update_event_count", 0)) for support in member_support)
         total_detections = sum(track.detection_count for track in member_tracks)
         weighted_u = sum(track.center_px[0] * track.detection_count for track in member_tracks) / max(1, total_detections)
         weighted_v = sum(track.center_px[1] * track.detection_count for track in member_tracks) / max(1, total_detections)
         track_rows.append({
             "track_id": canonical_id,
+            "persistent_track_id": canonical_id,
+            "canonical_track_id": canonical_id,
+            "raw_track_ids": raw_members,
+            "id_namespace": "canonical_localized",
             "class": "unknown_product",
             "source": "rgb_lidar_slam_consolidated",
             "first_frame_index": min(track.first_frame_index for track in member_tracks),
             "last_frame_index": max(track.last_frame_index for track in member_tracks),
             "detection_count": total_detections,
+            "rgb_detection_count": total_detections,
             "center_u_px": round(weighted_u, 3),
             "center_v_px": round(weighted_v, 3),
             "estimated_x_m": round(float(canonical_estimates[canonical_id][0]), 3),
@@ -570,7 +810,13 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             "map_y_m": round(float(canonical_map_estimates[canonical_id][1]), 3) if canonical_id in canonical_map_estimates else None,
             "map_z_m": round(float(canonical_map_estimates[canonical_id][2]), 3) if canonical_id in canonical_map_estimates else None,
             "depth_source": "lidar_projected_with_slam_pose",
-            "3d_observation_count": sum(observation_counts.get(raw_id, 0) for raw_id in raw_members),
+            "position_quantity": "median_of_associated_front_surface_lidar_returns",
+            "supporting_lidar_scan_timestamps_s": supporting_stamps,
+            "3d_observation_count": len(supporting_stamps),
+            "unique_supporting_scan_count": len(supporting_stamps),
+            "unique_retained_depth_return_count": retained_return_count,
+            "3d_update_event_count": update_event_count,
+            "observation_duration_s": round(supporting_stamps[-1] - supporting_stamps[0], 6) if len(supporting_stamps) > 1 else 0.0,
             "raw_track_count": len(raw_members),
         })
 
@@ -581,7 +827,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
 
     for row in track_rows:
         row["3d_observation_count"] = int(row["3d_observation_count"])
-    fields = ["track_id", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "map_x_m", "map_y_m", "map_z_m", "depth_source", "3d_observation_count", "raw_track_count"]
+    fields = ["track_id", "persistent_track_id", "canonical_track_id", "raw_track_ids", "id_namespace", "class", "source", "first_frame_index", "last_frame_index", "detection_count", "rgb_detection_count", "center_u_px", "center_v_px", "estimated_x_m", "estimated_y_m", "estimated_z_m", "map_x_m", "map_y_m", "map_z_m", "depth_source", "position_quantity", "supporting_lidar_scan_timestamps_s", "3d_observation_count", "unique_supporting_scan_count", "unique_retained_depth_return_count", "3d_update_event_count", "observation_duration_s", "raw_track_count"]
     _write_csv(output / "estimated_inventory.csv", track_rows, fields)
     _write_csv(output / "tracks.csv", track_rows, fields)
     (output / "estimated_inventory.json").write_text(json.dumps(track_rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -606,7 +852,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "annotations": "frame_annotations.jsonl",
         "estimated_inventory": "estimated_inventory.csv",
         "git_sha": _git_sha(Path(repo_root).resolve()) if repo_root else None,
-        "notes": "Boxes originate from RGB components; start-relative 3D centers are robust medians of projected LiDAR returns using interpolated SLAM pose.",
+        "notes": "RGB connected components are product-like proposals, not product instances. Localized positions are medians of associated front-surface LiDAR returns projected using scan-time and RGB-time SLAM poses; they are not full-product centers or extents.",
     }
     (output / "perception_manifest.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary
