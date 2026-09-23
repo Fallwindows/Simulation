@@ -14,9 +14,10 @@ import hashlib
 import json
 import math
 import subprocess
+import unicodedata
 import zipfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterable
 
 import numpy as np
@@ -29,6 +30,11 @@ INVENTORY_FIELDS = [
     "map_x_m", "map_y_m", "map_z_m", "observations", "confidence", "spatially_associated_gt_id",
     "gt_x_m", "gt_y_m", "gt_z_m", "spatial_association_error_m", "category_agreement",
 ]
+
+SLAM_ARTIFACT_NAMES = frozenset({
+    "slam_map_poses.csv", "slam_map_keyframes.csv", "slam_odom_poses.csv", "map_to_odom.csv",
+    "slam_poses.csv", "slam_map.pcd", "slam_map.ply",
+})
 
 
 def _git_sha(repo_root: Path) -> str | None:
@@ -115,8 +121,172 @@ def _gt_start_relative(capture_dir: Path, timestamp_s: float) -> list[dict[str, 
     return _start_relative_truth_rows(_load_csv(capture_dir / "inventory_ground_truth.csv"), start_t, start_r)
 
 def _load_csv(path: Path) -> list[dict[str, str]]:
+    _, rows = _load_csv_with_fields(path)
+    return rows
+
+
+def _load_csv_with_fields(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     with path.open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+        reader = csv.DictReader(handle)
+        fields = list(reader.fieldnames or [])
+        if len(fields) != len(set(fields)):
+            raise ValueError(f"{path.name} contains duplicate CSV column names")
+        return fields, list(reader)
+
+
+def _sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _valid_sha256(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+def _read_complete_manifest(path: Path, name: str) -> tuple[dict[str, object], bytes]:
+    try:
+        content = path.read_bytes()
+        value = json.loads(content.decode("utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} is missing or invalid") from exc
+    if not isinstance(value, dict) or value.get("status") != "complete":
+        raise ValueError(f"{name} is not complete")
+    return value, content
+
+
+def _canonical_artifact_identity(path: str) -> str:
+    """Return a Windows-aware identity for one canonical relative artifact path."""
+    posix_path = PurePosixPath(path)
+    windows_path = PureWindowsPath(path)
+    segments = path.split("/")
+    if (
+        not path
+        or "\\" in path
+        or posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or posix_path.as_posix() != path
+        or any(part in {"", ".", ".."} for part in segments)
+    ):
+        raise ValueError(f"SLAM manifest contains an unsafe or noncanonical artifact path: {path!r}")
+    normalized = unicodedata.normalize("NFC", path)
+    if normalized != path:
+        raise ValueError(f"SLAM manifest artifact path is not Unicode-normalized: {path!r}")
+    for segment in segments:
+        if segment.endswith((".", " ")) or any(char in '<>:"|?*' or ord(char) < 32 for char in segment):
+            raise ValueError(f"SLAM manifest contains a noncanonical Windows artifact segment: {segment!r}")
+        device_stem = segment.split(".", 1)[0].upper()
+        if device_stem in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+            raise ValueError(f"SLAM manifest contains a reserved Windows device name: {segment!r}")
+    if path not in SLAM_ARTIFACT_NAMES:
+        raise ValueError(f"SLAM manifest contains an unlisted artifact path: {path!r}")
+    return normalized.casefold()
+
+
+def _validate_map_provenance(slam_dir: Path, perception_dir: Path) -> tuple[dict[str, object], bytes]:
+    """Verify the complete optimized map input and retain its validated cloud bytes."""
+    slam_manifest_path = slam_dir / "slam_manifest.json"
+    perception_manifest_path = perception_dir / "perception_manifest.json"
+    slam_manifest, slam_bytes = _read_complete_manifest(slam_manifest_path, "slam_manifest.json")
+    perception_manifest, perception_bytes = _read_complete_manifest(perception_manifest_path, "perception_manifest.json")
+
+    map_version = slam_manifest.get("map_version")
+    if not _valid_sha256(map_version):
+        raise ValueError("SLAM manifest has an invalid map_version")
+    if perception_manifest.get("map_version") != map_version:
+        raise ValueError("perception manifest map_version does not match the SLAM map")
+    if perception_manifest.get("slam_manifest_sha256") != _sha256(slam_bytes):
+        raise ValueError("perception manifest was produced from a different slam_manifest.json")
+    recorded_manifest_size = perception_manifest.get("slam_manifest_size_bytes")
+    if not isinstance(recorded_manifest_size, int) or isinstance(recorded_manifest_size, bool) or recorded_manifest_size != len(slam_bytes):
+        raise ValueError("perception manifest slam_manifest_size_bytes does not match slam_manifest.json")
+
+    if slam_manifest.get("map_frame_id") != "map" or slam_manifest.get("optimized") is not True:
+        raise ValueError("SLAM manifest does not declare a complete optimized map-frame output")
+    graph_version = slam_manifest.get("graph_pose_version")
+    if not _valid_sha256(graph_version) or slam_manifest.get("pre_publish_graph_version") != graph_version:
+        raise ValueError("SLAM manifest optimized graph versions are invalid or disagree")
+    observer = slam_manifest.get("observer")
+    if not isinstance(observer, dict) or observer.get("status") != "complete":
+        raise ValueError("SLAM manifest does not embed a complete observer record")
+    observer_fields = {
+        "map_version": "map_version",
+        "graph_pose_version": "graph_pose_version",
+        "pre_publish_graph_version": "pre_publish_graph_version",
+        "map_pose_frame_id": "map_frame_id",
+    }
+    for observer_field, manifest_field in observer_fields.items():
+        if observer.get(observer_field) != slam_manifest.get(manifest_field):
+            raise ValueError(f"SLAM manifest observer disagrees on {observer_field}")
+    if observer.get("map_graph_matches_final_cloud") is not True or observer.get("optimized_pose_graph_complete") is not True or slam_manifest.get("optimized") is not True:
+        raise ValueError("SLAM observer does not confirm the final optimized graph/cloud")
+
+    observer_record = slam_manifest.get("observer_artifact")
+    observer_path = slam_dir / "slam_observer.json"
+    if not isinstance(observer_record, dict) or observer_record.get("path") != "slam_observer.json" or not observer_path.is_file():
+        raise ValueError("SLAM manifest is missing its observer artifact record")
+    observer_bytes = observer_path.read_bytes()
+    observer_size = observer_record.get("size_bytes")
+    observer_digest = observer_record.get("sha256")
+    if not isinstance(observer_size, int) or isinstance(observer_size, bool) or observer_size != len(observer_bytes) or not _valid_sha256(observer_digest) or observer_digest != _sha256(observer_bytes):
+        raise ValueError("slam_observer.json does not match its SLAM manifest integrity record")
+    try:
+        observer_json = json.loads(observer_bytes.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("slam_observer.json is invalid") from exc
+    if observer_json != observer:
+        raise ValueError("slam_observer.json content differs from the observer embedded in slam_manifest.json")
+
+    artifacts = slam_manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise ValueError("SLAM manifest is missing its artifact list")
+    paths: set[str] = set()
+    for record in artifacts:
+        if not isinstance(record, dict) or not isinstance(record.get("path"), str) or not record["path"].strip():
+            raise ValueError("SLAM manifest contains a malformed artifact record")
+        path_identity = _canonical_artifact_identity(record["path"])
+        if path_identity in paths:
+            raise ValueError(f"SLAM manifest contains a duplicate artifact path: {record['path']}")
+        paths.add(path_identity)
+    expected_paths = {name.casefold() for name in SLAM_ARTIFACT_NAMES}
+    if paths != expected_paths:
+        missing_paths = sorted(expected_paths - paths)
+        extra_paths = sorted(paths - expected_paths)
+        raise ValueError(f"SLAM manifest artifact set is incomplete or unexpected; missing={missing_paths}, extra={extra_paths}")
+
+    cloud_records = [record for record in artifacts if record.get("path") == "slam_map.ply"]
+    if len(cloud_records) != 1:
+        raise ValueError("SLAM manifest must contain exactly one artifact record for slam_map.ply")
+    cloud_record = cloud_records[0]
+    if cloud_record.get("role") != "final_optimized_cloud" or cloud_record.get("frame_id") != "map" or cloud_record.get("optimized") is not True or cloud_record.get("map_version") != map_version:
+        raise ValueError("slam_map.ply is not declared as the final optimized cloud for this map_version")
+    cloud_path = slam_dir / "slam_map.ply"
+    if not cloud_path.is_file():
+        raise ValueError("SLAM final map cloud is missing: slam_map.ply")
+    cloud_bytes = cloud_path.read_bytes()
+    expected_cloud_size = cloud_record.get("size_bytes")
+    expected_cloud_hash = cloud_record.get("sha256")
+    if not isinstance(expected_cloud_size, int) or isinstance(expected_cloud_size, bool) or expected_cloud_size != len(cloud_bytes) or not _valid_sha256(expected_cloud_hash) or expected_cloud_hash != _sha256(cloud_bytes):
+        raise ValueError("slam_map.ply size or SHA-256 does not match its SLAM manifest record")
+    if perception_manifest.get("slam_cloud_ply_sha256") != expected_cloud_hash:
+        raise ValueError("perception manifest slam cloud SHA-256 does not match slam_map.ply")
+    perception_cloud_size = perception_manifest.get("slam_cloud_ply_size_bytes")
+    if not isinstance(perception_cloud_size, int) or isinstance(perception_cloud_size, bool) or perception_cloud_size != expected_cloud_size:
+        raise ValueError("perception manifest slam cloud size does not match slam_map.ply")
+
+    provenance = {
+        "map_version": map_version,
+        "slam_manifest": {"path": "../slam/slam_manifest.json", "size_bytes": len(slam_bytes), "sha256": _sha256(slam_bytes)},
+        "perception_manifest": {"path": "perception_manifest.json", "size_bytes": len(perception_bytes), "sha256": _sha256(perception_bytes)},
+        "slam_map_cloud": {"path": "../slam/slam_map.ply", "size_bytes": len(cloud_bytes), "sha256": _sha256(cloud_bytes), "frame_id": "map", "role": "final_optimized_cloud"},
+    }
+    return provenance, cloud_bytes
+
+
+def _validate_estimate_map_versions(fields: list[str], estimates: list[dict[str, str]], map_version: str) -> None:
+    if "map_version" not in fields:
+        raise ValueError("estimated_inventory.csv is missing the required map_version column")
+    if any(row.get("map_version") != map_version for row in estimates):
+        raise ValueError("estimated inventory contains a missing or inconsistent map_version")
 
 
 def _float_or_none(value: object) -> float | None:
@@ -373,8 +543,8 @@ def _write_xlsx(path: Path, rows: list[dict[str, object]], fields: list[str]) ->
         archive.writestr("xl/worksheets/sheet1.xml", worksheet)
 
 
-def _write_inventory_map(path: Path, slam_map: Path, rows: list[dict[str, object]]) -> int:
-    lines = slam_map.read_text(encoding="utf-8").splitlines()
+def _write_inventory_map(path: Path, slam_map_bytes: bytes, rows: list[dict[str, object]]) -> int:
+    lines = slam_map_bytes.decode("utf-8").splitlines()
     end_header = next(index for index, line in enumerate(lines) if line == "end_header")
     header = lines[:end_header + 1]
     original_count = next(int(line.split()[2]) for line in header if line.startswith("element vertex "))
@@ -529,7 +699,9 @@ def evaluate_inventory(
     capture = Path(capture_dir).resolve()
     slam = Path(slam_dir).resolve()
     perception = Path(perception_dir).resolve()
-    estimates = _load_csv(perception / "estimated_inventory.csv")
+    input_provenance, validated_cloud_bytes = _validate_map_provenance(slam, perception)
+    estimate_fields, estimates = _load_csv_with_fields(perception / "estimated_inventory.csv")
+    _validate_estimate_map_versions(estimate_fields, estimates, str(input_provenance["map_version"]))
     start_timestamp_s = _slam_start_timestamp(slam)
     truth = _gt_start_relative(capture, start_timestamp_s)
     eligibility_evidence = None
@@ -543,7 +715,7 @@ def evaluate_inventory(
         rows, metrics = _match_rows(estimates, truth, eligible_truth_ids=eligible_ids)
     _write_csv(perception / "inventory.csv", rows, INVENTORY_FIELDS)
     _write_xlsx(perception / "inventory.xlsx", rows, INVENTORY_FIELDS)
-    map_center_count = _write_inventory_map(slam / "slam_map_with_inventory.ply", slam / "slam_map.ply", rows)
+    map_center_count = _write_inventory_map(slam / "slam_map_with_inventory.ply", validated_cloud_bytes, rows)
     result = {
         "status": "complete",
         "ground_truth_consumed": True,
@@ -552,6 +724,8 @@ def evaluate_inventory(
         "git_sha": _git_sha(Path(repo_root).resolve()) if repo_root else None,
         "evaluation_start_timestamp_s": start_timestamp_s,
         "evaluation_started_at_utc": evaluation_started_at.isoformat(),
+        "map_version": input_provenance["map_version"],
+        "input_provenance": input_provenance,
         "eligibility_evidence": eligibility_evidence,
         "metrics": metrics,
         "artifacts": {
