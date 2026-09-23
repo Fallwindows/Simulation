@@ -36,6 +36,7 @@ def generate_launch_description():
         contract = _load_json(package_share / "config" / "contracts.yaml")
         mapping_path = LaunchConfiguration("mapping_params_path").perform(context)
         mapping = _load_json(mapping_path if mapping_path else package_share / "config" / "params.yaml")
+        slam_latch = mapping.pop("slam_latch", None)
         topics = contract["topics"]
         frames = contract["frames"]
         use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
@@ -54,6 +55,10 @@ def generate_launch_description():
                 formatted = _rtabmap_value(key, value)
                 odom_params[key] = formatted
                 slam_params[key] = formatted
+        if slam_latch is not None:
+            if not isinstance(slam_latch, bool):
+                raise ValueError("slam_latch must be a JSON boolean")
+            slam_params["latch"] = _rtabmap_value("latch", slam_latch)
         odom_params.update({"publish_tf": True, "scan_cloud_max_points": 50000})
         slam_params.update({"publish_tf": True, "database_path": database_path})
 

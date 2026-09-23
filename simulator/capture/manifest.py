@@ -138,12 +138,11 @@ def _usda_scope(text: str, scope_name: str) -> str:
 
 def _usda_geometry_hash(path: Path) -> str:
     geometry = _usda_scope(path.read_text(encoding="utf-8"), "Geometry")
-    # Material and artwork bindings/UVs affect appearance but not mesh identity.
+    # Material, normals, and UVs affect RGB appearance but not physical mesh identity.
+    for declaration in _usda_surface_declarations(geometry):
+        geometry = geometry.replace(declaration, "", 1)
     geometry = re.sub(r'(?m)^\s*prepend\s+apiSchemas\s*=\s*\["MaterialBindingAPI"\]\s*$', "", geometry)
     geometry = re.sub(r"(?m)^\s*rel\s+material:binding\s*=.*$", "", geometry)
-    geometry = re.sub(r"(?ms)^\s*texCoord\w*\[\]\s+primvars:[^\n]+(?:\n\s*\([^)]*\))?\s*", "", geometry)
-    geometry = re.sub(r"(?m)^\s*normal3f\[\]\s+normals\s*=.*$", "", geometry)
-    geometry = re.sub(r"(?m)^\s*uniform\s+token\[\]\s+normals:interpolation\s*=.*$", "", geometry)
     return sha256_json(re.sub(r"\s+", "", geometry))
 
 
@@ -154,11 +153,42 @@ def _usda_appearance_hash(path: Path) -> str:
 
 def _usda_surface_hash(path: Path) -> str:
     geometry = _usda_scope(path.read_text(encoding="utf-8"), "Geometry")
-    authored_surface_data = re.findall(
-        r"(?ms)^\s*(?:normal\d+f\[\]\s+normals|texCoord\d+f\[\]\s+primvars:[\w:]+)\s*=\s*\[.*?\](?:\s*\([^)]*\))?",
-        geometry,
-    )
+    authored_surface_data = _usda_surface_declarations(geometry)
     return sha256_json(re.sub(r"\s+", "", "\n".join(authored_surface_data)))
+
+
+def _usda_surface_declarations(geometry: str) -> list[str]:
+    """Extract authored normal/primvar values and their interpolation/index metadata."""
+
+    lines = geometry.splitlines(keepends=True)
+    declarations: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if "=" not in line:
+            index += 1
+            continue
+        left, right = line.split("=", 1)
+        if not any(token in left for token in ("normals", "primvars:", "texCoord")):
+            index += 1
+            continue
+        declaration = line
+        square_depth = right.count("[") - right.count("]")
+        cursor = index + 1
+        while square_depth > 0 and cursor < len(lines):
+            declaration += lines[cursor]
+            square_depth += lines[cursor].count("[") - lines[cursor].count("]")
+            cursor += 1
+        tail = declaration.rsplit("]", 1)[-1] if "[" in declaration else right
+        if "(" in tail:
+            paren_depth = tail.count("(") - tail.count(")")
+            while paren_depth > 0 and cursor < len(lines):
+                declaration += lines[cursor]
+                paren_depth += lines[cursor].count("(") - lines[cursor].count(")")
+                cursor += 1
+        declarations.append(declaration)
+        index = max(index + 1, cursor)
+    return declarations
 
 
 def _bag_metadata_files(metadata_path: Path) -> list[str]:

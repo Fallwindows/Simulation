@@ -1,6 +1,7 @@
 import json
 import shutil
 import csv
+import importlib.util
 import math
 import sqlite3
 import subprocess
@@ -51,6 +52,88 @@ def _make_sensor_capture(root: Path) -> dict:
 
 
 class CaptureArchitectureTests(unittest.TestCase):
+    def test_slam_latch_config_is_only_routed_to_slam_and_final_cloud_is_fresh(self):
+        root_config = json.loads((ROOT / "config/mapping/rtabmap/params.yaml").read_text(encoding="utf-8"))
+        packaged_config = json.loads((ROOT / "ros2_ws/src/grocery_sim_mapping/config/params.yaml").read_text(encoding="utf-8"))
+        self.assertIs(root_config["slam_latch"], False)
+        self.assertEqual(packaged_config, root_config)
+
+        captured_nodes = []
+        ament = types.ModuleType("ament_index_python")
+        ament_packages = types.ModuleType("ament_index_python.packages")
+        ament_packages.get_package_share_directory = lambda package: str(ROOT / "ros2_ws/src/grocery_sim_mapping")
+        launch = types.ModuleType("launch")
+        actions = types.ModuleType("launch.actions")
+        substitutions = types.ModuleType("launch.substitutions")
+        launch_ros = types.ModuleType("launch_ros")
+        ros_actions = types.ModuleType("launch_ros.actions")
+
+        class LaunchDescription:
+            def __init__(self, entities): self.entities = entities
+
+        class OpaqueFunction:
+            def __init__(self, function): self.function = function
+
+        class DeclareLaunchArgument:
+            def __init__(self, name, default_value=None): self.name = name; self.default_value = default_value
+
+        class LaunchConfiguration:
+            def __init__(self, name): self.name = name
+            def perform(self, context): return context[self.name]
+
+        class Node:
+            def __init__(self, **kwargs): self.kwargs = kwargs; captured_nodes.append(self)
+
+        launch.LaunchDescription = LaunchDescription
+        actions.OpaqueFunction = OpaqueFunction
+        actions.DeclareLaunchArgument = DeclareLaunchArgument
+        substitutions.LaunchConfiguration = LaunchConfiguration
+        ros_actions.Node = Node
+        modules = {
+            "ament_index_python": ament,
+            "ament_index_python.packages": ament_packages,
+            "launch": launch,
+            "launch.actions": actions,
+            "launch.substitutions": substitutions,
+            "launch_ros": launch_ros,
+            "launch_ros.actions": ros_actions,
+        }
+        launch_path = ROOT / "ros2_ws/src/grocery_sim_mapping/launch/rtabmap_lidar.launch.py"
+        spec = importlib.util.spec_from_file_location("grocery_sim_rtabmap_launch_fixture", launch_path)
+        self.assertIsNotNone(spec)
+        launch_module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, modules):
+            spec.loader.exec_module(launch_module)
+            description = launch_module.generate_launch_description()
+            action = next(entity for entity in description.entities if isinstance(entity, OpaqueFunction))
+            with tempfile.TemporaryDirectory() as directory:
+                context = {
+                    "mapping_params_path": str(ROOT / "config/mapping/rtabmap/params.yaml"),
+                    "database_path": str(Path(directory) / "rtabmap.db"),
+                    "use_sim_time": "true",
+                }
+                nodes = action.function(context)
+        odom = next(node.kwargs for node in nodes if node.kwargs["package"] == "rtabmap_odom")
+        slam = next(node.kwargs for node in nodes if node.kwargs["package"] == "rtabmap_slam")
+        odom_parameters = odom["parameters"][0]
+        slam_parameters = slam["parameters"][0]
+        self.assertNotIn("latch", odom_parameters, "slam_latch must not alter ICP odometry parameters")
+        self.assertIs(slam_parameters["latch"], False)
+
+        # The observer still requires a new cloud callback after PublishMap and
+        # binds the graph/data/cloud by one exact map-frame timestamp.
+        observer_source = (ROOT / "simulator/capture/slam_observer.py").read_text(encoding="utf-8")
+        self.assertIn("self.map_messages > self.map_messages_before_publish", observer_source)
+        self.assertIn("self.map_graph_stamp_s == self.map_data_stamp_s == self.map_stamp_s", observer_source)
+
+    def test_slam_observer_subscribes_to_launch_resolved_map_topics(self):
+        source = (ROOT / "simulator/capture/slam_observer.py").read_text(encoding="utf-8")
+        self.assertIn('create_subscription(MapGraph, "/mapGraph"', source)
+        self.assertIn('create_subscription(MapData, "/mapData"', source)
+        self.assertIn('create_subscription(PointCloud2, "/slam/map_cloud"', source)
+        self.assertNotIn('create_subscription(MapGraph, "/rtabmap/mapGraph"', source)
+        self.assertNotIn('create_subscription(MapData, "/rtabmap/mapData"', source)
+
     def test_hashes_are_stable_and_physical_inputs_are_separate(self):
         first = build_experiment_hashes(SCENARIO, ROOT)
         second = build_experiment_hashes(SCENARIO, ROOT)
@@ -105,6 +188,17 @@ class CaptureArchitectureTests(unittest.TestCase):
             self.assertNotEqual(uv_before["appearance_sha256"], uv_after["appearance_sha256"])
             self.assertEqual(uv_before["product_hashes"]["slam_map_sha256"], uv_after["product_hashes"]["slam_map_sha256"])
             self.assertNotEqual(uv_before["product_hashes"]["rgb_perception_sha256"], uv_after["product_hashes"]["rgb_perception_sha256"])
+            usd.write_bytes(authored_geometry)
+
+            interpolation_before = build_experiment_hashes(scenario, root)
+            interpolation = b'uniform token[] normals:interpolation = ["uniform"]'
+            self.assertIn(interpolation, authored_geometry)
+            usd.write_bytes(authored_geometry.replace(interpolation, b'uniform token[] normals:interpolation = ["vertex"]', 1))
+            interpolation_after = build_experiment_hashes(scenario, root)
+            self.assertEqual(interpolation_before["geometry_sha256"], interpolation_after["geometry_sha256"])
+            self.assertNotEqual(interpolation_before["appearance_sha256"], interpolation_after["appearance_sha256"])
+            self.assertEqual(interpolation_before["product_hashes"]["slam_map_sha256"], interpolation_after["product_hashes"]["slam_map_sha256"])
+            self.assertNotEqual(interpolation_before["product_hashes"]["rgb_perception_sha256"], interpolation_after["product_hashes"]["rgb_perception_sha256"])
             usd.write_bytes(authored_geometry)
 
             color_before = build_experiment_hashes(scenario, root)
@@ -528,16 +622,57 @@ $global:LASTEXITCODE = 0
             class Future:
                 def __init__(self): self.is_done = False
                 def done(self): return self.is_done
-                def result(self): return type("Response", (), {"success": True})()
+                def result(self): return type("PublishMapResponse", (), {})()
 
             class FakeClient:
                 def __init__(self): self.future = None; self.request = None
                 def wait_for_service(self, timeout_sec): return True
                 def call_async(self, request): self.request = request; self.future = Future(); return self.future
 
+            class GraphFuture:
+                def __init__(self, response): self.response = response
+                def done(self): return True
+                def result(self): return self.response
+
+            class FakeGraphClient:
+                def __init__(self, responses): self.responses = list(responses); self.requests = []
+                def wait_for_service(self, timeout_sec): return True
+                def call_async(self, request):
+                    self.requests.append(request)
+                    return GraphFuture(self.responses.pop(0))
+
+            class GetMapRequest:
+                def __init__(self): self.global_map = False; self.optimized = False; self.graph_only = True
+
+            def optimized_graph_response(first_node_x):
+                def pose(x):
+                    return type("Pose", (), {
+                        "position": type("Vector", (), {"x": x, "y": 0.0, "z": 0.0})(),
+                        "orientation": type("Quaternion", (), {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})(),
+                    })()
+                def node(node_id, stamp_s, x):
+                    raw_pose = type("Pose", (), {
+                        "position": type("Vector", (), {"x": x, "y": 0.0, "z": 0.0})(),
+                        "orientation": type("Quaternion", (), {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})(),
+                    })()
+                    return type("NodeData", (), {"id": node_id, "stamp": stamp_s, "pose": raw_pose})()
+                nodes = [node(1, 11.5, 0.0), node(2, 12.0, 1.0)]
+                map_to_odom = type("Transform", (), {
+                    "translation": type("Vector", (), {"x": 0.0, "y": 0.0, "z": 0.0})(),
+                    "rotation": type("Quaternion", (), {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})(),
+                })()
+                graph = type("MapGraph", (), {"poses_id": [1, 2], "poses": [pose(first_node_x), pose(5.0)], "map_to_odom": map_to_odom})()
+                stamp = type("Stamp", (), {"sec": 12, "nanosec": 0})()
+                header = type("Header", (), {"frame_id": "map", "stamp": stamp})()
+                data = type("MapData", (), {"header": header, "graph": graph, "nodes": nodes})()
+                graph_message = type("MapGraphMessage", (), {
+                    "header": header, "poses_id": graph.poses_id, "poses": graph.poses, "map_to_odom": graph.map_to_odom,
+                })()
+                return data, graph_message
+
             class PointCloudReader:
                 @staticmethod
-                def read_points(message, **kwargs): return [(1.0, 2.0, 3.0)]
+                def read_points(message, **kwargs): return [(4.0, 0.0, 0.0)]
 
             class FakeRos:
                 def __init__(self): self.observer = None; self.spin_count = 0
@@ -553,10 +688,15 @@ $global:LASTEXITCODE = 0
                     if future is not None and not future.done():
                         message = type("Message", (), {
                             "fields": [type("Field", (), {"name": name})() for name in ("x", "y", "z")],
-                            "header": type("Header", (), {"stamp": type("Stamp", (), {"sec": 12, "nanosec": 0})()})(),
+                            "header": type("Header", (), {"stamp": type("Stamp", (), {"sec": 12, "nanosec": 0})(), "frame_id": "map"})(),
                         })()
                         self.observer._on_map(message)
+                        data, graph_message = optimized_graph_response(4.0)
+                        self.observer._on_map_data(data)
+                        self.observer._on_map_graph(graph_message)
                         future.is_done = True
+                    else:
+                        __import__("time").sleep(timeout_sec)
 
             class Node:
                 def destroy_node(self): pass
@@ -590,9 +730,25 @@ $global:LASTEXITCODE = 0
             observer._on_tf(transform_message(11.9, 1.0))
             observer._on_tf(transform_message(12.0, 3.0))
             observer.map_pose_rows = []
+            observer.graph_pose_version = None; observer.optimized_graph_last_stamp_s = None
+            observer.optimized_pose_graph_complete = False; observer.map_graph_matches_final_cloud = False
+            observer.pre_publish_graph_version = None
             observer.latest_map = []; observer.map_stamp_s = None; observer.map_messages = 0
+            observer.map_graph_messages = 0; observer.map_data_messages = 0
+            observer.map_graph_before_publish = 0; observer.map_data_before_publish = 0
+            observer.map_graph_message = None; observer.map_data_message = None
+            observer.map_graph_stamp_s = None; observer.map_data_stamp_s = None
+            observer.map_cloud_frame_id = None; observer.final_map_graph_frame_id = None
+            observer.final_map_graph_stamp_s = None; observer.final_cloud_stamp_s = None
             observer.point_cloud2 = PointCloudReader; observer.publish_map_client = FakeClient(); observer.close_timeout_s = 5.0
+            observer.publish_map_request_factory = type("PublishMapRequest", (), {"__init__": lambda self: None})
             ros.observer = observer
+            pre_data, pre_graph = optimized_graph_response(4.0)
+            pre_cloud = type("Message", (), {
+                "fields": [type("Field", (), {"name": name})() for name in ("x", "y", "z")],
+                "header": type("Header", (), {"stamp": type("Stamp", (), {"sec": 12, "nanosec": 0})(), "frame_id": "map"})(),
+            })()
+            observer._on_map(pre_cloud); observer._on_map_data(pre_data); observer._on_map_graph(pre_graph)
             observer.spin_until_done()
             self.assertTrue(observer.replay_complete_signal_observed)
             self.assertTrue(observer.drain_complete)
@@ -600,9 +756,14 @@ $global:LASTEXITCODE = 0
             self.assertTrue(observer.publish_map_acknowledged)
             self.assertTrue(observer.mapper_database_span)
             self.assertTrue(observer.final_map_span)
+            self.assertEqual(observer.map_messages_before_publish, 1)
+            self.assertEqual(observer.map_messages, 2)
+            self.assertEqual(observer.final_map_graph_stamp_s, observer.final_cloud_stamp_s)
             self.assertTrue(observer.publish_map_client.request.global_map)
             self.assertTrue(observer.publish_map_client.request.optimized)
             self.assertFalse(observer.publish_map_client.request.graph_only)
+            self.assertTrue(observer.map_graph_matches_final_cloud)
+            self.assertTrue(observer.optimized_pose_graph_complete)
             observer.output_dir = Path(directory) / "observer_output"
             observer.output_dir.mkdir()
             result = observer.close()
@@ -612,15 +773,55 @@ $global:LASTEXITCODE = 0
             self.assertTrue(result["final_map_span"])
             self.assertEqual(result["database_last_stamp_s"], 12.0)
             self.assertTrue(result["map_pose_correction_complete"])
+            self.assertEqual(result["pose_source"], "rtabmap_optimized_graph")
+            self.assertTrue(result["map_graph_matches_final_cloud"])
+            self.assertTrue(result["graph_pose_version"])
+            self.assertEqual(result["final_map_graph_stamp_s"], result["final_cloud_stamp_s"])
+            self.assertEqual(result["final_map_graph_frame_id"], "map")
             with (observer.output_dir / "slam_map_poses.csv").open(encoding="utf-8") as handle:
                 corrected = list(csv.DictReader(handle))
             with (observer.output_dir / "slam_odom_poses.csv").open(encoding="utf-8") as handle:
                 raw = list(csv.DictReader(handle))
             self.assertEqual(corrected[0]["frame_id"], "map")
-            self.assertAlmostEqual(float(corrected[0]["x_m"]), 2.0, places=6)
+            self.assertAlmostEqual(float(corrected[0]["x_m"]), 4.0, places=6)
+            self.assertAlmostEqual(float(corrected[0]["x_m"]), observer.latest_map[0][0], places=6)
+            self.assertNotAlmostEqual(float(corrected[0]["x_m"]), 2.0, places=6, msg="final optimized graph pose must supersede historical incremental TF correction")
             self.assertEqual(raw[0]["frame_id"], "odom")
             artifact_record = next(item for item in result["files"] if item["path"] == "slam_map_poses.csv")
             self.assertEqual(artifact_record["sha256"], sha256_file(observer.output_dir / "slam_map_poses.csv"))
+            self.assertEqual(artifact_record["map_version"], result["map_version"])
+            self.assertEqual(artifact_record["frame_id"], "map")
+            self.assertTrue(artifact_record["optimized"])
+            self.assertEqual(len(corrected), len(raw))
+            keyframes = next(item for item in result["files"] if item["path"] == "slam_map_keyframes.csv")
+            self.assertEqual(keyframes["map_version"], result["map_version"])
+            self.assertEqual(keyframes["schema_version"], 2)
+            with (observer.output_dir / "slam_map_keyframes.csv").open(encoding="utf-8") as handle:
+                keyframe_rows = list(csv.DictReader(handle))
+            self.assertAlmostEqual(float(keyframe_rows[0]["x_m"]), 4.0, places=6)
+            self.assertAlmostEqual(float(keyframe_rows[0]["odom_x_m"]), 0.0, places=6)
+            self.assertAlmostEqual(float(keyframe_rows[0]["correction_x_m"]), 4.0, places=6)
+            self.assertTrue(result["pre_publish_graph_version"])
+            self.assertEqual(result["graph_pose_version"], result["pre_publish_graph_version"])
+            self.assertTrue(result["dense_pose_version"])
+            self.assertTrue(result["map_version"])
+
+            # A later loop closure changes node 1's optimized pose while raw
+            # odometry stays fixed; the production exporter follows the final graph.
+            loop_closed_data, loop_closed_graph = optimized_graph_response(6.0)
+            observer.map_data_message = loop_closed_data
+            observer.map_graph_message = loop_closed_graph
+            observer._capture_final_optimized_graph()
+            self.assertAlmostEqual(float(observer.map_pose_rows[0]["x_m"]), 4.2, places=6)
+            self.assertNotEqual(observer.graph_pose_version, result["pre_publish_graph_version"])
+
+            data, graph_message = optimized_graph_response(4.0)
+            observer.map_graph_message = graph_message
+            observer.map_data_message = data
+            observer.map_graph_stamp_s = 12.0
+            observer.map_data_stamp_s = 11.9
+            with self.assertRaisesRegex(RuntimeError, "stamps do not identify one publication"):
+                observer._capture_final_optimized_graph()
 
             clock_observer = SlamObserver.__new__(SlamObserver)
             clock_observer.callback_generation = 0; clock_observer.last_clock_s = None
@@ -718,11 +919,15 @@ $global:LASTEXITCODE = 0
                 observer.publish_map_acknowledged = False; observer.map_messages_before_publish = 0
                 observer.final_map_span = False; observer.mapper_database_span = False
                 observer.database_node_count = 0; observer.database_last_stamp_s = None
+                observer.map_pose_rows = []
+                observer.graph_pose_version = None; observer.optimized_graph_last_stamp_s = None
+                observer.optimized_pose_graph_complete = False; observer.map_graph_matches_final_cloud = False
+                observer.pre_publish_graph_version = None
                 observer.node = Node()
                 result = observer.close()
                 self.assertEqual(result["status"], "incomplete")
                 self.assertFalse(result["map_pose_correction_complete"])
-                self.assertEqual(result["uncorrected_odom_sample_count"], 1)
+                self.assertFalse(result["optimized_pose_graph_complete"])
                 with (observer.output_dir / "slam_map_poses.csv").open(encoding="utf-8") as handle:
                     self.assertEqual(list(csv.DictReader(handle)), [])
                 for record in result["files"]:
