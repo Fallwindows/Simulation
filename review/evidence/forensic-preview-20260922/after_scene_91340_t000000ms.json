@@ -1,0 +1,152 @@
+{
+  "status": "complete",
+  "purpose": "approved forensic-scene comparable after frame",
+  "source": {
+    "commit": "91340cfc47a02f18341ddc5a80963337ed6aa394",
+    "tree": "1db83f7bc0a763bc01512f447c6bb1ddc8276e88",
+    "workspace": "C:\\Users\\suyog\\.codex\\worktrees\\forensic-scene\\Simulation",
+    "selected_inputs_match_head": true,
+    "input_sha256": {
+      "simulator/runtime/isaac_sim_runner.py": "35603f9ed2c6f17d1c2f3c04fe3c6f9eeb4734b2f1891336cc9ab4fff0462c36",
+      "simulator/config/loader.py": "7ca0fb15fdbcf33051229e0a4df35579ecae32424e2577a9e0a21f917231c90c",
+      "simulator/environment/isaac_builder.py": "0072764f1187bffa47089013eb51791e708585192044cb6bbc7f972919fb77da",
+      "simulator/environment/aisle_builder.py": "6b378a5f7a9c4d036edbac542ab02f7a7504903e532d7fa0f2947e8b9c0b79d1",
+      "simulator/environment/retail_catalog.py": "238982dd27fb240081404be4601fb6c5a7b58bbc608cbb7003b35dd4659c048c",
+      "simulator/motion/trajectory.py": "8439041e947bb5bb04522f8b6b69ecb952fd52335f15a1df4ef3e41ec3fce1b3",
+      "simulator/sensors/transforms.py": "e577e37afc780847999d65fa4876763cf363465896ba9c89029467236f34840e",
+      "config/scenarios/walking_baseline.yaml": "d08ccd3d805aefaefb06b5f7447e8b78adca058c7c88e15f3d971058fa4fac35",
+      "config/environments/baseline_aisle.yaml": "bcee62d4e691d25c0d70b38f45dee93cce4c5ff06ab4ee45abe524041851c478",
+      "config/sensors/baseline_rgb_lidar.yaml": "3339a0cca53e079f8a16f2530fe67adefb28fd944c998112116f8cdcf898dc01",
+      "config/trajectories/walking.yaml": "99924708c59f214e5e434b08cdbf183f92ed8690afe5960419f29840ab600b41",
+      "assets/retail/manifest.json": "431972a8931001380d119e1d5d18bf0d4d74d18f9d8f93a85e747597712d346a"
+    },
+    "authored_usda_sha256": {
+      "assets/retail/usd/can_beans.usda": "58d58e320b4033548eac8f04185a3bdb06c3ea3dfb6ac937885a0378732cac94",
+      "assets/retail/usd/can_soup_green.usda": "764a35c2ae771ec0ec13362ce78a576b8c999c4a306fc15adb1a49a28b9c8c2d",
+      "assets/retail/usd/can_soup_red.usda": "4b874fdd63e15f134f940ff206d368c361894743f64724c0596cc0151411caaf",
+      "assets/retail/usd/can_tomato.usda": "79e24907db1dddfbed74a3804ec93c275160d2e53e28cd8b44f8bb29872e9fd3",
+      "assets/retail/usd/cereal_berry.usda": "083acd59ae43d1c1afd9dceba7976d64ccca8d8fd5746b93a8a294505ac719ea",
+      "assets/retail/usd/cereal_grain.usda": "b5850d6a4e2ede5eb7adae88a8de69d963e44e052f36b6729956d8725e7035ff",
+      "assets/retail/usd/cereal_harvest.usda": "f7d10bc0686dc2645d6ecb2fd1f8db73be40543471493b0de2df6c689e0369f2",
+      "assets/retail/usd/cereal_honey.usda": "0106555503ab922a763f020f49b51cd253aa23cd8a7c614a48288cf26abeb821",
+      "assets/retail/usd/cereal_morning.usda": "a0965bd2cb2431302a70746faeb95fb06cbcca8357541534ef789d69a5a25241",
+      "assets/retail/usd/cereal_sunrise.usda": "5abbd484f9e18424afe6c8dc7e845cc6a0ce43a48d6b4b3967bf48d8c4d6196c",
+      "assets/retail/usd/green_apple.usda": "7f0568bce255651b2400e3d18c1aa00e08a636696666a328a4b4b8be39a3bf1f",
+      "assets/retail/usd/jar_honey.usda": "cd8c778312fed7357ebf5336b604faa903fd88fd6b73eced26636fe8d04c62c0",
+      "assets/retail/usd/jar_pickle.usda": "5e0914fd68b6949795d7f7c7323b767ca80ecb32fa31b632a08f7eb39976a3d4",
+      "assets/retail/usd/jar_sauce.usda": "b7695adbcfc75db240872da3a54e7c244d308cb7252ad621030d1e293bc3e312",
+      "assets/retail/usd/juice_apple.usda": "1dfc2b44da040dba5b3e21a2b0f9dc800f3316adf179a4ab61293591df43bb07",
+      "assets/retail/usd/juice_berry.usda": "ad51bdd2364e762c28234b5d641ee96b6ae9f8ef7a6c931568f8b22bef064fe3",
+      "assets/retail/usd/juice_citrus.usda": "046956dd6205f15e1b641aa5177886954651f3737bbbb7760dc176594892a576",
+      "assets/retail/usd/juice_green.usda": "1fa3acb03fec4b3df7d3c357fdf3b4173c86a049cecbaeb03186a756d6af91f1",
+      "assets/retail/usd/lemon.usda": "dcaef737ab1c36a3ed34815cc07fffde71a90a793f34c53c9c0cc90604cbc194",
+      "assets/retail/usd/orange.usda": "953043af49c1887c40031e2c0dd474d3b76bb045b3ec23a95886c392d8f26bb7",
+      "assets/retail/usd/produce_crate_green.usda": "1c3ced2e92c821227cac8ca1493e5b92a44afa4611ef95057ad6f6f5a4d6e590",
+      "assets/retail/usd/produce_crate_red.usda": "091cd7f43c3308a2c63437991c01b69c9eff42c51fc19e04f5c7f298be21350f",
+      "assets/retail/usd/promo_market_sign.usda": "c64d2ad0a9766e88fd2b32a66fa13adc1bd8bcbe57c7b51518aa3d05534b3efb",
+      "assets/retail/usd/red_apple.usda": "78e4266b1eb43846321cb5a59c11b98c003b8678406781e52582fd41aacc52eb",
+      "assets/retail/usd/snack_chips.usda": "26ec4a439068207e9907103de88e969559e531ee0564aed520ea0a45b8b277a6",
+      "assets/retail/usd/snack_cracker.usda": "72f967802e2924d586d351c5c691af32ba892d97ff6276f268ae458234f65146",
+      "assets/retail/usd/snack_popcorn.usda": "7b938990460d900a55a8a0cae53cf5fdda547a42a00baca61ef43489d3a6656b",
+      "assets/retail/usd/snack_pretzel.usda": "a96cc3b009ed786803125cb605ac2526cad41f1927cf464482d1c3e15579dadb",
+      "assets/retail/usd/snack_wafer.usda": "fc40879ed1a6c52927883f0c2be658fa75b92cdf61fb48ec0a4f5351833f4389",
+      "assets/retail/usd/soda_cherry.usda": "5cce86b2e4c900ad9ad2313316f7b94cca5aa152971427347f61ffdcb6fde146",
+      "assets/retail/usd/soda_lime.usda": "c935155a67a522d8a01af930e108aafd80b412051ecd17c6e93199df7bbac907",
+      "assets/retail/usd/soda_orbit.usda": "8bdba8584d001690d2266048214b0127f886f91dd8ec2262490991707904a2ac",
+      "assets/retail/usd/water_clear.usda": "b544a5b63642ab68b59c07f4b7497f25801e298c976ea394b82d37409d50226e",
+      "assets/retail/usd/water_sky.usda": "166103140833bc60b2d98edf02d72caf9c2a513063dcb3f2857836bd2883c4d2"
+    },
+    "texture_sha256": {
+      "assets/retail/textures/can_beans.png": "49ea8c9eae61bb2e141698936cfeabd4f71b6f948f4cea1c9ac12bff1150d394",
+      "assets/retail/textures/can_soup_green.png": "4659d641b49db36a4d24b6e6eb0bc7d814fbf0fccd53cd59ce8677f15aef44c8",
+      "assets/retail/textures/can_soup_red.png": "2f084d6ef182c8d354bbd87bd9931a8ac0e65d4c98e7ddc44b4aa09789a49f50",
+      "assets/retail/textures/can_tomato.png": "82af0d8874b0e993f4ee6e7383f8030de89146d8a0fe677aed7f5ef45c944b5e",
+      "assets/retail/textures/cereal_berry.png": "fc215886be6fbe5b5c8f12bba147a181d865e575d6b0cee8715b94e1cdd0ca9e",
+      "assets/retail/textures/cereal_grain.png": "02945a1d9ae2bd17138c49ac4a26880b54367cf840581543d367b3d040e17ef4",
+      "assets/retail/textures/cereal_harvest.png": "d8ce0781ba4adc1d907ab68b524e844dcc7d65101360539eed8ba37d386e9113",
+      "assets/retail/textures/cereal_honey.png": "1495fbfeb17b7bdaafb4e84b86300e77f1479b824d5e5371506976a0527ebc17",
+      "assets/retail/textures/cereal_morning.png": "7357110e5f478863558d83a71655fb0426c77840ccaa39ff92fc550e4c9fafe9",
+      "assets/retail/textures/cereal_sunrise.png": "fea1ff84a088601b90b4b17ee2e90e80737b6cf83e698cb852191b3abfa620b8",
+      "assets/retail/textures/green_apple.png": "f4a31a0db6490ef4bd6f07292dfff46673bc0bdd129b6cbb8b0afb3446531352",
+      "assets/retail/textures/jar_honey.png": "d1c343e51c4f5bb83e203f426505810809c3888595183bbd60e85148b53d3f0c",
+      "assets/retail/textures/jar_pickle.png": "27878d02fb89808ac13055bb530bf850a109e13ebf6839d92732cf800bb6b11a",
+      "assets/retail/textures/jar_sauce.png": "f9ea4eff5c057405f37cd4cc642e9229ad1b7ac991f3e3cb26d1a8ac6975c15d",
+      "assets/retail/textures/juice_apple.png": "1877146d05dd020cdf98ec75af5f0dcd65acb017590d603a629d4af58f7331d6",
+      "assets/retail/textures/juice_berry.png": "05dd712d2c1c0388a59fc39cc938730b51a6fe338bb5072876c602980bee098c",
+      "assets/retail/textures/juice_citrus.png": "bf244e802a0921981cffc2865ba92df757eec122157a8cb826814835c22a85a1",
+      "assets/retail/textures/juice_green.png": "f3795674cc8a9fd6878682a2f6885ce789e2dbd48b899d05f165672560c69192",
+      "assets/retail/textures/lemon.png": "5ae3a264d409b8b5e9ae5591569361c4ebb578342d19905421698123cc7913a1",
+      "assets/retail/textures/orange.png": "1e94b42565dee2cdc6c2913c5b50ffb86c5297feb002518099c98998e85c51a5",
+      "assets/retail/textures/produce_crate_green.png": "c52d9b305880a499555a201b8d21fce1da4238dab1a7e85c5a1f98aaaf1ce949",
+      "assets/retail/textures/produce_crate_red.png": "80f8479c79f9370b6cc1ea91c2c51f9ea8545d1b95a552d84f4e1a181e29e4b6",
+      "assets/retail/textures/promo_market_sign.png": "c79d4aa19e48a0887b181cf227ae10b5e686d785dc26c7e79a35c7813efc3028",
+      "assets/retail/textures/red_apple.png": "ce334bd9aba88b1b51c81e0015c12926fd2a8da1a38636f74aa5262126942a4b",
+      "assets/retail/textures/snack_chips.png": "5623587a08115271f695a51a64d083b2071ce52bfadfd3cc632db88976e73f3b",
+      "assets/retail/textures/snack_cracker.png": "c4c9451735dea423e6b3c7d0f9680af8c39b92ab5422e65f05d5039e7fbf1204",
+      "assets/retail/textures/snack_popcorn.png": "ad74d1811baabe89b17f80d7eacf4bb84682381bb465317e9af03bf777e51ad8",
+      "assets/retail/textures/snack_pretzel.png": "a72a0a7c087cf3178343bfba119790663e7d7dd369410db2b9c7015c39c02f62",
+      "assets/retail/textures/snack_wafer.png": "0cd64ff1056fa412c2a858bc9d26844488ab1b36c067b0cda2fb54fae2d0e7c8",
+      "assets/retail/textures/soda_cherry.png": "c7f2d2c500b32bc56babd7c23f69d9c77788f3a1a01bbfd719396b8bf012d998",
+      "assets/retail/textures/soda_lime.png": "57bda7f07d443959a620cb84c6998e818969ff3637f21ce33751c832535835c4",
+      "assets/retail/textures/soda_orbit.png": "d9c0b4d350edbbb7280133525ec82e81975fd69033a784ce618c3fe63a66d093",
+      "assets/retail/textures/water_clear.png": "073636eb6274f859d2cd615b429097a9a6433bb854633d0f1016d3c92e0e5aab",
+      "assets/retail/textures/water_sky.png": "07be78e2477c440b7271ede5eaf0031bdca8565eaa79ef48a0701a47e6323572"
+    },
+    "script": "C:\\Users\\suyog\\OneDrive\\Documents\\ChatGPT\\Simulation\\review\\evidence\\forensic-preview-20260922\\capture_after_scene_91340.py",
+    "script_sha256": "6a91eed22929ca89584ae07756a5ecb1c17d6c50d22939bcf5247f3759ceb7ea"
+  },
+  "runtime": {
+    "launcher": "C:/isaacsim/python.bat",
+    "isaac_version": "6.1.0-rc.26+release.49347.2d230af4.gl",
+    "renderer": "RaytracedLighting",
+    "headless": true,
+    "ros_enabled": false,
+    "opencv_used": false,
+    "capture_api": "omni.replicator.core rgb annotator + functional.write_image",
+    "rt_subframes": 8,
+    "captured_frame_count": 1
+  },
+  "scene": {
+    "scenario": "C:\\Users\\suyog\\.codex\\worktrees\\forensic-scene\\Simulation\\config\\scenarios\\walking_baseline.yaml",
+    "camera_path": "/World/SensorRig/camera_link/camera_optical_frame",
+    "capture_time_s": 0.0,
+    "rig_position_m": [
+      1.5,
+      0.0,
+      0.0
+    ],
+    "rig_orientation_xyzw": [
+      0.0,
+      0.013089595571344443,
+      0.0,
+      0.9999143275740071
+    ],
+    "primitive_count": 2305
+  },
+  "image": {
+    "path": "C:\\Users\\suyog\\OneDrive\\Documents\\ChatGPT\\Simulation\\review\\evidence\\forensic-preview-20260922\\after_scene_91340_t000000ms.png",
+    "width": 1280,
+    "height": 720,
+    "mode": "RGBA",
+    "channel_extrema": [
+      [
+        0,
+        243
+      ],
+      [
+        0,
+        245
+      ],
+      [
+        0,
+        244
+      ],
+      [
+        255,
+        255
+      ]
+    ],
+    "size_bytes": 1030580,
+    "sha256": "3cec305dae8f5bb55c21bf59f2dd967ae0888a1a3991a5c5bfed31ab96767512"
+  }
+}
