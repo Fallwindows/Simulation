@@ -1,0 +1,113 @@
+{
+  "runtime": "isaac_sim",
+  "isaac_version": "6.1.0",
+  "scenario": "baseline_straight",
+  "frames_simulated": 1230,
+  "primitive_count": 2305,
+  "product_count": 1995,
+  "topics": {
+    "clock": "/clock",
+    "rgb": "/sim/camera/rgb/image_raw",
+    "camera_info": "/sim/camera/rgb/camera_info",
+    "lidar_ideal": "/sim/lidar/points_ideal",
+    "lidar": "/sim/lidar/points",
+    "ground_truth_pose": "/sim/ground_truth/pose"
+  },
+  "frames": [
+    "sim_world",
+    "truth_sensor_rig",
+    "sensor_rig",
+    "camera_link",
+    "camera_optical_frame",
+    "lidar_link",
+    "map",
+    "odom"
+  ],
+  "camera_cadence": {
+    "requested_fps": 30.0,
+    "frame_skip_count": 1,
+    "effective_fps": 30.0,
+    "mode": "ros2_camera_helper_frameSkipCount"
+  },
+  "observed_rgb_frames": 0,
+  "observed_rgb_hz": null,
+  "clock_source": "Isaac timeline current_time",
+  "ros_callback_service": "MultiThreadedExecutor background thread",
+  "timestamp_phase": {
+    "clock_reference": "/clock",
+    "truth_and_rig_source": "Isaac timeline current_time",
+    "policy": "command_rig_before_update_publish_truth_after_update",
+    "evaluation_policy": "interpolate_ground_truth_at_estimator_timestamps",
+    "synthetic_frame_time_fallback": false,
+    "render_phase_offset_mean_s": 0.0,
+    "render_phase_offset_max_abs_s": 0.0
+  },
+  "static_tf_topic": "/tf_static",
+  "truth_tf_child_frame": "truth_sensor_rig",
+  "lidar_config": {
+    "tick_rate_hz": 10.0,
+    "near_range_m": 0.2,
+    "far_range_m": 60.0,
+    "translation_m": [
+      0.0,
+      0.0,
+      1.55
+    ],
+    "orientation_xyzw_ros": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "orientation_wxyz_isaac": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "mount_frame": "sensor_rig",
+    "mount_semantics": "rig_relative",
+    "world_pose_semantics": "sensor_rig_world_pose_composed_with_local_mount",
+    "sensor_asset": "Example_Rotary",
+    "scan_pattern_source": "Isaac Sim 6.1 Example_Rotary asset"
+  },
+  "timestamp_alignment": {
+    "reference": "/clock",
+    "ground_truth": {
+      "sample_count": 1230,
+      "mean_offset_s": null,
+      "max_abs_offset_s": null
+    },
+    "rgb": {
+      "sample_count": 0,
+      "mean_offset_s": null,
+      "max_abs_offset_s": null
+    },
+    "lidar": {
+      "sample_count": 0,
+      "mean_offset_s": null,
+      "max_abs_offset_s": null
+    }
+  },
+  "lidar_cloud_points": {
+    "sample_count": 0,
+    "min_points": null,
+    "max_points": null,
+    "mean_points": null
+  },
+  "lidar_noise": {
+    "enabled": false,
+    "relay": null,
+    "received_clouds": null,
+    "published_clouds": null,
+    "last_point_count": null
+  },
+  "rig_orientation_source": "trajectory.sample.orientation_xyzw",
+  "last_rig_orientation_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+  ],
+  "ground_truth_odometry_leakage": false
+}
