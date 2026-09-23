@@ -94,3 +94,7 @@ Earlier implementation milestones and handoff cleanup were pushed to `origin/mas
 - Live walking smoke `runs/final_walking_runtime_smoke.json`: 120 frames completed and the final rig quaternion was non-identity, confirming full sampled orientation reached USD runtime state. Live sensor-realism smoke `runs/final_sensor_realism_runtime_smoke.json`: 21 noisy clouds received and published with timestamp offsets recorded. The GUI smoke `runs/final_gui_runtime_smoke.json` completed 120 frames without `--no-window`.
 - The collector now waits for the first live sample before measuring its scenario-derived capture window, preventing Isaac startup time from consuming the evaluation interval.
 - Final automated suite: 39 tests passing; Python compileall and PowerShell parse checks passing; native RTAB package prefixes and executables verified.
+
+## 2026-09-23 — forensic repair pass (G01)
+
+Owner-authorized implementation goal started at 2026-09-23 05:18:49 UTC with a 12-hour checkpoint deadline of 2026-09-23 17:18:49 UTC. Repair work is isolated from the user's dirty main checkout; base is d5e825c8f6dab77aa6a1007c9731c226b588dfcf. The review is pinned to ab8ebbd51989342c3b1acb6b8b96cf947288cd55; every finding must be rechecked against the repair base. Working ledger: review/FORENSIC_REPAIR_PASS.md. No code candidate is accepted yet; independent Sol review is required. Local commits only; no push or merge authorized by this entry.
