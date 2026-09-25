@@ -44,7 +44,7 @@
             "reason": "the technical producer has no validated frame-level preroll mapping"
           }
         },
-        "intent": "activate the sensor visualization while preserving the established aisle view"
+        "intent": "blend the established aisle view with an earlier offline sensor replay as a non-co-timed editorial blend"
       },
       {
         "from_shot": 6,
@@ -126,6 +126,16 @@
       }
     ]
   },
+  "editorial_disclosures": [
+    {
+      "id": "earlier_sensor_replay",
+      "text": "EARLIER SENSOR REPLAY · SOURCE t=02.00–05.90 s",
+      "start_frame": 531,
+      "end_frame_exclusive": 660,
+      "source_time_range_s": [2.0, 5.9],
+      "source_time_basis": "capture-relative simulation sensor time"
+    }
+  ],
   "role_contracts": {
     "rgb": {
       "description": "Timestamped simulated RGB capture with camera calibration and a derived timeline-aligned view.",

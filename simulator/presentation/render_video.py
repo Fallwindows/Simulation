@@ -484,6 +484,90 @@ def _shot_transition_windows(plan: PresentationPlan, shot: Shot) -> list[dict[st
     return windows
 
 
+def _disclosure_layout(width: int, height: int) -> dict[str, int]:
+    font_size = max(18, round(height * 0.028))
+    box_x = round(width * 0.025)
+    box_width = min(width - 2 * box_x, round(width * 0.62))
+    box_height = max(48, round(height * 0.067))
+    box_y = height - round(height * 0.028) - box_height
+    return {
+        "box_x": box_x,
+        "box_y": box_y,
+        "box_width": box_width,
+        "box_height": box_height,
+        "text_x": box_x + round(width * 0.0125),
+        "text_y": box_y + (box_height - font_size) // 2,
+        "font_size": font_size,
+    }
+
+
+def _editorial_disclosure_filters(plan: PresentationPlan, width: int, height: int) -> list[str]:
+    filters = []
+    layout = _disclosure_layout(width, height)
+    for disclosure in plan.editorial_disclosures:
+        last_frame = disclosure.end_frame_exclusive - 1
+        enabled = f"between(n,{disclosure.start_frame},{last_frame})"
+        filters.extend(
+            [
+                (
+                    f"drawbox=x={layout['box_x']}:y={layout['box_y']}:w={layout['box_width']}:"
+                    f"h={layout['box_height']}:color=0x03111f@0.82:t=fill:enable='{enabled}'"
+                ),
+                (
+                    f"drawbox=x={layout['box_x']}:y={layout['box_y']}:w={layout['box_width']}:"
+                    f"h={layout['box_height']}:color=0x55ddff@0.92:t=2:enable='{enabled}'"
+                ),
+                _drawtext(
+                    disclosure.text,
+                    str(layout["text_x"]),
+                    str(layout["text_y"]),
+                    layout["font_size"],
+                    "0xc9f4ff",
+                )
+                + f":enable='{enabled}'",
+            ]
+        )
+    return filters
+
+
+def _editorial_disclosure_manifest(plan: PresentationPlan, width: int, height: int) -> list[dict[str, Any]]:
+    layout = _disclosure_layout(width, height)
+    return [
+        {
+            "id": disclosure.id,
+            "text": disclosure.text,
+            "start_frame": disclosure.start_frame,
+            "end_frame_exclusive": disclosure.end_frame_exclusive,
+            "first_visible_frame": disclosure.start_frame,
+            "last_visible_frame": disclosure.end_frame_exclusive - 1,
+            "film_time_range_s": [
+                disclosure.start_frame / plan.fps,
+                disclosure.end_frame_exclusive / plan.fps,
+            ],
+            "film_interval_semantics": "start-inclusive/end-exclusive",
+            "source_time_range_s": list(disclosure.source_time_range_s),
+            "source_time_basis": disclosure.source_time_basis,
+            "classification": {
+                "kind": "earlier_sensor_replay",
+                "processing": "offline_replay",
+                "co_timed_with_film": False,
+                "live": False,
+                "sensor_fusion": False,
+                "editorial_blend": True,
+                "claim": "earlier offline sensor replay disclosed over a non-co-timed editorial blend",
+            },
+            "rendering": {
+                "stage": "post_transition_final_composite",
+                "persistent_for_every_frame": True,
+                "first_blend_frame": plan.transitions[0].start_frame,
+                "incoming_weight_at_first_frame": 0.0,
+                "layout": layout,
+            },
+        }
+        for disclosure in plan.editorial_disclosures
+    ]
+
+
 def _validate_source(
     segment: PlannedSegment,
     profile_width: int,
@@ -634,6 +718,9 @@ def _build_filter(
         current_label = mixed_label
         logical_frames += segment.shot.frame_count
     final_chain = f"[{current_label}]trim=start_frame=0:end_frame={logical_frames},setpts=PTS-STARTPTS,format=yuv420p"
+    disclosure_filters = _editorial_disclosure_filters(plan, profile.width, profile.height)
+    if disclosure_filters:
+        final_chain += "," + ",".join(disclosure_filters)
     if test_fixture_label:
         final_chain += ",drawbox=x=0:y=0:w=iw:h=44:color=0x7d1538@0.92:t=fill," + _drawtext(
             "GENERATED TEST FIXTURE - NOT PRODUCTION CAPTURE", "18", "10", 20, "white"
@@ -875,6 +962,7 @@ def _render_presentation_generation(
         "frame_count": plan.frame_count,
         "duration_seconds": plan.duration_seconds,
         "transitions": _transition_manifest(plan, segments),
+        "editorial_disclosures": _editorial_disclosure_manifest(plan, profile.width, profile.height),
         "ground_truth_consumed": False,
         "provenance_validation": {
             "status": "validated",

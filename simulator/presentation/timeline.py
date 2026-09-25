@@ -42,6 +42,8 @@ EXPECTED_SHOT_BOUNDARIES = (
 SMOOTH_TRANSITION_BOUNDARIES = (540, 660, 750, 840, 960, 1080, 1200)
 LEGACY_DIAGNOSTIC_PLAN_RELATIVE = "config/presentation/diagnostic_storyboard_legacy.yaml"
 LEGACY_DIAGNOSTIC_PLAN_SHA256_LF = "5a7e98db32134ba8f6507e60534a056bf9e5e35f3290d61eb9fa6b684479bc5f"
+REPLAY_DISCLOSURE_TEXT = "EARLIER SENSOR REPLAY · SOURCE t=02.00–05.90 s"
+REPLAY_DISCLOSURE_SOURCE_RANGE_S = (2.0, 5.9)
 
 
 def _mapping(path: Path) -> dict[str, Any]:
@@ -127,6 +129,16 @@ class Transition:
 
 
 @dataclass(frozen=True)
+class EditorialDisclosure:
+    id: str
+    text: str
+    start_frame: int
+    end_frame_exclusive: int
+    source_time_range_s: tuple[float, float]
+    source_time_basis: str
+
+
+@dataclass(frozen=True)
 class Shot:
     number: int
     slug: str
@@ -152,6 +164,7 @@ class PresentationPlan:
     role_contracts: dict[str, RoleContract]
     shots: tuple[Shot, ...]
     transitions: tuple[Transition, ...]
+    editorial_disclosures: tuple[EditorialDisclosure, ...]
 
     def shot_for_frame(self, frame_index: int) -> Shot:
         if frame_index < 0 or frame_index >= self.frame_count:
@@ -334,7 +347,7 @@ def load_plan(path: str | Path) -> PresentationPlan:
         normalized_source = source.as_posix().lower()
         if not normalized_source.endswith(LEGACY_DIAGNOSTIC_PLAN_RELATIVE.lower()) or _lf_text_sha256(source) != LEGACY_DIAGNOSTIC_PLAN_SHA256_LF:
             raise ValueError("production transition_policy is required; only the exact frozen legacy diagnostic plan may omit it")
-        return PresentationPlan(source, fps, duration, frame_count, profiles, contracts, tuple(shots), ())
+        return PresentationPlan(source, fps, duration, frame_count, profiles, contracts, tuple(shots), (), ())
     if not isinstance(transition_policy, dict):
         raise ValueError("transition_policy must be a mapping")
     if transition_policy.get("mode") != "symmetric_boundary_blend_v1":
@@ -433,6 +446,10 @@ def load_plan(path: str | Path) -> PresentationPlan:
                 raise ValueError(
                     "transition at frame 540 requires moving RGB post-roll and a reasoned technical start clone"
                 )
+            if "earlier offline sensor replay" not in intent.lower() or "non-co-timed editorial blend" not in intent.lower():
+                raise ValueError(
+                    "transition at frame 540 must identify the earlier offline replay and non-co-timed editorial blend"
+                )
         elif outgoing_sampling.mode != "edge_clone" or incoming_sampling.mode != "edge_clone":
             raise ValueError(f"transition at frame {boundary_frame} must retain symmetric edge clones")
         transitions.append(
@@ -451,7 +468,51 @@ def load_plan(path: str | Path) -> PresentationPlan:
     for previous, current in zip(transitions, transitions[1:]):
         if previous.end_frame_exclusive > current.start_frame:
             raise ValueError("transition windows must not overlap")
-    return PresentationPlan(source, fps, duration, frame_count, profiles, contracts, tuple(shots), tuple(transitions))
+
+    disclosure_data = data.get("editorial_disclosures")
+    if not isinstance(disclosure_data, list) or len(disclosure_data) != 1:
+        raise ValueError("production plan must declare the earlier sensor replay disclosure")
+    disclosure_value = disclosure_data[0]
+    allowed_disclosure_fields = {
+        "id", "text", "start_frame", "end_frame_exclusive", "source_time_range_s", "source_time_basis",
+    }
+    if not isinstance(disclosure_value, dict) or set(disclosure_value) != allowed_disclosure_fields:
+        raise ValueError("earlier sensor replay disclosure fields do not match the presentation contract")
+    source_range_value = disclosure_value.get("source_time_range_s")
+    if not isinstance(source_range_value, list) or len(source_range_value) != 2:
+        raise ValueError("earlier sensor replay disclosure source_time_range_s must contain two values")
+    source_range = tuple(float(value) for value in source_range_value)
+    first_transition = transitions[0]
+    disclosure = EditorialDisclosure(
+        id=str(disclosure_value.get("id", "")),
+        text=str(disclosure_value.get("text", "")),
+        start_frame=int(disclosure_value.get("start_frame", -1)),
+        end_frame_exclusive=int(disclosure_value.get("end_frame_exclusive", -1)),
+        source_time_range_s=(source_range[0], source_range[1]),
+        source_time_basis=str(disclosure_value.get("source_time_basis", "")),
+    )
+    if (
+        disclosure.id != "earlier_sensor_replay"
+        or disclosure.text != REPLAY_DISCLOSURE_TEXT
+        or disclosure.start_frame != first_transition.start_frame
+        or disclosure.end_frame_exclusive != shots[5].end_frame_exclusive
+        or disclosure.source_time_range_s != REPLAY_DISCLOSURE_SOURCE_RANGE_S
+        or disclosure.source_time_basis != "capture-relative simulation sensor time"
+    ):
+        raise ValueError(
+            "earlier sensor replay disclosure must cover film frames 531-659 and identify source t=02.00-05.90 s"
+        )
+    return PresentationPlan(
+        source,
+        fps,
+        duration,
+        frame_count,
+        profiles,
+        contracts,
+        tuple(shots),
+        tuple(transitions),
+        (disclosure,),
+    )
 
 
 def inspect_inputs(

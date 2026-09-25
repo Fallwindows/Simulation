@@ -142,6 +142,23 @@ class PresentationTimelineTests(unittest.TestCase):
         self.assertIn("offset=21.7", graph)
         self.assertIn("offset=24.7", graph)
         self.assertIn("trim=start_frame=0:end_frame=1350", graph)
+        self.assertIn("EARLIER SENSOR REPLAY · SOURCE t=02.00–05.90 s", graph)
+        self.assertIn("enable='between(n,531,659)'", graph)
+        self.assertLess(graph.rindex("xfade=transition=custom"), graph.index("EARLIER SENSOR REPLAY"))
+
+        replay = plan.editorial_disclosures[0]
+        self.assertEqual(replay.text, "EARLIER SENSOR REPLAY · SOURCE t=02.00–05.90 s")
+        self.assertEqual((replay.start_frame, replay.end_frame_exclusive), (531, 660))
+        self.assertEqual(replay.source_time_range_s, (2.0, 5.9))
+        self.assertIn("earlier offline sensor replay", plan.transitions[0].intent)
+        self.assertIn("non-co-timed editorial blend", plan.transitions[0].intent)
+        self.assertEqual(
+            (
+                plan.transitions[0].outgoing_sampling.source_frame_start,
+                plan.transitions[0].outgoing_sampling.source_frame_end_exclusive,
+            ),
+            (540, 549),
+        )
 
     def test_invalid_transition_contracts_fail_closed(self):
         source = json.loads(PLAN.read_text(encoding="utf-8"))
@@ -155,6 +172,26 @@ class PresentationTimelineTests(unittest.TestCase):
             path = Path(directory) / "plan.json"
             for expected, mutate in attacks.items():
                 with self.subTest(expected=expected):
+                    candidate = json.loads(json.dumps(source))
+                    mutate(candidate)
+                    path.write_text(json.dumps(candidate), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, expected):
+                        load_plan(path)
+
+    def test_replay_disclosure_contract_fails_closed(self):
+        source = json.loads(PLAN.read_text(encoding="utf-8"))
+        attacks = [
+            ("declare the earlier sensor replay disclosure", lambda value: value.pop("editorial_disclosures")),
+            ("must cover film frames 531-659", lambda value: value["editorial_disclosures"][0].update(start_frame=540)),
+            ("must cover film frames 531-659", lambda value: value["editorial_disclosures"][0].update(text="SENSOR REPLAY")),
+            ("must identify the earlier offline replay", lambda value: value["transition_policy"]["boundaries"][0].update(
+                intent="activate the sensor visualization"
+            )),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            for expected, mutate in attacks:
+                with self.subTest(expected=expected, mutation=repr(mutate)):
                     candidate = json.loads(json.dumps(source))
                     mutate(candidate)
                     path.write_text(json.dumps(candidate), encoding="utf-8")
@@ -283,6 +320,7 @@ class PresentationTimelineTests(unittest.TestCase):
 
     def test_existing_rgb_baseline_is_diagnostic_and_never_complete(self):
         plan = load_plan(LEGACY_DIAGNOSTIC_PLAN)
+        self.assertEqual(plan.editorial_disclosures, ())
         report = inspect_inputs(plan, BASELINE_INPUTS)
         self.assertFalse(report.complete)
         self.assertEqual(report.ready_genuine_roles, frozenset())
@@ -915,6 +953,42 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertTrue(all(item["presentation_transform"] == PRESENTATION_TRANSFORM_HFLIP for item in manifest["shots"][:5]))
         self.assertTrue(all(item["presentation_transform"] is None for item in manifest["shots"][5:]))
         self.assertEqual(manifest["shots"][4]["source_end_frame_exclusive"], 549)
+        self.assertEqual(manifest["editorial_disclosures"], [{
+            "id": "earlier_sensor_replay",
+            "text": "EARLIER SENSOR REPLAY · SOURCE t=02.00–05.90 s",
+            "start_frame": 531,
+            "end_frame_exclusive": 660,
+            "first_visible_frame": 531,
+            "last_visible_frame": 659,
+            "film_time_range_s": [17.7, 22.0],
+            "film_interval_semantics": "start-inclusive/end-exclusive",
+            "source_time_range_s": [2.0, 5.9],
+            "source_time_basis": "capture-relative simulation sensor time",
+            "classification": {
+                "kind": "earlier_sensor_replay",
+                "processing": "offline_replay",
+                "co_timed_with_film": False,
+                "live": False,
+                "sensor_fusion": False,
+                "editorial_blend": True,
+                "claim": "earlier offline sensor replay disclosed over a non-co-timed editorial blend",
+            },
+            "rendering": {
+                "stage": "post_transition_final_composite",
+                "persistent_for_every_frame": True,
+                "first_blend_frame": 531,
+                "incoming_weight_at_first_frame": 0.0,
+                "layout": {
+                    "box_x": 32,
+                    "box_y": 652,
+                    "box_width": 794,
+                    "box_height": 48,
+                    "text_x": 48,
+                    "text_y": 666,
+                    "font_size": 20,
+                },
+            },
+        }])
         self.assertEqual(
             [item["source_end_frame_exclusive"] for item in manifest["shots"][:4]],
             [90, 180, 300, 420],
@@ -1076,6 +1150,36 @@ class CompletePresentationTests(unittest.TestCase):
             self.assertLess(adjacent_rms[0], 48.0, f"transition at {transition.boundary_frame} jumps on entry")
             self.assertLess(adjacent_rms[-1], 48.0, f"transition at {transition.boundary_frame} jumps on exit")
             self.assertLess(max(adjacent_rms), 48.0, f"transition at {transition.boundary_frame} has an abrupt adjacent-frame jump")
+
+        disclosure_prefix = transition_dir / "disclosure_boundary_frame_%02d.png"
+        subprocess.run(
+            [
+                str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(output / manifest["video"]),
+                "-vf", "select='eq(n\\,530)+eq(n\\,531)+eq(n\\,659)+eq(n\\,660)'",
+                "-fps_mode", "vfr", "-y", str(disclosure_prefix),
+            ],
+            check=True,
+        )
+        disclosure_paths = sorted(transition_dir.glob("disclosure_boundary_frame_*.png"))
+        self.assertEqual(len(disclosure_paths), 4)
+        rendered_disclosure_frames = {
+            frame_number: Image.open(path).convert("RGB")
+            for frame_number, path in zip((530, 531, 659, 660), disclosure_paths)
+        }
+        layout = manifest["editorial_disclosures"][0]["rendering"]["layout"]
+
+        def cyan_rule_fraction(frame):
+            y = layout["box_y"]
+            pixels = [
+                frame.getpixel((x, y))
+                for x in range(layout["box_x"], layout["box_x"] + layout["box_width"])
+            ]
+            return sum(red < 170 and green > 145 and blue > 175 for red, green, blue in pixels) / len(pixels)
+
+        self.assertLess(cyan_rule_fraction(rendered_disclosure_frames[530]), 0.35)
+        self.assertGreater(cyan_rule_fraction(rendered_disclosure_frames[531]), 0.70)
+        self.assertGreater(cyan_rule_fraction(rendered_disclosure_frames[659]), 0.70)
+        self.assertLess(cyan_rule_fraction(rendered_disclosure_frames[660]), 0.35)
 
     def test_reviewed_orientation_operations_drive_filters_and_reject_forgery(self):
         plan = load_plan(PLAN)
