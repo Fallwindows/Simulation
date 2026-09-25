@@ -149,17 +149,26 @@ class CaptureArchitectureTests(unittest.TestCase):
             shutil.copytree(ROOT / "assets/retail", root / "assets/retail")
             scenario = root / "config/scenarios/baseline_straight.yaml"
             manifest_path = root / "assets/retail/manifest.json"
+            def write_catalog_artifact(path: Path, content: bytes, hash_field: str) -> None:
+                """Keep the copied catalog internally valid for deliberate mutations."""
+                path.write_bytes(content)
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                path_field = "usd_path" if hash_field == "usd_sha256" else "texture_path"
+                relative_path = path.relative_to(manifest_path.parent).as_posix()
+                entry = next(asset for asset in manifest["assets"] if asset[path_field] == relative_path)
+                entry[hash_field] = sha256_file(path)
+                manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
             dimensions_before = json.loads(manifest_path.read_text(encoding="utf-8"))["assets"][0]["dimensions_m"]
             first = build_experiment_hashes(scenario, root)
             usd = root / "assets/retail/usd/cereal_sunrise.usda"
             authored_geometry = usd.read_bytes()
-            usd.write_bytes(authored_geometry + b"\n# non-semantic audit comment\n")
+            write_catalog_artifact(usd, authored_geometry + b"\n# non-semantic audit comment\n", "usd_sha256")
             comment_only = build_experiment_hashes(scenario, root)
             self.assertEqual(first["geometry_sha256"], comment_only["geometry_sha256"])
             self.assertEqual(first["appearance_sha256"], comment_only["appearance_sha256"])
-            usd.write_bytes(authored_geometry)
             self.assertIn(b"0.15500", authored_geometry)
-            usd.write_bytes(authored_geometry.replace(b"0.15500", b"0.15600", 1))
+            write_catalog_artifact(usd, authored_geometry.replace(b"0.15500", b"0.15600", 1), "usd_sha256")
             dimensions_after = json.loads(manifest_path.read_text(encoding="utf-8"))["assets"][0]["dimensions_m"]
             second = build_experiment_hashes(scenario, root)
             self.assertEqual(dimensions_before, dimensions_after)
@@ -169,27 +178,32 @@ class CaptureArchitectureTests(unittest.TestCase):
             self.assertNotEqual(first["product_hashes"]["slam_map_sha256"], second["product_hashes"]["slam_map_sha256"])
             self.assertNotEqual(first["product_hashes"]["rgb_perception_sha256"], second["product_hashes"]["rgb_perception_sha256"])
 
-            usd.write_bytes(authored_geometry)
+            write_catalog_artifact(usd, authored_geometry, "usd_sha256")
             normals_before = build_experiment_hashes(scenario, root)
             normal_bytes = b"normal3f[] normals = [(0, 1, 0)]"
             self.assertIn(normal_bytes, authored_geometry)
-            usd.write_bytes(authored_geometry.replace(normal_bytes, b"normal3f[] normals = [(0, 0, 1)]", 1))
+            write_catalog_artifact(
+                usd, authored_geometry.replace(normal_bytes, b"normal3f[] normals = [(0, 0, 1)]", 1), "usd_sha256"
+            )
             normals_after = build_experiment_hashes(scenario, root)
             self.assertEqual(normals_before["geometry_sha256"], normals_after["geometry_sha256"])
             self.assertNotEqual(normals_before["appearance_sha256"], normals_after["appearance_sha256"])
             self.assertEqual(normals_before["product_hashes"]["slam_map_sha256"], normals_after["product_hashes"]["slam_map_sha256"])
             self.assertNotEqual(normals_before["product_hashes"]["rgb_perception_sha256"], normals_after["product_hashes"]["rgb_perception_sha256"])
 
+            write_catalog_artifact(usd, authored_geometry, "usd_sha256")
             uv_before = build_experiment_hashes(scenario, root)
             uv_bytes = b"texCoord2f[] primvars:st = [(0, 0), (1, 0)"
             self.assertIn(uv_bytes, authored_geometry)
-            usd.write_bytes(authored_geometry.replace(uv_bytes, b"texCoord2f[] primvars:st = [(0, 0), (0.9, 0)", 1))
+            write_catalog_artifact(
+                usd, authored_geometry.replace(uv_bytes, b"texCoord2f[] primvars:st = [(0, 0), (0.9, 0)", 1), "usd_sha256"
+            )
             uv_after = build_experiment_hashes(scenario, root)
             self.assertEqual(uv_before["geometry_sha256"], uv_after["geometry_sha256"])
             self.assertNotEqual(uv_before["appearance_sha256"], uv_after["appearance_sha256"])
             self.assertEqual(uv_before["product_hashes"]["slam_map_sha256"], uv_after["product_hashes"]["slam_map_sha256"])
             self.assertNotEqual(uv_before["product_hashes"]["rgb_perception_sha256"], uv_after["product_hashes"]["rgb_perception_sha256"])
-            usd.write_bytes(authored_geometry)
+            write_catalog_artifact(usd, authored_geometry, "usd_sha256")
 
             interpolation_before = build_experiment_hashes(scenario, root)
             normal_interpolation = re.compile(
@@ -199,27 +213,32 @@ class CaptureArchitectureTests(unittest.TestCase):
                 rb'\1vertex\2', authored_geometry, count=1
             )
             self.assertEqual(replacement_count, 1, "expected an authored normals property with uniform interpolation")
-            usd.write_bytes(vertex_interpolation_geometry)
+            write_catalog_artifact(usd, vertex_interpolation_geometry, "usd_sha256")
             interpolation_after = build_experiment_hashes(scenario, root)
             self.assertEqual(interpolation_before["geometry_sha256"], interpolation_after["geometry_sha256"])
             self.assertNotEqual(interpolation_before["appearance_sha256"], interpolation_after["appearance_sha256"])
             self.assertEqual(interpolation_before["product_hashes"]["slam_map_sha256"], interpolation_after["product_hashes"]["slam_map_sha256"])
             self.assertNotEqual(interpolation_before["product_hashes"]["rgb_perception_sha256"], interpolation_after["product_hashes"]["rgb_perception_sha256"])
-            usd.write_bytes(authored_geometry)
+            write_catalog_artifact(usd, authored_geometry, "usd_sha256")
 
             color_before = build_experiment_hashes(scenario, root)
             body_color = b"color3f inputs:diffuseColor = (0.94902, 0.65882, 0.18039)"
             self.assertIn(body_color, usd.read_bytes())
-            usd.write_bytes(usd.read_bytes().replace(body_color, b"color3f inputs:diffuseColor = (0.94902, 0.65882, 0.18038)", 1))
+            write_catalog_artifact(
+                usd,
+                usd.read_bytes().replace(body_color, b"color3f inputs:diffuseColor = (0.94902, 0.65882, 0.18038)", 1),
+                "usd_sha256",
+            )
             color_after = build_experiment_hashes(scenario, root)
             self.assertEqual(color_before["geometry_sha256"], color_after["geometry_sha256"])
             self.assertNotEqual(color_before["appearance_sha256"], color_after["appearance_sha256"])
             self.assertEqual(color_before["product_hashes"]["slam_map_sha256"], color_after["product_hashes"]["slam_map_sha256"])
             self.assertNotEqual(color_before["product_hashes"]["rgb_perception_sha256"], color_after["product_hashes"]["rgb_perception_sha256"])
 
+            write_catalog_artifact(usd, authored_geometry, "usd_sha256")
             artwork_before = build_experiment_hashes(scenario, root)
             texture = root / "assets/retail/textures/cereal_sunrise.png"
-            texture.write_bytes(texture.read_bytes() + b"artwork mutation")
+            write_catalog_artifact(texture, texture.read_bytes() + b"artwork mutation", "texture_sha256")
             artwork_after = build_experiment_hashes(scenario, root)
             self.assertEqual(artwork_before["geometry_sha256"], artwork_after["geometry_sha256"])
             self.assertNotEqual(artwork_before["appearance_sha256"], artwork_after["appearance_sha256"])
@@ -245,11 +264,19 @@ class CaptureArchitectureTests(unittest.TestCase):
 
     def test_inventory_export_is_deterministic_and_has_semantic_ids(self):
         with tempfile.TemporaryDirectory() as directory:
-            result = export_inventory(SCENARIO, directory)
-            self.assertEqual(result["asset_count"], 1995)
-            rows = json.loads((Path(directory) / "inventory_ground_truth.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(rows), 1995)
+            first_dir = Path(directory) / "first"
+            second_dir = Path(directory) / "second"
+            result = export_inventory(SCENARIO, first_dir)
+            repeated = export_inventory(SCENARIO, second_dir)
+            rows = json.loads((first_dir / "inventory_ground_truth.json").read_text(encoding="utf-8"))
+            repeated_rows = json.loads((second_dir / "inventory_ground_truth.json").read_text(encoding="utf-8"))
+            self.assertEqual(result, repeated)
+            self.assertEqual(rows, repeated_rows)
+            self.assertEqual(result["asset_count"], len(rows))
+            self.assertGreaterEqual(len(rows), 2000)
             self.assertTrue(all(row["semantic_id"].startswith("retail/") for row in rows))
+            semantic_ids = [row["semantic_id"] for row in rows]
+            self.assertEqual(len(semantic_ids), len(set(semantic_ids)))
             self.assertIn("width_m", rows[0])
 
     def test_slam_validation_does_not_require_ground_truth(self):

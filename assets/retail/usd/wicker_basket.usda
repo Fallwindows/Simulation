@@ -22,66 +22,130 @@ def Xform "Asset" (
         def Mesh "FrontWeave0" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(-0.20200, 0.15100, -0.03992), (-0.11440, 0.15100, 0.02392), (-0.11440, 0.15100, 0.03992), (-0.20200, 0.15100, -0.02392)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(-0.202000, 0.148000, -0.039920), (-0.114400, 0.148000, 0.023920), (-0.114400, 0.148000, 0.039920), (-0.202000, 0.148000, -0.023920), (-0.202000, 0.142000, -0.039920), (-0.114400, 0.142000, 0.023920), (-0.114400, 0.142000, 0.039920), (-0.202000, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave0" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.202000, -0.142000, -0.039920), (-0.114400, -0.142000, 0.023920), (-0.114400, -0.142000, 0.039920), (-0.202000, -0.142000, -0.023920), (-0.202000, -0.148000, -0.039920), (-0.114400, -0.148000, 0.023920), (-0.114400, -0.148000, 0.039920), (-0.202000, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
         }
         def Mesh "FrontWeave1" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(-0.20200, 0.15100, 0.02392), (-0.06011, 0.15100, -0.03992), (-0.06011, 0.15100, -0.02392), (-0.20200, 0.15100, 0.03992)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(-0.202000, 0.154000, 0.023920), (-0.060114, 0.154000, -0.039920), (-0.060114, 0.154000, -0.023920), (-0.202000, 0.154000, 0.039920), (-0.202000, 0.148000, 0.023920), (-0.060114, 0.148000, -0.039920), (-0.060114, 0.148000, -0.023920), (-0.202000, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave1" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.202000, -0.148000, 0.023920), (-0.060114, -0.148000, -0.039920), (-0.060114, -0.148000, -0.023920), (-0.202000, -0.148000, 0.039920), (-0.202000, -0.154000, 0.023920), (-0.060114, -0.154000, -0.039920), (-0.060114, -0.154000, -0.023920), (-0.202000, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
         }
         def Mesh "FrontWeave2" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(-0.15703, 0.15100, -0.03992), (-0.00583, 0.15100, 0.02392), (-0.00583, 0.15100, 0.03992), (-0.15703, 0.15100, -0.02392)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(-0.157029, 0.148000, -0.039920), (-0.005829, 0.148000, 0.023920), (-0.005829, 0.148000, 0.039920), (-0.157029, 0.148000, -0.023920), (-0.157029, 0.142000, -0.039920), (-0.005829, 0.142000, 0.023920), (-0.005829, 0.142000, 0.039920), (-0.157029, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave2" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.157029, -0.142000, -0.039920), (-0.005829, -0.142000, 0.023920), (-0.005829, -0.142000, 0.039920), (-0.157029, -0.142000, -0.023920), (-0.157029, -0.148000, -0.039920), (-0.005829, -0.148000, 0.023920), (-0.005829, -0.148000, 0.039920), (-0.157029, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
         }
         def Mesh "FrontWeave3" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(-0.10274, 0.15100, 0.02392), (0.04846, 0.15100, -0.03992), (0.04846, 0.15100, -0.02392), (-0.10274, 0.15100, 0.03992)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(-0.102743, 0.154000, 0.023920), (0.048457, 0.154000, -0.039920), (0.048457, 0.154000, -0.023920), (-0.102743, 0.154000, 0.039920), (-0.102743, 0.148000, 0.023920), (0.048457, 0.148000, -0.039920), (0.048457, 0.148000, -0.023920), (-0.102743, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave3" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.102743, -0.148000, 0.023920), (0.048457, -0.148000, -0.039920), (0.048457, -0.148000, -0.023920), (-0.102743, -0.148000, 0.039920), (-0.102743, -0.154000, 0.023920), (0.048457, -0.154000, -0.039920), (0.048457, -0.154000, -0.023920), (-0.102743, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
         }
         def Mesh "FrontWeave4" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(-0.04846, 0.15100, -0.03992), (0.10274, 0.15100, 0.02392), (0.10274, 0.15100, 0.03992), (-0.04846, 0.15100, -0.02392)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(-0.048457, 0.148000, -0.039920), (0.102743, 0.148000, 0.023920), (0.102743, 0.148000, 0.039920), (-0.048457, 0.148000, -0.023920), (-0.048457, 0.142000, -0.039920), (0.102743, 0.142000, 0.023920), (0.102743, 0.142000, 0.039920), (-0.048457, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave4" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.048457, -0.142000, -0.039920), (0.102743, -0.142000, 0.023920), (0.102743, -0.142000, 0.039920), (-0.048457, -0.142000, -0.023920), (-0.048457, -0.148000, -0.039920), (0.102743, -0.148000, 0.023920), (0.102743, -0.148000, 0.039920), (-0.048457, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
         }
         def Mesh "FrontWeave5" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(0.00583, 0.15100, 0.02392), (0.15703, 0.15100, -0.03992), (0.15703, 0.15100, -0.02392), (0.00583, 0.15100, 0.03992)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(0.005829, 0.154000, 0.023920), (0.157029, 0.154000, -0.039920), (0.157029, 0.154000, -0.023920), (0.005829, 0.154000, 0.039920), (0.005829, 0.148000, 0.023920), (0.157029, 0.148000, -0.039920), (0.157029, 0.148000, -0.023920), (0.005829, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave5" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.005829, -0.148000, 0.023920), (0.157029, -0.148000, -0.039920), (0.157029, -0.148000, -0.023920), (0.005829, -0.148000, 0.039920), (0.005829, -0.154000, 0.023920), (0.157029, -0.154000, -0.039920), (0.157029, -0.154000, -0.023920), (0.005829, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
         }
         def Mesh "FrontWeave6" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(0.06011, 0.15100, -0.03992), (0.20200, 0.15100, 0.02392), (0.20200, 0.15100, 0.03992), (0.06011, 0.15100, -0.02392)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(0.060114, 0.148000, -0.039920), (0.202000, 0.148000, 0.023920), (0.202000, 0.148000, 0.039920), (0.060114, 0.148000, -0.023920), (0.060114, 0.142000, -0.039920), (0.202000, 0.142000, 0.023920), (0.202000, 0.142000, 0.039920), (0.060114, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave6" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.060114, -0.142000, -0.039920), (0.202000, -0.142000, 0.023920), (0.202000, -0.142000, 0.039920), (0.060114, -0.142000, -0.023920), (0.060114, -0.148000, -0.039920), (0.202000, -0.148000, 0.023920), (0.202000, -0.148000, 0.039920), (0.060114, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
         }
         def Mesh "FrontWeave7" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(0.11440, 0.15100, 0.02392), (0.20200, 0.15100, -0.03992), (0.20200, 0.15100, -0.02392), (0.11440, 0.15100, 0.03992)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(0.114400, 0.154000, 0.023920), (0.202000, 0.154000, -0.039920), (0.202000, 0.154000, -0.023920), (0.114400, 0.154000, 0.039920), (0.114400, 0.148000, 0.023920), (0.202000, 0.148000, -0.039920), (0.202000, 0.148000, -0.023920), (0.114400, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
             rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave7" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.114400, -0.148000, 0.023920), (0.202000, -0.148000, -0.039920), (0.202000, -0.148000, -0.023920), (0.114400, -0.148000, 0.039920), (0.114400, -0.154000, 0.023920), (0.202000, -0.154000, -0.039920), (0.202000, -0.154000, -0.023920), (0.114400, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
         }
         def Xform "CornerPost00" {
             double3 xformOp:translate = (-0.19320, -0.13950, 0.00000)
@@ -268,6 +332,16 @@ def Xform "Asset" (
         }
         def Material "Accent" {
             token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74902, 0.56863, 0.31765)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Print" {
+            token outputs:surface.connect = </Asset/Looks/Print/Preview.outputs:surface>
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.74902, 0.56863, 0.31765)

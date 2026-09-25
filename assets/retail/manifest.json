@@ -1105,13 +1105,19 @@
       "geometry_signature": "48341c6db744d342e3f34925f719a63792112d27768f587a35231734a1fc6fce",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "9a95d34b4b8a7d67171616b61d0145aa40136b907d8a15adfdbc50bb337950ee",
-      "texture_sha256": "206eb3c312c2bce942f8b7bfdf6837d7d164b25b072a0d790c101c0dcfebd25c",
-      "geometry_scope_sha256": "a809b5b8619392793847c85fadc65c32c7378a8f250eca9de3ba518dd982370a",
-      "appearance_scope_sha256": "ecd95ff111ee7b31fcc03fb2c034fe92601dc14851119a4b54a69099d3a3060e"
+      "usd_sha256": "60f4a3aa0082307d6a0953357faa5c67ff87c315a36ef0849d8d9b6f359998d8",
+      "texture_sha256": "af7ff4b80f063c183513510c4d5e91cf4631fe41d8a0544c7895881fd2315c82",
+      "geometry_scope_sha256": "f6cf0e86a32ca2b65260e337296ac44f8e84ea0875087f76fb4c3be9385a5e57",
+      "appearance_scope_sha256": "79f11c613044a2f22b94b636fbd47a7109c18ec92334660aed1a3dc8e8fbcd51",
+      "normal_texture_path": "textures/milk_gallon_normal.png",
+      "normal_texture_sha256": "304826598bda970c4bed7bfe450621874150a69bb914f2fa31e373acb2811cff",
+      "roughness_texture_path": "textures/milk_gallon_roughness.png",
+      "roughness_texture_sha256": "07faa49fba54318de5e06b55294a0fe78d97c7c0a996cf9ea6a040e31e0791a1"
     },
     {
       "asset_key": "milk_carton",
@@ -1139,13 +1145,19 @@
       "geometry_signature": "64778e1e9623962f5b3ee52e4038ad7cbd1e4cf4d37b5dd2be9cd801f6db89e8",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "677024c36df637d56126d8f25d773798f40f5ec9f95e0b5170114a8c97b68f65",
-      "texture_sha256": "852945ee09768aaae24fdeb83a7b783a8823f46fae3e4a607bbcadf12fe71aad",
-      "geometry_scope_sha256": "596ec185f7242d84647fcc7d06781de30fc60cabbed2a8ec85f870404ab1d87b",
-      "appearance_scope_sha256": "c2c3b1b53621c9528ca8b1e10af57652aef5358b7c67d8a9aea7a7354a2c7efd"
+      "usd_sha256": "8cc83cbb05d88f3ccf6db0d8e78fc606fdd2ccfb59608e797ef18b694dc53e12",
+      "texture_sha256": "eb86991fa923e680cc3797f397fe8e647f0344bd4e7b903064cb0ffaa0e83fff",
+      "geometry_scope_sha256": "8e9ee35920a4ac0c0cab7591cbcff27fc0f203d4c780c9c462b0f4e229dc1603",
+      "appearance_scope_sha256": "242cc18014c7aaf3cd337582de4d15ffd1b20203d572c197f2e6b00c90f95397",
+      "normal_texture_path": "textures/milk_carton_normal.png",
+      "normal_texture_sha256": "bb180835c64ab2b36bd9055ffff3726c15a09d4b25c27d8a0fea8fb736e4c8d0",
+      "roughness_texture_path": "textures/milk_carton_roughness.png",
+      "roughness_texture_sha256": "8a390ace6a1ef3e5438813672b954786dd201bd195258fa8d39106a44d85911b"
     },
     {
       "asset_key": "yogurt_cup",
@@ -1171,13 +1183,19 @@
       "geometry_signature": "f0692b3bf65b5549cf2908cfea30fb87cdc323e162b38c91471fd9800ef77613",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "72f73f46bf6033c167515ec04d6538c1c1f9ec7f5d0e63f1b7637a1a3b25d567",
-      "texture_sha256": "02b55b4f75f6ce60c5078ed6bc78e2401baba38615629f6281ef569238695cad",
-      "geometry_scope_sha256": "71d01c9b73070898feee8bad8e893ba0bec21937eb767ec7fecb7e8d1c9206f2",
-      "appearance_scope_sha256": "73abf41cd4ef913ba8a2a13c74f056eb775fd71581af6c3b03d8803c89516196"
+      "usd_sha256": "c611a4f8f93bd0ee836ecf95b14baac35bdc33416346e3561b103e37a6cc516d",
+      "texture_sha256": "264ca138f381d58609d2c29765214f2110cb801f077ac6659a4749601d184649",
+      "geometry_scope_sha256": "1ec72e8924345d2580cc9beddbf9a3069314765e9153789a96f696dcf8ce40ea",
+      "appearance_scope_sha256": "d07d9dbd148d3f1b0214982126bc5211e05125fbf57ed3228d5020d23955346e",
+      "normal_texture_path": "textures/yogurt_cup_normal.png",
+      "normal_texture_sha256": "5c06eb0bc53cbd1614fbc32b1f09412157d7338d8e614661f8fde45e4d2b5908",
+      "roughness_texture_path": "textures/yogurt_cup_roughness.png",
+      "roughness_texture_sha256": "dcb6975e9695b22182aca07772a2900bb19eeddc09a7dcfae325335f50c28fdf"
     },
     {
       "asset_key": "egg_carton",
@@ -1204,13 +1222,19 @@
       "geometry_signature": "4c864b141796939011c81b72fbc8f49e3689dc016b3bfd873323308c6a114de3",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "b2c17b00fbc12108966b0c3a3c273397c593376ac5f4d3b78fa2374e47c6664f",
-      "texture_sha256": "fdabe0469e803108a37f21d9591b6e0df6e2c3fb74ad92a1262750fed53e2dec",
-      "geometry_scope_sha256": "458504f71c85e82576012299e41530aaee789a62a9c74843cc012b95cb96a8de",
-      "appearance_scope_sha256": "59032ebaea1f8d3e991e0efb2abee4f36ae524e5edaecf1fee9310e690852213"
+      "usd_sha256": "41bb63a58e0658adfaec6b76873510ecea05e84a3043091a959913530fcdbc28",
+      "texture_sha256": "bda2b469aa821b89e832f3437ac5bed303b2c4117e2886dc489b217e08bd7b59",
+      "geometry_scope_sha256": "f74f712835cf8eb52c3eea82f0aa75cca96927049143886628c4e082abdc292a",
+      "appearance_scope_sha256": "30c1779a4cc1c79769c7b05255087e049b0dccf916378b67bad53606136256bc",
+      "normal_texture_path": "textures/egg_carton_normal.png",
+      "normal_texture_sha256": "0e11ea685634361eabd53a199fae38fd166029aaaefa2571384ccb2ec096e3b4",
+      "roughness_texture_path": "textures/egg_carton_roughness.png",
+      "roughness_texture_sha256": "f26cc90cc7ec11ba3090b7618257b0f74f13d3c3cebed27e2069288c5f490858"
     },
     {
       "asset_key": "butter_pack",
@@ -1236,13 +1260,19 @@
       "geometry_signature": "8443cb984f417c2a0e8ee0aa4b397cdd93c4deb19108916def9869cf9e60544e",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "06d5eba713f278a55aaf55d1baa0378826b486c12abfa85ed66ccbf2cd6bc682",
-      "texture_sha256": "2c7cef8dd3a45914d462630239dfab32d9b1d707fae0b9c7f580efcf2ce54035",
-      "geometry_scope_sha256": "10a6519104aab8ea861d89de79d5d4756caac7e561de7f81d494c05fd62c3acc",
-      "appearance_scope_sha256": "d18a923184cb3eb0236b0a4da937dd0c9f8b9ee41bca8fa02b6bd3d3d1670c52"
+      "usd_sha256": "5481ad377b7df9a5ccb6e33dc10a884c4883791d2835c985fb1067ee7c6d6324",
+      "texture_sha256": "d73f4983baec673d91ead521004ba2b587f97c09cdadce09d0cc45d7a81eb2ee",
+      "geometry_scope_sha256": "7e2b2beab2e32f7c5b1ecff5a1fb2aa830edea2463cb61eb8838af05e8481c15",
+      "appearance_scope_sha256": "c15892011132ee596ca8b15348a89c70f6f6882a8c208215423370d52c58e6e7",
+      "normal_texture_path": "textures/butter_pack_normal.png",
+      "normal_texture_sha256": "fd58f0e1898561a874066d87a8328b13948a971089cb4f4d7f89bac4edf2c2b7",
+      "roughness_texture_path": "textures/butter_pack_roughness.png",
+      "roughness_texture_sha256": "6cd3a67ea8bdc0fe8226bc8755f132aacaa025eb3b4f62d68e7e49d8cd5965d7"
     },
     {
       "asset_key": "cheese_wedge",
@@ -1268,13 +1298,19 @@
       "geometry_signature": "9f19af24f65ab8fcbdec2a668e608afc87da72d46df1f213c222e94432b8eba5",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "55cdbfaa5f48a82322e06adcb92ba9f15300342914b3ae211b8fec22fa5483d4",
-      "texture_sha256": "62414ffead9cbe47fe30ba0e2c780ab8a23e0318aef83b8d248b5641b9cff196",
-      "geometry_scope_sha256": "7d13a052fe9813291106a989001dfeaa3a853986e98e1513b08fc267b30f4053",
-      "appearance_scope_sha256": "378b56cf1eec934922aaefac80e0e14a6003c47ea43dcb756f20497d31d78a13"
+      "usd_sha256": "265de986126a263dea6b0bd1dce3b45f8b617857bf6691a0a4b9d3e435621ed5",
+      "texture_sha256": "96487519a93eed51fa6b245e0c9b1b3f86b7c1672eb2a4e7e6ac7a09e1cf3fe3",
+      "geometry_scope_sha256": "b706d7e9e380c2be277b374ec2e96235ecfb7519d61e2cdb1a4f82ab55e2f455",
+      "appearance_scope_sha256": "63a1a223588db9dc280b44f9e8a7869f2f0fd5dc3167820cbb856887fc337076",
+      "normal_texture_path": "textures/cheese_wedge_normal.png",
+      "normal_texture_sha256": "00a3530496e3f08993be5a67ae0f87621d563957e64e77480cce59ef28bca0db",
+      "roughness_texture_path": "textures/cheese_wedge_roughness.png",
+      "roughness_texture_sha256": "0c4a834dc04f00cf5762b3faa958fa9ecfff2ae6e29baacfccfa7b728a9b7c28"
     },
     {
       "asset_key": "frozen_pizza",
@@ -1300,13 +1336,19 @@
       "geometry_signature": "d296fba0fb7c0e72c37dcec832447a2879f1c8053e2b396a268170447d0b0ee1",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "d50380ceaccbbde51e2f5e2e1e439f40627c22d0ff8d7ad9d0da40c934c87a33",
-      "texture_sha256": "9903cd62231f341481f23338bc67e5adb5b705ca2f5a74d0ad5d04ed1c09ea86",
-      "geometry_scope_sha256": "95cf115605244ddfcec244fa42d85f7b412b750d3027ae76aa106d4d3a3fc878",
-      "appearance_scope_sha256": "6d5fdc80af321d47284eb3ceeecfcb61e6a422b01bea93d3f11efc64b074cb2b"
+      "usd_sha256": "a51361b52b0e1177e533f7d6bce4f964bde26bcc9b595ef97dfa5b67f2b6aec5",
+      "texture_sha256": "3f78e66f0b64b480f30c8eadd647340d8d5a663f36153d8cb4e245e47cf122ff",
+      "geometry_scope_sha256": "5d1a5004520c4e5c554a6f4b9c1d3e30c82dca290fd52c3ba016c3d04dd82c82",
+      "appearance_scope_sha256": "0ecd86f3af2bbe70ab0c0f9eabfcd0d8fb8373abd661576e160ad17dd880f91b",
+      "normal_texture_path": "textures/frozen_pizza_normal.png",
+      "normal_texture_sha256": "9ce356cd11a23df0447119a7377fc7ef2147a8f9e4b22fea3a9b4ea630f71bd1",
+      "roughness_texture_path": "textures/frozen_pizza_roughness.png",
+      "roughness_texture_sha256": "5c1b0134fe701b1a974dc4737e444d897a9b18771340beb83d67fc720e5c1964"
     },
     {
       "asset_key": "icecream_tub",
@@ -1332,13 +1374,19 @@
       "geometry_signature": "b9826dc18a63f81dc09b18793550f7e3acd55c663b23a5a7ae9dfed14efaea1a",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "a68a0dc7c581c93f5cac4ae4bf48bf585d7af4025c46323a41087f661d054d4e",
-      "texture_sha256": "464d74f888319892daff661eb6fdf2dd70539425d47f6c377041ee0d656bc780",
-      "geometry_scope_sha256": "b862dd2530df33c7dcc805e354edf36c35a033df3e6c2dd0837167c93fd7d7f4",
-      "appearance_scope_sha256": "5bb89da871456a6d9c6b16d0d72de908a653d8449b0f6a5082dd1fd22bb0c1fd"
+      "usd_sha256": "967693b725596852a00d9f46484be082c58d3f587f66baa9f68ca235aedc07f8",
+      "texture_sha256": "ea9bdbe38e6a23f1bd9b8bdeeb5710009150274f4169d01330ff8c6cbbae6a77",
+      "geometry_scope_sha256": "563b3e50335c10df15d341879ef891aa2cd2ebea88937d1ac1bff925698a865f",
+      "appearance_scope_sha256": "728849e42e4cf9cbbe2fe21f17cb20f82df6a968b782229584ebb17498eacc2b",
+      "normal_texture_path": "textures/icecream_tub_normal.png",
+      "normal_texture_sha256": "032aab318950f9470e25b21bc9407e5a34e9245df5349cb073169cf663a449ee",
+      "roughness_texture_path": "textures/icecream_tub_roughness.png",
+      "roughness_texture_sha256": "d7abb3d260b7d9bbc4af3be472f016fac539e331ac8a9357b122b43a906206c0"
     },
     {
       "asset_key": "olive_oil",
@@ -1367,13 +1415,19 @@
       "material_classes": [
         "printed_label",
         "glass",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "37d158d8d56783bc133d3324eb1e3bfe385fef2699da0b3ac87018d171507e21",
-      "texture_sha256": "4b68709e8de4619eee5c9a9cac1d0642cab1d924c5cdc32c7b9c7de8fe6a8af9",
-      "geometry_scope_sha256": "647e6cb295ef5b4a793174634484361ea8dd35c32f02aea3ca238cc285af8231",
-      "appearance_scope_sha256": "d281e8de07bb3dc888558a8a87a8d88d6c0d42b3dd835c7afd366dde01c89fb0"
+      "usd_sha256": "e1fad22088c9a6de0f6f5ac85ee3ed9111d2197a07639696cb5f6085bd08c484",
+      "texture_sha256": "ded26162a7e6002ce167af864a06734aee3a05ec0e1471c686d0daaa1f446c61",
+      "geometry_scope_sha256": "561c78b0e41fb796d320e1b4c39433b8b83ea93659c6e33e0ffc8d5fdc9d065d",
+      "appearance_scope_sha256": "38f73896502e54c98ef1ebdd795c132de70077518d7409c789699e4d137fd079",
+      "normal_texture_path": "textures/olive_oil_normal.png",
+      "normal_texture_sha256": "f22c707f5fe3fae311ee67f24678f92c90106ebdeb639f6701ab50b80689e9f4",
+      "roughness_texture_path": "textures/olive_oil_roughness.png",
+      "roughness_texture_sha256": "b8d921418acc05490f41e5e3e8594fb2eb1da2551b3c8627a085846a2cf1e299"
     },
     {
       "asset_key": "maple_syrup",
@@ -1401,13 +1455,19 @@
       "material_classes": [
         "printed_label",
         "glass",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "ba832e43d28ac381a00d15665db9f8176f958d9125fb330cdb1688f21c8cbb1f",
-      "texture_sha256": "fc848ef551006156958f747ddb460831c2eb65d55fa1b9cb9372e43c080fe525",
-      "geometry_scope_sha256": "f3d661676a279d7e090b09aa534950b0a46e05cdd8946d0ceb638ad497337674",
-      "appearance_scope_sha256": "1ec535e78ffcadbfb704ccffc33905c971d126b61a61fc6da03c24a1c4652e93"
+      "usd_sha256": "1c93d6259a4ca8e0c03b958d7b48224d8e0b4e366d427e613444c18e541eb207",
+      "texture_sha256": "2663c55ff0d16d685a5daddf12b9f898f391f8355e8c37d54b70bff5731b69a1",
+      "geometry_scope_sha256": "5a62151b5e7d507fa392f4f9ee4c02399180b3ebe88f13399186bb8d3d0f1055",
+      "appearance_scope_sha256": "56b9b4f4fc2a80f851aae2a1e79d318aff6edea4f01a107604b52fa14f52237f",
+      "normal_texture_path": "textures/maple_syrup_normal.png",
+      "normal_texture_sha256": "70e9839743e6d28f4461c49e99572682f98f753adab59211014092d35b856234",
+      "roughness_texture_path": "textures/maple_syrup_roughness.png",
+      "roughness_texture_sha256": "e9242529d47a418dbeb1f8969809deea4c0ed672f4348e84631f9dd2177248cb"
     },
     {
       "asset_key": "sports_drink",
@@ -1434,13 +1494,19 @@
       "geometry_signature": "fbd4782a5c6d794872df4d6af8dbbe529a58413ab6b719b43007767059c98811",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "eed4021c926a082d59d9861ae6589b4705c1668ac08ce26a01b6c4d2ecc0304a",
-      "texture_sha256": "8fddad90c359cec7cb034870440399bd308ee0416aefe289f4a5ed4aa0b79924",
-      "geometry_scope_sha256": "9c8d5527279a9aa925721d56438f803dc289cb740b8eeb27c664bd88db3c0c56",
-      "appearance_scope_sha256": "05249be2fd473068ad212e143c83a984c6099cce44508156fdc4e5277a2b0b71"
+      "usd_sha256": "4134802ea05147a243fd7aa61cd87322c048845a6cc7ee85f603a96a12268701",
+      "texture_sha256": "f96547569271047c1739fcf141ab6f8c8dc66b06f6cc905f07f9733a141007b4",
+      "geometry_scope_sha256": "2cda137d0090585d6d7f1d91cb88eaab5a155d78ca92d67b298b953dc85d45b9",
+      "appearance_scope_sha256": "f797fa8bc640f751cbd2486106d5f16a4a430f3ec3664b82f6446d80be121c8d",
+      "normal_texture_path": "textures/sports_drink_normal.png",
+      "normal_texture_sha256": "2bc1315057656f69ad67d808d7167a8c8b4938ab120695d7ff25aeb70c2194d4",
+      "roughness_texture_path": "textures/sports_drink_roughness.png",
+      "roughness_texture_sha256": "ebd8f29d19a343b989820b60feab59e9c3a49b41e1f554ae062dfc049d12092a"
     },
     {
       "asset_key": "sparkling_wine",
@@ -1469,13 +1535,19 @@
       "material_classes": [
         "printed_label",
         "glass",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "f49a4217e433ae4b3eafb247d87f490f1d33135f6272acef2596a1c9afd6c135",
-      "texture_sha256": "8ad150ae6ebe6f4b08c25e60f5af2f11ceb23418e498ed162e6bc6062c7fdfac",
-      "geometry_scope_sha256": "4a349ca5457d5a2e1de5ef729534b3489ee5fdf1dfb922927f8a7db8ddd0a7dd",
-      "appearance_scope_sha256": "fb0f909321b665b924b92893b65cc50aa8eeb5c77d20f9ed0c42edede486c9f2"
+      "usd_sha256": "fe0f592d3964dd6a84d50a5ef693425791d22e39c816002ee75e4fb89e2a2a99",
+      "texture_sha256": "e20ef001ab2e14877721cb4fed4c8420ecc757216bbf63a15b5c0a0fe97e4a41",
+      "geometry_scope_sha256": "8fd074ff6ee8d7bddbb6b30a76c2d766853e7b05ed2e8713979e49caad4c415c",
+      "appearance_scope_sha256": "6bb09db4a923f3d2300558721f1dd119d6f03fcd2738292ee108591f16c1a589",
+      "normal_texture_path": "textures/sparkling_wine_normal.png",
+      "normal_texture_sha256": "f892814d5ed7b2830e325c6e1446b6a82ba2d0df59e91de79bc3d4e80673fd1d",
+      "roughness_texture_path": "textures/sparkling_wine_roughness.png",
+      "roughness_texture_sha256": "728843b64edb235e98a0967359966ec6b30b2aaa8e37bb5c901e269f1ca6bbd0"
     },
     {
       "asset_key": "spray_cleaner",
@@ -1503,13 +1575,19 @@
       "geometry_signature": "ecb304cbc41b65e6e926c2886f27addf481383f39d47a3134c23a226c94f685b",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "23184a94e288e158ca6754621002c0b6f4f6f0063872aeb24cdce69a44822bdd",
-      "texture_sha256": "8803702d93505d04f11d562ead4b93902a14423fda6b004b649e3ef4a73182b1",
-      "geometry_scope_sha256": "f63f3e830906e8a151ddc857bc7c9e74804a550167005c02dc6d8d68c107bd6a",
-      "appearance_scope_sha256": "24590b298a39ac990a004c0b8948c62823277dc96eee6c97116fd23ae5684576"
+      "usd_sha256": "8e3b38d11a13d8b9ad3beb83bcde5277dc1fd7bb1193d6670f367077622f6d10",
+      "texture_sha256": "65b5fdbd1adc0e10284a796b6784e0fbb44beff9152ce5826af2557b08f0a057",
+      "geometry_scope_sha256": "46bd622153217a84363bb475339f362c039957b2799f784c4392954941a18620",
+      "appearance_scope_sha256": "39022e9e77a03e1c897386382fd09935207779ae9a2ad5d85fdf58c568e2d4bb",
+      "normal_texture_path": "textures/spray_cleaner_normal.png",
+      "normal_texture_sha256": "92112cafe7fa2d1883c2dc1642c78493dc3ffe8c295afb56f13af01e0c8e5aa4",
+      "roughness_texture_path": "textures/spray_cleaner_roughness.png",
+      "roughness_texture_sha256": "e8545a15a5cf397eb0e6cdf94e38458e66b479d3e789bfe60b6b3c6b32587b1e"
     },
     {
       "asset_key": "dish_soap",
@@ -1535,13 +1613,19 @@
       "geometry_signature": "fdb4457293f5eef3d312858ada892c4b01fe76e7939b356372cb81c0971dfb37",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "5428fcf3e00a38c9dd8d733ab42cc21ad91a1b6bd16284a55d8b6777a28deab3",
-      "texture_sha256": "8068a565f3408b11645c6bf3595a9fd9503dbc2b1a2502251daa03e86d950637",
-      "geometry_scope_sha256": "b3eeabfb9efa053e92c8f2082b1fce377ae8496b8628594a43ba7d6277f38692",
-      "appearance_scope_sha256": "f61c795d043b032341e9009a78e9cd7a8a068090d868be668e105b01e49d3a85"
+      "usd_sha256": "31687b3e5466b6dd32a9611f2051d84860e5197d11cea0d14244935011ba9124",
+      "texture_sha256": "80bb7cf363e8001dd0d118167056737e014840f0f3a90203261bd1bb7fae09db",
+      "geometry_scope_sha256": "8f6065b8841f46a79a0f779dee38a757b9da669fc4791aba0393a024768c0a30",
+      "appearance_scope_sha256": "4eed95703c68579ee6e1648507ea15019b125115bc2fc8553e19011c4c44038c",
+      "normal_texture_path": "textures/dish_soap_normal.png",
+      "normal_texture_sha256": "d8b624ecdc3579c7f8e381bdfe73fde916e2aeb20da4474642a6de55f2df02be",
+      "roughness_texture_path": "textures/dish_soap_roughness.png",
+      "roughness_texture_sha256": "83a38b48c2e68d6c441e536f6d5741b43376dede8a50bf7f9092b4b3dc072193"
     },
     {
       "asset_key": "detergent_jug",
@@ -1568,13 +1652,19 @@
       "geometry_signature": "f392d10ee3feac5a56d27604119935f196b36a1b3cbf7717e02db0cc225211eb",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "c9c2d4f6ad0f9727b9442ac926e9cac0366e211c414ae2245dcd7c2e68a437ea",
-      "texture_sha256": "719ff4cbc1385d66304fc45c42c219683ab1a5434393066fe5a6eeb40874ae6b",
-      "geometry_scope_sha256": "923249de80f338ef12c1ca961fcf3f30eea707718dc2693b283068a97be3e9a2",
-      "appearance_scope_sha256": "e6c9bb10a55340080309663d6e51a986cd771eb92c238075a88a513d1cf3f14d"
+      "usd_sha256": "847af8c96be15dd5a37e0617f436504acdaeb6ab21b7765da7c8d94d61774ee7",
+      "texture_sha256": "258b82f515c043b95190391c552d32903b68f0e63bbd66c0ad8507b677f4192e",
+      "geometry_scope_sha256": "391189144edef8ccbd741f66b9c13768b97c255dca976298a2c0fd393ef15f95",
+      "appearance_scope_sha256": "a7bc4cefd71c622751ae0400dcf59ad094d05fcdbf5c1f1d185f43c4ff20ec0d",
+      "normal_texture_path": "textures/detergent_jug_normal.png",
+      "normal_texture_sha256": "a78cf020e0a2e0db16ae91c636c2e227d542f93c9efef2fa08459e6f9b71ac20",
+      "roughness_texture_path": "textures/detergent_jug_roughness.png",
+      "roughness_texture_sha256": "3abfcbd67a84491d10850035b2576a8d238cb7a6a19281f19aa524cd73859f23"
     },
     {
       "asset_key": "bleach_jug",
@@ -1601,13 +1691,19 @@
       "geometry_signature": "b34e0b7eb97d165ba75c412450d6a38e0e64321996f979778a8f9b4b117be5df",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "2d34650f55cc51f2264bdad36f7d3cf33786d4379f87ebda15b5248fc5042417",
-      "texture_sha256": "d3b19d610c78286ea046da7322f7e11e498801819fbe94dce24d2ae153e93016",
-      "geometry_scope_sha256": "ed385bfc4766a840bb8b754f65e1d7260eb51df8c9f4bd1b0fd8f871be71139e",
-      "appearance_scope_sha256": "60c71e91755714159739171243619c461e02a5b5dc7abbdb6e66fd4e95709ad8"
+      "usd_sha256": "6c978514594eed9c58141f8b317293a02520302ec7b973af74481cb6542a0f2a",
+      "texture_sha256": "f7161d1398a76d09dd42d4d215a7cbf2f3116dd3b1bacc68a0d13a97c9b4e04d",
+      "geometry_scope_sha256": "2ea8d9d8f908b2b60730b532cf18459c75bdc8bfb94af0f837cb5d3981e35ee6",
+      "appearance_scope_sha256": "0126555d85fb22189968aa639cc1fbe8010b62404d97e309db301e77f67bd65a",
+      "normal_texture_path": "textures/bleach_jug_normal.png",
+      "normal_texture_sha256": "8eadfc6a859624b743ddf35c54a9a737529aa87f0a6a292d81503d3b271b6b55",
+      "roughness_texture_path": "textures/bleach_jug_roughness.png",
+      "roughness_texture_sha256": "aadfeb4da266e6df98954eaad7908fbbca5534b9b23cf730c512229b39848468"
     },
     {
       "asset_key": "hand_soap",
@@ -1635,13 +1731,19 @@
       "geometry_signature": "2c6f57fd6472dcaaf21da82e05ecdda24ca27774b7a5b488e44913e86da56161",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "0a5bf230685205a5056ba6f489fc53e8f82b4f098c7075245509c3f87b0c0aeb",
-      "texture_sha256": "b50d3d8948e76c79a0d7bdd8f804f0a26cd26fd3192dfc466d2b371ef1a6347d",
-      "geometry_scope_sha256": "81304b28eebf358e47a2b36ef6bc172d6e909e0ae3c6d10c8beb762b0e38d619",
-      "appearance_scope_sha256": "3c8108c1a354e2004cb480270a33b9a79ebd3babe93d68c7f523ec5333855fe5"
+      "usd_sha256": "a0ee37d6be70263c8cb8b0f667ce459336c189fa55ba82b5e24ee89a8be5b0b5",
+      "texture_sha256": "20667df607d4649a9c4caa926311570ee36f653dff6e91b690be28001e37d7e6",
+      "geometry_scope_sha256": "0e4894b0c3d4300325c77b78e7c51a15aa72f2dec4036bf7f0d52e687fc97c35",
+      "appearance_scope_sha256": "927b31ba850410337eee7642baa5acd70331892ad519400b5011583c9461166c",
+      "normal_texture_path": "textures/hand_soap_normal.png",
+      "normal_texture_sha256": "ece56b98faf96b8c712c1ee36053139bac0cdd5678cc3fcf2d1347cff0553dc7",
+      "roughness_texture_path": "textures/hand_soap_roughness.png",
+      "roughness_texture_sha256": "2824afa549e86203772d4fa3b53f1e48db30b67878369263fcc30fd90107f9cb"
     },
     {
       "asset_key": "shampoo",
@@ -1667,13 +1769,19 @@
       "geometry_signature": "eb448d647d662d1a069c7aef081f33d73669d47e4934110eb0364534bb1e4a36",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "46a7f186629c70eb134918123fa06d714018e067fcbd4d4bca3504431a0330de",
-      "texture_sha256": "5a6b572f6d40835b1544937009f6c6d74f116e40f38309fe1194a5aaf3f4c656",
-      "geometry_scope_sha256": "ac481a07a2c5a47a6e0b3d7724cac2a52937f213c63aeecf2bed9620e3cd356f",
-      "appearance_scope_sha256": "b1644bc08b663d7c2804fc045723c70aab85f7649c558b714afb543df7cce2f1"
+      "usd_sha256": "8493c3d240c25fbbf0531ec5fc2059b03efd68635984daa032cabe3b8ed86c23",
+      "texture_sha256": "40cc11cf09e360233bd3c089a30ebb5b8c636ab3188c97079d2217e67cd8c848",
+      "geometry_scope_sha256": "45794bcd668e191b1316e0cc68bc554d736d6badcc25b9154dc1b70d6fc42e4e",
+      "appearance_scope_sha256": "17cc90c6a112f982be7f9c1077a871a9ef79a29977ffa119f32d870c63915c0e",
+      "normal_texture_path": "textures/shampoo_normal.png",
+      "normal_texture_sha256": "12cbb811fb320a657423413ec0f92dc04c0b2784f5945f4de7785bd9d90e4c24",
+      "roughness_texture_path": "textures/shampoo_roughness.png",
+      "roughness_texture_sha256": "c2aff2f67fb026e1d1f1eef582d8be53a273e0ec6e58f0df036c38c72e570d60"
     },
     {
       "asset_key": "tuna_can",
@@ -1699,13 +1807,19 @@
       "geometry_signature": "22273c620c18cfa701d7b41183c691f86aad70ccfb2dd85605a7989fe8f1af53",
       "material_classes": [
         "printed_label",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "515d8294b7b32bcec106ffcf228d6cdd592c718461d0d017f3a65c7fa3a31944",
-      "texture_sha256": "6ae17a34c99dbaec3e5505ea96691e37115274fd99b3d2a4c7a3697c2fb94bcf",
-      "geometry_scope_sha256": "ebe3bab2bf57f784488ccc1e886ccbea443ce8a14a9adb6ab34e5f47d928d5a8",
-      "appearance_scope_sha256": "380ece8d9547ec2300578d70fe9cb3d89775732f3d8d7a990d7af60298b9ba9f"
+      "usd_sha256": "6c7210ef5fd081fe8471c0654f48e352a6ba36fa6c0025e193c41d3808416f67",
+      "texture_sha256": "281b779b7e0b28febf4a0272a9f50649371a9bebbb8d18003f2b873cc2be3db0",
+      "geometry_scope_sha256": "04810f010ec1ba48b558cc8dc2680eade1d2ce7da992e5e0af1ff19af5f47611",
+      "appearance_scope_sha256": "b445cbad0fb0565029454b2909aea8e61902480201374510b466565583c33246",
+      "normal_texture_path": "textures/tuna_can_normal.png",
+      "normal_texture_sha256": "9d410aa79d9eaceb165df024cce29a44139ab3dc669aa8af868a48532dbc4488",
+      "roughness_texture_path": "textures/tuna_can_roughness.png",
+      "roughness_texture_sha256": "aa76e885ef377becb95187b36ec5ee2342d8d0f37521de11a6703512fd984afd"
     },
     {
       "asset_key": "coffee_canister",
@@ -1732,13 +1846,19 @@
       "geometry_signature": "7970685e7316cbdd35e9e05a7ce7b4a96bff66976b4bd31b5bb42e464975dfe9",
       "material_classes": [
         "printed_label",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "0ab1711960dc13767ff475e371f9a82553a3f4d32edf16a9caccda0d45e97790",
-      "texture_sha256": "6497db64971c773776cc51aaeb5de8066630cc49b236d43fc89d4ca6db9e0cb4",
-      "geometry_scope_sha256": "588a12239a244355036ace9fa7f0b926d49817005055e9af92ec003f091ccffa",
-      "appearance_scope_sha256": "4b283676cac6a56db9a2c77c950692cc41eb19fa008d7664be731eb3f53892dc"
+      "usd_sha256": "0b1147a47699c19312a8de6c8154e94d8062fcc191601673a61098c7d0642df8",
+      "texture_sha256": "8f2c01fc63926385beeba529b6cff64a3e9c887ff16e97519b8c7ef8d4321765",
+      "geometry_scope_sha256": "1b7e930e7edf4a1a4e35d2d9e1336e544fef96ee8de04ba0344f0fca4c082bfd",
+      "appearance_scope_sha256": "a1518cd8353459d3113731d26ce74f2cc2379bab5cb348a4c51b6c8c88b795b9",
+      "normal_texture_path": "textures/coffee_canister_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/coffee_canister_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
     },
     {
       "asset_key": "sardine_tin",
@@ -1764,13 +1884,19 @@
       "geometry_signature": "e71b808b3a25a91a78981a8913dbdc2dff35e8936b5e4b70c2fc58cd6add40dd",
       "material_classes": [
         "printed_label",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "f9a08bf2fa4df7848eff2164ec3b11c61ce325b7041aaa63931ad5c9357329c5",
-      "texture_sha256": "32b39673c29eee99de8da8fb6cfb24e0adff81af54e938020ab8b8384b2d1065",
-      "geometry_scope_sha256": "dd0afdde4f73adfa3c76cbc53937a81bb35abef37b7fccd95c6dda000fb1bd0d",
-      "appearance_scope_sha256": "ef05103b76b16f5d3fd0a24098dc1611818965ed38353b7f1f567b9d73577761"
+      "usd_sha256": "d969c02fef479409e465c549aa005ef4c3d020f5055ae67d96be53ab1215b355",
+      "texture_sha256": "910650b9ae2ac6ca29c4e18e68fb8e2c690e6097ea03fbea50acdab135187aca",
+      "geometry_scope_sha256": "f7e0604daa76a433b0e8dc071862f3057d48ab9fd460f347ff3364c8f67d3fce",
+      "appearance_scope_sha256": "f35fe742707a1e7369bba38b566aa18856aebc102eb877d9d0601a2b9f9cf4dc",
+      "normal_texture_path": "textures/sardine_tin_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/sardine_tin_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
     },
     {
       "asset_key": "tea_box",
@@ -1796,13 +1922,19 @@
       "geometry_signature": "fafde322d4f86268377a224715ebf9e2a3bcb316508b6dab12225350223a3072",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "398cc72c9394ea1dbb06936ceb4cfcfbc3a552c9d66e9008fc71b8254d1f9c28",
-      "texture_sha256": "9114f898bca949becb0d667160272a961dc47197ffeef4e5c9dbd09f6acfc18c",
-      "geometry_scope_sha256": "55c346827d927e922c86443325f03cee16dd932e4731e564405b583829750857",
-      "appearance_scope_sha256": "991926c48f21c01f2c97f5ed0e7215cca5a115b65f4968dc878289d24d045be1"
+      "usd_sha256": "e1530e0e5d93cbec7555c89329a2975d23b755420f13ef721ef70cd3057099f0",
+      "texture_sha256": "751a8f813037f8eb583f6492cf2a8b633dca87c33a663e526f838c00b31bc866",
+      "geometry_scope_sha256": "bb60867be1fff53f2ecdf694e438cf4f9581204d4183c72e40a27fedd4e7fb84",
+      "appearance_scope_sha256": "cf50b1db648758fde53590495e5d16f9f30f695700a40c662bbfba96035fe43b",
+      "normal_texture_path": "textures/tea_box_normal.png",
+      "normal_texture_sha256": "5d18a0d3ecf8a45f49944ee00ce2a693fd68fea7ade6756386b38ef25b5dd783",
+      "roughness_texture_path": "textures/tea_box_roughness.png",
+      "roughness_texture_sha256": "60130ed5de68b57366551612f8a8a61466716fe8a3e20ff422ed02e524142eff"
     },
     {
       "asset_key": "pasta_box",
@@ -1828,13 +1960,19 @@
       "geometry_signature": "1cac90c7b3d4e0b421bb7e2e6328c734c7a62c70e39bc28b540a551b07aead00",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "4608cd4662b19e200f1517a0d2c78edeac06b8211af10bc57271d7afa0f06dc3",
-      "texture_sha256": "cb81ba8ea778ddf9a6218588682c800e7e1848ec5f554bef75be8282ba9dd324",
-      "geometry_scope_sha256": "fd4cd73bbf529a864b19bc264cb5cad04408902f3add069c288155904a61bcb6",
-      "appearance_scope_sha256": "3f3a0201d1c41634c6bb8550fbe7de853fb9862099984c8ddffd24f3d70eb238"
+      "usd_sha256": "517d451d090028de4def2a90a9559812ae881d8f53cb653a0a9c5719e811c19d",
+      "texture_sha256": "ff91cf7ac70294405673bc88d9051ee65a2b62bd0bec4ffca7e446c1e5bcefdc",
+      "geometry_scope_sha256": "a2dd4b5652ae753ad4dd5b493ba61c5c44dd1d0d609f471b49550655d93d2449",
+      "appearance_scope_sha256": "99c25fc1109a5fb7ba682015069c166e593988d8bf305f77c3cc4b592d56ea16",
+      "normal_texture_path": "textures/pasta_box_normal.png",
+      "normal_texture_sha256": "b093adf5ef7757f3e63c3ab935e79f67bfa23c02c7af898035e42981e8504a3f",
+      "roughness_texture_path": "textures/pasta_box_roughness.png",
+      "roughness_texture_sha256": "4061fd44185d104ea2b694f4dfebaa71e461c51fb775d6cac1d9954323952d11"
     },
     {
       "asset_key": "rice_bag",
@@ -1861,13 +1999,19 @@
       "geometry_signature": "110740117b123699a9d4f1489dfce1c21c95c2d1e11d3e1fd209f0450541f1fc",
       "material_classes": [
         "printed_film",
-        "paper_or_product"
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "cbdc6fa809152433cbd7acbfead806e56e06c03134e90daf7b28db28033b52ef",
-      "texture_sha256": "f8b91cbdd6a0c9fb05c6dcdfd30e47727645a299ad19f1f7895e90210267e5fc",
-      "geometry_scope_sha256": "c6f0ab20ba00e77387648d4b7198a727f774b8ef84e89fa4a3a216cfb05549e5",
-      "appearance_scope_sha256": "43399cd99e72084783d68f9de65fe915c593d9680d52374f99178da72f68a0a5"
+      "usd_sha256": "c035cbf54e154610f42535bdead058fd7c8c96325f09785c309fc211a8cb209e",
+      "texture_sha256": "2bbd9b08966c425a07920e53c564cde13a9e537e907ff992d653fade620d3f23",
+      "geometry_scope_sha256": "762ed463582b55b9395dae2d64ad166b5eaa40a218b03bebbec5764a27e764c9",
+      "appearance_scope_sha256": "83b1dc7d3eb8a7edfe139bc46442bb6dfc4b067d97d19c2a45afad0afb511e63",
+      "normal_texture_path": "textures/rice_bag_normal.png",
+      "normal_texture_sha256": "9f216cdeb7f7e2a4d56548a160983133bdd034472fe0710a25b3869d62758649",
+      "roughness_texture_path": "textures/rice_bag_roughness.png",
+      "roughness_texture_sha256": "484040c8012e8c5bd283ee0eddf594db545a35b021ed69a659ff3287680f3263"
     },
     {
       "asset_key": "coffee_bag",
@@ -1893,13 +2037,19 @@
       "geometry_signature": "aed7f4a22557afe2464a09549d0101a9cbe21f0fcd057bd72777a0ed231a3737",
       "material_classes": [
         "printed_film",
-        "paper_or_product"
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "9fe62b82c80aebc23a10569e42c710e8e98833bfbc39bfe09460d6e9533a1c55",
-      "texture_sha256": "ea558a15ec864a47756d524fbb37582d504871672a1a75bb91a7d20dfc03abbc",
-      "geometry_scope_sha256": "43381de745b3c24831ab9e143bbf073d88a255e7d69c716c87400da24ecc74a8",
-      "appearance_scope_sha256": "d893450e78229c32b2a214fef07db848bdd70ba664e40a98df138e855c30c8ed"
+      "usd_sha256": "049fc647b3d997b2ee64b111d0380fc0a19d11efc0a05210f79d4e8e70bd6a90",
+      "texture_sha256": "390f1d35f2cda251e28f303abe40561c3274dc40bba46958b8ce61034b675907",
+      "geometry_scope_sha256": "b786523aa0ed374fa2c67e7d8876fbfb9fc357754f22410905b2b1f4656d5893",
+      "appearance_scope_sha256": "4a74a7fc2fba915047f65076fc693671214cf08df4e8930b262b3bec16442af8",
+      "normal_texture_path": "textures/coffee_bag_normal.png",
+      "normal_texture_sha256": "9acbe0171f7cb8e47a3a2680a24ef169f2e64d765599f361f53bd6fbc6d75ee3",
+      "roughness_texture_path": "textures/coffee_bag_roughness.png",
+      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514"
     },
     {
       "asset_key": "flour_sack",
@@ -1926,13 +2076,19 @@
       "geometry_signature": "59b961aa200c98481902c90421483100ed13c3236ee145d79147fc014c52d16c",
       "material_classes": [
         "printed_film",
-        "paper_or_product"
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "40a437dbe44da8cc17cc164e48a24c36133409a999e0d42b6b8f602f390bad48",
-      "texture_sha256": "26ba662006deee6430d439b9f90b5c8b633bb409baed41b24a5beb52ed796dde",
-      "geometry_scope_sha256": "f1f9683cfe1159550e5847e0ba5f5ec03fc0bad1550664b67d3ce7ebeebf7341",
-      "appearance_scope_sha256": "cac556fd0649864fbaa8eafb0505a41ad29b80ff9f88468ea273ff758415ef2f"
+      "usd_sha256": "034df14794447ac9dd0f2a7a8fdba583c2904fe083ab2a8900d24402df10d77a",
+      "texture_sha256": "d00eea1f46a5128387157411349b82ee32756a6a4fda5f36f7fdde776a57c874",
+      "geometry_scope_sha256": "9dc584f6c9ad3361f06140133060bf843c96d45ac98776cbc744d08abae35d08",
+      "appearance_scope_sha256": "20c5e66308fdd895231e6333a41cabef0f60029266c16a35217915d81d66b1a7",
+      "normal_texture_path": "textures/flour_sack_normal.png",
+      "normal_texture_sha256": "0dc9da97abd7da43a3eb7ce49c5f64d3619b60ccbc8decd2f9bc44fd5b104b88",
+      "roughness_texture_path": "textures/flour_sack_roughness.png",
+      "roughness_texture_sha256": "29084b9249d44584dd2a8c6b805c61fa8a47d76c36a7e70b288d7783d16e29ff"
     },
     {
       "asset_key": "bread_loaf",
@@ -1951,21 +2107,28 @@
       "intended_support": "shelf",
       "assembly_profile": "bread_bag",
       "assembly_parts": [
-        "loaf",
-        "clear_bag",
+        "continuous_scored_loaf",
+        "clear_sleeve",
+        "bottom_seal",
         "twisted_neck",
         "closure"
       ],
-      "geometry_signature": "3e8809e615ffbb971dc3a7aeebbd204f22d14074864fcb1b095b5797710519e0",
+      "geometry_signature": "50b1634aed445f1c4845a9915823054b9bacf6267af81a7c9809f87ff26c8d33",
       "material_classes": [
         "printed_film",
-        "paper_or_product"
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "5e04fa74651b2da4f1547467958eaa8c38a1972b8b8e787549704d300aa99ff5",
-      "texture_sha256": "0007ee5a2e3909fef27ef94de5d1fec8551ab889ee9555d7938f9a84cd462463",
-      "geometry_scope_sha256": "fd5691136dbe98dd31da398a4269784f3bc0079c1149d1c39b0a6398bffdb765",
-      "appearance_scope_sha256": "173f19c2491dfc8ed5cb5fe1508cbfe97f94940ed495d16726c2a720ea158828"
+      "usd_sha256": "f89c173f0ff3c1dfd97475cd52d2f05b0fa4f40ac92a22479d4bca2c745b229a",
+      "texture_sha256": "6315abe5b24d8cfd73a3f4473a8fae4e68ad7b6edf6d5a5b5d3a6d1166227cab",
+      "geometry_scope_sha256": "fa0b61284d344834c71de92ee491826507c259c84bf45e1a107b957a2bff9c71",
+      "appearance_scope_sha256": "6f53fc139b096a0cd2565c67b34d2798a855a13adad273c17b2377104bad40fc",
+      "normal_texture_path": "textures/bread_loaf_normal.png",
+      "normal_texture_sha256": "a18aa561160342eac532db4873636e498a386b905ac414b115df5486aad81902",
+      "roughness_texture_path": "textures/bread_loaf_roughness.png",
+      "roughness_texture_sha256": "6d690f96f082b406ab7ae87d5f960e9d121f31f8583a0e5aaf2a59ae0bd6aae8"
     },
     {
       "asset_key": "chips_bag",
@@ -1992,13 +2155,19 @@
       "geometry_signature": "254b0d9f95f74c377a53d3630de81b4ccff624b279bfbf4822089cabb3509aef",
       "material_classes": [
         "printed_film",
-        "paper_or_product"
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "f5e0b0c6e98b007607a506a1dda87a2fa6eb0438c053cf90c3eac8d562720f15",
-      "texture_sha256": "f61a1d9a27087c98b10bc28f011d9215d8c6871f3db8ff276a269d1decee500c",
-      "geometry_scope_sha256": "85d8bbc47ec29a17056d47529a75acd692bd4c1afc4fb961d7f8164e8074d179",
-      "appearance_scope_sha256": "96c2e4168965d575d71669d5daae23c34aa88b4b2f7ec1d9d4617357fe8c6f5e"
+      "usd_sha256": "c9cf70a25d49aa1d1d9d32baaef5e79ab02caefed62a16b59241ea4730ea307f",
+      "texture_sha256": "6976f6e499e57bf0127ebcb1e0fc60c94ed999c002a15e650c2ac6e11a7ade65",
+      "geometry_scope_sha256": "a59b0aa52e71dfd4a5da5290b5d31f794a59b48897314df3fb715e01e24d2f4c",
+      "appearance_scope_sha256": "3871e660c9eaac125dc889bcb38bf7e035127f8c4ada944b0f7afb74969a3427",
+      "normal_texture_path": "textures/chips_bag_normal.png",
+      "normal_texture_sha256": "8a067aafe78714d3a012a4693ccc98fac265b266eaba52d76e0e8f1599439924",
+      "roughness_texture_path": "textures/chips_bag_roughness.png",
+      "roughness_texture_sha256": "ef4f904359b0008cb02cd0b325b85045ff8cf1ca138c80b5f1b6b8161922b706"
     },
     {
       "asset_key": "banana_bunch",
@@ -2017,20 +2186,26 @@
       "intended_support": "shelf",
       "assembly_profile": "banana_bunch",
       "assembly_parts": [
-        "five_three_segment_curved_fingers",
+        "five_continuous_tapered_fingers",
         "crown",
         "stem"
       ],
-      "geometry_signature": "cef24d5efb0a8f50e833b2a7687c6799cccaa5e9d1802d7f2a00026568c50eb7",
+      "geometry_signature": "189720c02bb696b8b501f73f69eaeee664df5b990c270a7cba2a9e036bd6b6d2",
       "material_classes": [
         "produce_skin",
-        "plant_stem"
+        "plant_stem",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "b353ab0d8b242d3904652a53c96d40b6aef3e2547c0bffb717c38c00f553c839",
-      "texture_sha256": "679d0dfe1132ccabe806a631a70d92fcfb6f8b286b07fc2861b89bff3eb2e2ef",
-      "geometry_scope_sha256": "a48cbf7575fdae067f1faf31a921ad87f6f9d5c5831d1343bac1d4528c7a6c31",
-      "appearance_scope_sha256": "fcbb3c8b72f174f6426c027dbda91cf5cb35a888b07acf4daa94c3ed7ce39d4c"
+      "usd_sha256": "10e120123da33862515bf917fafb4a5823f01907618fa4f9e16c2ad1d6b2917c",
+      "texture_sha256": "5dcd997ddd71dda5757021ce3a775d022f4e1bbfedecb360edf1a69925deca9b",
+      "geometry_scope_sha256": "cea649c3807903e9835406b7dd8e80bdf53c3216e9efe5c753a48fd40b327e2d",
+      "appearance_scope_sha256": "a146531bc4ff92731970bde23c5274022bc7c0bf858ede68d4c7f8f033364013",
+      "normal_texture_path": "textures/banana_bunch_normal.png",
+      "normal_texture_sha256": "0cbc1192053f6293363913d3adfce29185807f4b361aacd0a25bb4ebe447c1da",
+      "roughness_texture_path": "textures/banana_bunch_roughness.png",
+      "roughness_texture_sha256": "ba47c989f92a56d53cf2e254d5a0222a264eea5545c30440539cb8273ff64bcc"
     },
     {
       "asset_key": "pear",
@@ -2057,13 +2232,19 @@
       "geometry_signature": "c7ca050b833802e832b63cc8c8c74719a043a09f830f6a124d2e2498b77f00cf",
       "material_classes": [
         "produce_skin",
-        "plant_stem"
+        "plant_stem",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "ecf63b9cf60d7173b0037a45480b531f12b7dab8043a9b1dc903c2c1a18ba35a",
-      "texture_sha256": "a1fbec1eac6797f50735e7d656b0b9c82319f8e05d1f280a27fa8dff02704d1b",
+      "usd_sha256": "e6fddf0d380d9f760d4b551c8ed649feb9e5cc80c9027deb873dfa82e8e4fa9a",
+      "texture_sha256": "6e066efca2961901ae767ccc494312d73a9ba395baa8029995b1e153ed843684",
       "geometry_scope_sha256": "07aa68d69d525d9dba3713ece9d2d1e730c61937e33b9a970051539745ed5627",
-      "appearance_scope_sha256": "ebcc20bcec446cbcd1780a5f314e8f9131392614445891331474c7db0bbc92bc"
+      "appearance_scope_sha256": "ec34df2a46deb69d65634293a05d6d48fc5bbb0b0fd7395d0d3ffb7a1cb2ec0f",
+      "normal_texture_path": "textures/pear_normal.png",
+      "normal_texture_sha256": "564be39a086d0587ddd2620ceccf88366da5d0052e212da578227dc91196544b",
+      "roughness_texture_path": "textures/pear_roughness.png",
+      "roughness_texture_sha256": "ae9cce60bf1c166c93382b4980e3c9067d007b9d6ea1dec848edc1474012c782"
     },
     {
       "asset_key": "broccoli",
@@ -2083,19 +2264,25 @@
       "assembly_profile": "broccoli",
       "assembly_parts": [
         "stalk",
-        "five_branches",
-        "fifteen_florets"
+        "five_tapered_branches",
+        "fifteen_irregular_floret_meshes"
       ],
-      "geometry_signature": "8aacbfe79506fb4a702cab57d81161e9dba06abd31c29a282f15dc605ad7201b",
+      "geometry_signature": "aac00cebc3c23b5bd027d31f704f1853550802baa1107ed8a0a1dc53aadc1a1b",
       "material_classes": [
         "produce_skin",
-        "plant_stem"
+        "plant_stem",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "652fda14d3305cf31d66986f7fe20b3ec7c69c7e7c8b51ce67dde3730ca4c5da",
-      "texture_sha256": "83abfe7422c9ab701dbef397e52738bc9f7879ffd488318cadfef72ad7cc3c29",
-      "geometry_scope_sha256": "7cdc85077c2678d0a836579cf3674d35afe8ef4fcc68f6ea38010f91ef6a8f98",
-      "appearance_scope_sha256": "700cd66300e896338c5853f8364234730569e1ea20d395fb124f33b2e9851ac5"
+      "usd_sha256": "0380706d81f2d5ab2aa7e7a1ca155208af71288e52da30e348b91651c58fdebc",
+      "texture_sha256": "3c674bddedbef014d83f0b5a35cfda9fc98c8ab15d117781453f504eea784bac",
+      "geometry_scope_sha256": "024c6990fabe9f16d3d18b02b7a8da0af52f97743c81a136e00db52a4b9355c2",
+      "appearance_scope_sha256": "b1920518fe169ecbbf683465371db8afc7f414d81a684120d24c2cdbf5daf80b",
+      "normal_texture_path": "textures/broccoli_normal.png",
+      "normal_texture_sha256": "2a741baf48ed4f18b7a5183d015006a11915d54e97f11e39fae5b988ca3ae162",
+      "roughness_texture_path": "textures/broccoli_roughness.png",
+      "roughness_texture_sha256": "29f592d1bc5094f2b9fda224fb6f0c287193938a35e38ece8802d18289fc8635"
     },
     {
       "asset_key": "carrot_bunch",
@@ -2121,13 +2308,19 @@
       "geometry_signature": "16da6670a68722aa9c3d32e7072326d9dc6b37fc8410173548b81608e580cc11",
       "material_classes": [
         "produce_skin",
-        "plant_stem"
+        "plant_stem",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "8830b9b435dcec86d80d242dff709767fbe634fc9ac5f9b216e7ae687347c9b0",
-      "texture_sha256": "df068e275b68e44c5dd2dfd97e9b5b802e9e0b8c83a82c4965eedc6c97808ff1",
+      "usd_sha256": "064760b8188faa99968a830755af922677eb5cf78318512f2e420108639965b4",
+      "texture_sha256": "eda00e2d20d27d67eb3dd72585f1f2d951145b44458a11df48bdeb05f6c75545",
       "geometry_scope_sha256": "1d288696e6f31cd46b588712fbbc1d9da855e1d5907041b92d850e79c132eeba",
-      "appearance_scope_sha256": "be7d087e9361b71a04539e8943d8abdcd23938bc4fb01942755fd663e57ed684"
+      "appearance_scope_sha256": "3dfebc438221bef56ff20b82f7373272bd87a08f224b53c6724f41e09c99c0c5",
+      "normal_texture_path": "textures/carrot_bunch_normal.png",
+      "normal_texture_sha256": "a1264db5853e6f4710c49b8e74380d70cd7aebd31e04cd68fa7690d49fc54b3c",
+      "roughness_texture_path": "textures/carrot_bunch_roughness.png",
+      "roughness_texture_sha256": "483a9cd532e6bfcb83bee01697d0dc2b6bda0032be85221f3882993ca287b7f7"
     },
     {
       "asset_key": "jam_jar",
@@ -2155,13 +2348,19 @@
       "material_classes": [
         "printed_label",
         "glass",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "5c12f580b2ec6334ea2ec921efed57bf62fb1c5001adfbf783c6ca846e7b9b71",
-      "texture_sha256": "b5fac9b04e81630169e6fb303fcbb3039ec2fb09b5277946fd653f7f724b400c",
-      "geometry_scope_sha256": "6c49c01fc50b9e11a6c07414e380e3c41ee16cb497377e4708824b3ea7136a92",
-      "appearance_scope_sha256": "1a939772176a6f8c081138a7cba34c5944e4b1c5d39cfc05be8a7483c76209e9"
+      "usd_sha256": "2b813ca7eed2045de8e58e2be08bc77d05ebf9f4265334c4e447d49db3d5bebe",
+      "texture_sha256": "f90374ee00682c978d70c990cc2d9b1d14a0244256f5296e794af83e3e4d2a83",
+      "geometry_scope_sha256": "0d3849e60deb855d55e29802848221dc9c172031591165c9c52c66f9fb57de2f",
+      "appearance_scope_sha256": "9ed1290a291e946f485ca73212cf10c5325fc67a57553823cb9ad7e893fee0ee",
+      "normal_texture_path": "textures/jam_jar_normal.png",
+      "normal_texture_sha256": "9d410aa79d9eaceb165df024cce29a44139ab3dc669aa8af868a48532dbc4488",
+      "roughness_texture_path": "textures/jam_jar_roughness.png",
+      "roughness_texture_sha256": "aa76e885ef377becb95187b36ec5ee2342d8d0f37521de11a6703512fd984afd"
     },
     {
       "asset_key": "spice_jar",
@@ -2188,13 +2387,19 @@
       "material_classes": [
         "printed_label",
         "glass",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "1a4614f83accb14254ba181d76f9492f56546395d545f125d403be7836045ca6",
-      "texture_sha256": "93f78cb9da4c5924c1e48c10d77b7dccc72f6eeac58d3faf2837e4a60e776af1",
-      "geometry_scope_sha256": "221f677f49cd3fe40f19f8e064c0cf701591002cfaf4f6181dbe8d86150959bc",
-      "appearance_scope_sha256": "5c8c1cda0a8de2863eba9530f48d9ef1d2813da880625e643850067cc5fa86f2"
+      "usd_sha256": "5043ba4caf54b3276dce381b029c18b96ac07fed39a398494915b49530ca337d",
+      "texture_sha256": "a716755d2998ddf837de0cdae9f2632566ac7e6a1b286e72f16c37926dff0577",
+      "geometry_scope_sha256": "9445521754b61847d4173f7ab59641c4fb20b9992a0bf7abb567d9ffeb68c32a",
+      "appearance_scope_sha256": "f3f0690c917032c8caf183d0a4731193d0cb6cab1ac9532ec776eeda23d33205",
+      "normal_texture_path": "textures/spice_jar_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/spice_jar_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
     },
     {
       "asset_key": "peanut_jar",
@@ -2222,13 +2427,19 @@
       "material_classes": [
         "printed_label",
         "glass",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "d606c7d18058fa02fb0c24031f3be07fbdd2c0c97ca4d33b5216d7f177901440",
-      "texture_sha256": "4962d1a754c55370f869eeb3f04670883bdb830dffc5be3162bb15c618a71155",
-      "geometry_scope_sha256": "1d28d772b3a718530226df97368bedd0e093c442ce430994cd10ebc523546944",
-      "appearance_scope_sha256": "7438173c778f0fa9755840a771c2259ece844f0ab9eafcb40a6efd109a6e0bb1"
+      "usd_sha256": "cf10f226a9d7b44b195c047d2c5af5565e711d0c9cde2ba89c449bccc5c3dd77",
+      "texture_sha256": "78cfe6db74a1fe5a25f823acb6d48e3eab371a7af04086fb1c97c52ab1b2afc8",
+      "geometry_scope_sha256": "c1d125b817e4b0cc2daadae638dc97acc79e2524d500b8420d16f23b7bb5e11c",
+      "appearance_scope_sha256": "981a0151ba9b5689dd92f1626bba19ae5172107b8aaca3097e58dda7aba6fa1a",
+      "normal_texture_path": "textures/peanut_jar_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/peanut_jar_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
     },
     {
       "asset_key": "paper_towel",
@@ -2255,13 +2466,19 @@
       "geometry_signature": "c6ed490a2d45e5c8e06e7422ab5e95b9317aed6876677eda63978befe655a032",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "674d2adeca015ed0581eaf7664c5ed90d9138aecd28e9c6156ad6d4bbf7bccd7",
-      "texture_sha256": "236b246aeb643b0ab16b1f81106b4e6af1c0d91068f813ed465809fa4903e2b6",
-      "geometry_scope_sha256": "f048a0f571da13e9bd9885b17c8eb2a7b0f7021df0e6457854e9c1dda531231f",
-      "appearance_scope_sha256": "bd3c0754197c4a3efde84d5d05b22697a7d319d9d4b49e9ddc30edfb8b608ed4"
+      "usd_sha256": "1907aff7fe11d382a9993eeb493c49972d5e59d6f71d257782fe3f9c39a62fbb",
+      "texture_sha256": "f35c251a7f650cce7cb0d0442f319c6d7bd85b37fcffaea6532745821b008cf5",
+      "geometry_scope_sha256": "0c51838912f3bbd43078e5002273a120c10fd874e899ef383b2b67e2cdbe968b",
+      "appearance_scope_sha256": "4a46b178aecc136079be3d97c45515f1f1e861fa53bf61fb7f784af6920eaab2",
+      "normal_texture_path": "textures/paper_towel_normal.png",
+      "normal_texture_sha256": "04bd85467313ecd99f22c4d0d386c90469a3ef701b03689ad8a62bf0a657cc8c",
+      "roughness_texture_path": "textures/paper_towel_roughness.png",
+      "roughness_texture_sha256": "58d77687a4c45d10e58f352485f1d71941c81c85f90f7cefcb5b644d3d1156e9"
     },
     {
       "asset_key": "tissue_box",
@@ -2287,13 +2504,19 @@
       "geometry_signature": "36dc26530b75c534beb5a74d15cfb71aabb5b06b467caad5194f3d8e04acde33",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "0c0c3449e3544086eab4021e6768b0df5ea2fe931053a423d7963869e56ddb37",
-      "texture_sha256": "a9470f64e0b9ca0febf250b13b695d2c8a28f02d693d73adbb64c7e68d976c20",
-      "geometry_scope_sha256": "397eadb6427689001d2623d9ee1f8a4fb93b1f7da74a44e8c9e328d450b01747",
-      "appearance_scope_sha256": "313954a5cd55234920c583f329304778ce0eab0ca6ff97c82fa79f2c59e8fcc5"
+      "usd_sha256": "5d0f8e1d5910fe8fcab794bafc271ce1bb35c715fcab5f4d85663460ef83f891",
+      "texture_sha256": "aee360af284e9e13564d98eb7fdc6785819d29c65ddf9c7b6fd78bcd4e8a1cfd",
+      "geometry_scope_sha256": "6bc85ab37ddce94817744d721ef35e453d98639c24891e461845779119dbabc8",
+      "appearance_scope_sha256": "3db1b58f9aeb60ac77352dca64f7677ff1b72f6b7a64f97b58af147c398aab1d",
+      "normal_texture_path": "textures/tissue_box_normal.png",
+      "normal_texture_sha256": "12782b770d8e65ecdc390637fb674b172a84eb2a4d3ea6004378a004e5bbe3dc",
+      "roughness_texture_path": "textures/tissue_box_roughness.png",
+      "roughness_texture_sha256": "39c92f74e43c2b4c40add13ac34d52057f2645ce1fc35094fe50554c22d8efb2"
     },
     {
       "asset_key": "foil_box",
@@ -2320,13 +2543,19 @@
       "geometry_signature": "5e2f6fa70c601f4bf3c8d9ad553e305115fb72aa0da01e731da922adc6ca05fb",
       "material_classes": [
         "printed_label",
-        "metal"
+        "metal",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "10e12d6603c1843fc36140250e15152dd1c25e25731b5109ee0029a8a94dae79",
-      "texture_sha256": "02b2149fc15925beb8292a32891d2149fb29cfcdf9155bacfad9409180255c6a",
-      "geometry_scope_sha256": "4e49b6697122e51d05064b3b7ae8d00cf89a619310d20b1962e9cd47f34d1060",
-      "appearance_scope_sha256": "ee65b6e9aba52faf9c66b496dcc07ea0c6822c07809e215514857e5f77c1cce8"
+      "usd_sha256": "c1b9e81092c0cdb4e8e1ffe28b70125b82ae378b8ec63790dec9fae21022202f",
+      "texture_sha256": "74c12de3bae0100d9cc3a60cfe2f8fdfe57ad61a94fb204800e8de31946a4f85",
+      "geometry_scope_sha256": "89b3e9e99cacafde5161107b2144c2d62946278fbabf0349e6fc647e00ca05f0",
+      "appearance_scope_sha256": "bc892493550b403ba85c03471db688a5f37e50f628a9df704a9225e5b039f6b5",
+      "normal_texture_path": "textures/foil_box_normal.png",
+      "normal_texture_sha256": "d691056c3f6b4def0840f7beb6e573dfd2ec4a41c7aecd71dc9b615a21afd90e",
+      "roughness_texture_path": "textures/foil_box_roughness.png",
+      "roughness_texture_sha256": "9e8f907154ab9e83a4aaa4b1288a4ccdd8cb14ee4ba42987be2c8abef16821f5"
     },
     {
       "asset_key": "sponge_pack",
@@ -2353,13 +2582,19 @@
       "geometry_signature": "de5527081ecc62cf49286218f8de2f788ae3713b610a66bf1fa1327b5bc2b4d9",
       "material_classes": [
         "printed_film",
-        "paper_or_product"
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "ebedf5c101ffae805c59f02d8d6e319edb01844b5d9ec0206a38433e456a4484",
-      "texture_sha256": "7a4ab04e4d4b2cba41aa67ba55cf242570239475bbd57743ce3f146a36ed0e15",
-      "geometry_scope_sha256": "385229f7ec5302e21f3fb897cf64b64251cda2bb6e87b316ab0e8c20fca1d724",
-      "appearance_scope_sha256": "c84b0f4caa8066cba81fb484d722513e29b71ddd66af455b65cc1f675b974b00"
+      "usd_sha256": "8a203bc5e16ad61635d889b276edfff7c6467e5d6a8555956b4c2afb53fca34e",
+      "texture_sha256": "21e7913d65722d615fa9544ad6306f0333dfac2a30e3e6dd2241fd90f77bdac8",
+      "geometry_scope_sha256": "a0895b41fe14442a0131356674a347977955f94db23d760c1fb4514737c2f885",
+      "appearance_scope_sha256": "e59bbbfe1594ded550eff30660062edd4ae5cda389d76afb96f2a4b1b3226e6b",
+      "normal_texture_path": "textures/sponge_pack_normal.png",
+      "normal_texture_sha256": "ce03420b54d30b9b1801e53fc83e2a3daff61595bbcc96f5d158800c9ea079de",
+      "roughness_texture_path": "textures/sponge_pack_roughness.png",
+      "roughness_texture_sha256": "a71b49d604e3b3848e69e112cc8df0c10b81e722ea004f3ae83aa237fd2e816c"
     },
     {
       "asset_key": "trash_bags",
@@ -2385,13 +2620,19 @@
       "geometry_signature": "c5115d4438d69f5c258ed4bd3c8a0663e4cea59ffba842c6ef2786ff9eb80c0d",
       "material_classes": [
         "printed_label",
-        "molded_plastic"
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "3623351e7c2031f4d9c7a01d654a6807f1f7123ced1bae56be079f2407fe2323",
-      "texture_sha256": "97510f3b6a22fc7894a7d8e26dd8cf728362ca150a98d6dba5adc5871aa6816d",
-      "geometry_scope_sha256": "efc7338215c7319ea5c8cd73677914a4627c4cbed0e430fa7803384878d78eea",
-      "appearance_scope_sha256": "4a91bcb1266ee509f8bda74dbf0440cb2467964f8402546468666c5344621e0f"
+      "usd_sha256": "092e5222a373bbba7379b763139cb2c61fa450f0a404dea3282997ff1d89b047",
+      "texture_sha256": "f977165a011866828d49b1bac8fdc30df01811bc9d30a21ca7445ae4c334a241",
+      "geometry_scope_sha256": "360b3e89bb640a4430e9ff199fefe005b8d54d3d15adee67580cc759649398d6",
+      "appearance_scope_sha256": "3d33543812287ad67533263a8e5cfcb2d7522e6aa7142d1f30ebf3d939610150",
+      "normal_texture_path": "textures/trash_bags_normal.png",
+      "normal_texture_sha256": "22fc19c6d6e0219ed4f5f5691981565125c1cfc11ca90d2fa6826cd34dbd6e0b",
+      "roughness_texture_path": "textures/trash_bags_roughness.png",
+      "roughness_texture_sha256": "3e81aaa8b76cac67449d0f013f50efdc0e6d9c8027a7ec85452129e2fee57a61"
     },
     {
       "asset_key": "angled_produce_bin",
@@ -2419,13 +2660,19 @@
       "geometry_signature": "f1a595da5cdc3bf6ad9b3a1813b64e31d958c1a491a3f67aadbd0eb1f9b665cd",
       "material_classes": [
         "fixture_body",
-        "metal_or_clear_plastic"
+        "metal_or_clear_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "76bb4477024d909c2d77110cc3bbf0cee63b3b9cfdf7a560ec51666134a1b5d6",
-      "texture_sha256": "3130eb5e0c294201a5ed605bbce7fc7dce7aa9d2e676de8e739f5f55b44af85c",
+      "usd_sha256": "64831fe7647b011ec1afdddd1c0f44eb12facf6a55f45c75ede2a40129a2a8e2",
+      "texture_sha256": "983946d631fc81a0a4eb7756f6986dfc1c63806d0daa3312966da4067cd4e18a",
       "geometry_scope_sha256": "e5852d4c6f29bdc42710548211b2a29d19474d699cdcef04612d647879beaeed",
-      "appearance_scope_sha256": "a78f8740aa2a548582fe5210fbfd5b37590217bb9a20a4790a2563041e69f4a8"
+      "appearance_scope_sha256": "60d7b993c0bbd3eac08a6f7094e4c524beb1823d998b497e13aab24f1f4185fd",
+      "normal_texture_path": "textures/angled_produce_bin_normal.png",
+      "normal_texture_sha256": "f84072e66f64f8b921e85410e992bd9b4ec29d699470483612f8bd5b8589c1f5",
+      "roughness_texture_path": "textures/angled_produce_bin_roughness.png",
+      "roughness_texture_sha256": "f9f6b9bd782c6e414af84ca2cf22ffa238a41f2000c493fb8dc88c81c1bbae20"
     },
     {
       "asset_key": "wicker_basket",
@@ -2446,20 +2693,26 @@
       "assembly_parts": [
         "woven_base",
         "four_posts",
-        "eight_diagonal_ribbons",
+        "sixteen_extruded_diagonal_ribbons",
         "four_cross_slats",
         "rim"
       ],
-      "geometry_signature": "6e4ba84a7c6d6ab0789cb89ae5a8eaf1d5e8d6e5c94f930044435e475dc65571",
+      "geometry_signature": "5ed97de29158e144c0a707121cfa997ab1625a690c9c6b471a3e02851c561ea6",
       "material_classes": [
         "fixture_body",
-        "metal_or_clear_plastic"
+        "metal_or_clear_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "eeae905faa668d553b5373077fe3ddb1fd213119e7b0fb7d948ad0c7f8a8eb50",
-      "texture_sha256": "6a2c7edce17b2fb405a02b74994421cd4fc920481764732b563ce030d5019f26",
-      "geometry_scope_sha256": "90892b3fb82cfd1e52fb2f5cf3762e76d553dfacc2a0fd329c2992f5cfab3326",
-      "appearance_scope_sha256": "c75ca9c81ed4464af4c1b087fed3b850f29bd2960d578bf296b96272ffb6445e"
+      "usd_sha256": "b75c401a5b8252afc3c7a2858b4016d50a700868a43cffb5b422b3c08ddfb992",
+      "texture_sha256": "2bc18985eac12614a4e3ea9017795d1cb0d88d6fdc251be129d54e10da1a13ae",
+      "geometry_scope_sha256": "d759074f9e40e8543773f938a66af903f39532c375fc9430451a0dbf9c694ed9",
+      "appearance_scope_sha256": "83dba6a600b455766482af3f806bea91b94950bb566e4305aa52a8aeb8380363",
+      "normal_texture_path": "textures/wicker_basket_normal.png",
+      "normal_texture_sha256": "1d8248e912ddeaeb0f73d3f10e237a615a829991f236892521e91f0c3f63f7f6",
+      "roughness_texture_path": "textures/wicker_basket_roughness.png",
+      "roughness_texture_sha256": "7044028091864ab7469c8758f414dfd68c2f6f1c7dd674f6022cb443c6811d3f"
     },
     {
       "asset_key": "shelf_divider",
@@ -2485,13 +2738,19 @@
       "geometry_signature": "8bd7a677acd8a2f5eb35f31f4ff1aae19f94039aa51656ee629e4d3d0825a8e8",
       "material_classes": [
         "fixture_body",
-        "metal_or_clear_plastic"
+        "metal_or_clear_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "b8f660934072779ff07201d00e684b9988a4fe057c73d89f44efdeb35e497b62",
-      "texture_sha256": "c1839209f886e3fbb59b1e9fb225bf37263ea39f52e4de981b28899a4dfa62a7",
+      "usd_sha256": "544a01201f941b4dc18a8d777193ad61b8c587f2db90ed3681bc4aaba5cd653d",
+      "texture_sha256": "674f456031c92bc5ae2ff1ac50d82bd57ae44a99429ea0c8f58183eb39b5ba78",
       "geometry_scope_sha256": "e1fa6a7e078504dbd40f115704d388d6e40a0e11aa964e34223aebb46190f07e",
-      "appearance_scope_sha256": "89b63eebfa6e841bf0b73159970400d82f2e961188b13171cdf27251a85633d9"
+      "appearance_scope_sha256": "187411e15686201201950a323fc09e6778414f45500e0eba8ad588416828c22c",
+      "normal_texture_path": "textures/shelf_divider_normal.png",
+      "normal_texture_sha256": "9d410aa79d9eaceb165df024cce29a44139ab3dc669aa8af868a48532dbc4488",
+      "roughness_texture_path": "textures/shelf_divider_roughness.png",
+      "roughness_texture_sha256": "cd3a117eddc351eaa52630bd37f2d91d88a3936f38ee004bb201181b9ae3a5a7"
     },
     {
       "asset_key": "bottle_rack",
@@ -2518,13 +2777,19 @@
       "geometry_signature": "794ae174b74c6bb3d70e2b2be8691e3330ad2a5dca3407b29445ab496f174d90",
       "material_classes": [
         "fixture_body",
-        "metal_or_clear_plastic"
+        "metal_or_clear_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "2c2e0bea64f742aeb3d9f1940d38bd55df4b77f97191b51207d533b42fd6fca8",
-      "texture_sha256": "2042af8479b848cca8934e879165af9bff1649275ab76a8ebb30f57c185e4bcc",
+      "usd_sha256": "4435400dc48dbe143af156ad7b2dde0c519cb8d6b18cbb1d3f1d5fbb41557b3c",
+      "texture_sha256": "217f30f0842141c40bd2b633d9d97f9a21d2029d65bc6e3c716cb5152443ac5b",
       "geometry_scope_sha256": "e8b54132df17f0dfe85b111b51ebf2faf9562654b15ba59273726125e89eca35",
-      "appearance_scope_sha256": "5c6c21c47302c7a96355e055f53019fd6fb9295271d4cee4f376b988cf3cd3bd"
+      "appearance_scope_sha256": "e1b707abc7c96994efbb070f8edac92ba678871a3fb8f5d0cfcba7ae6d1fd85e",
+      "normal_texture_path": "textures/bottle_rack_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/bottle_rack_roughness.png",
+      "roughness_texture_sha256": "959f03456a2210cec28e7fba71659dcaa2367672d725ee2544a81a131d91fc7a"
     },
     {
       "asset_key": "price_display",
@@ -2550,13 +2815,19 @@
       "geometry_signature": "457049049a1b7bbb7a7b3ba5a410b2804e2b4969e3c083b6f359f733cabc75eb",
       "material_classes": [
         "fixture_body",
-        "metal_or_clear_plastic"
+        "metal_or_clear_plastic",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "6d395f25a3a8f53af0d67714baeb061304f83e02da28c5647e19d966bb435556",
-      "texture_sha256": "553b59c578b45c250bda9b40107d070dbccdfcca2cd7ecefefd10f22ab348916",
+      "usd_sha256": "9d65d4b2d534af1b02ce498f3aa2e5f5371fa8c7737f9ec6e11d2669205d7793",
+      "texture_sha256": "3785683eaa51ecb824fb936274584328a6ee7b6c132816ec50fd4a5109a12718",
       "geometry_scope_sha256": "f13958637b27f2eedcc4aa811b3ac340f6ada085c357be7d1d797be1773659a4",
-      "appearance_scope_sha256": "6867f1ae1336e6bbe969092692da368d2fb5484a951173be631b1abd76c8edc0"
+      "appearance_scope_sha256": "3dea8b49d2020eb5010cb476faeae6086b6c1e1500d731b5e41367a962561341",
+      "normal_texture_path": "textures/price_display_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/price_display_roughness.png",
+      "roughness_texture_sha256": "959f03456a2210cec28e7fba71659dcaa2367672d725ee2544a81a131d91fc7a"
     }
   ]
 }

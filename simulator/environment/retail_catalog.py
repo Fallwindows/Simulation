@@ -14,6 +14,8 @@ class RetailAsset:
     category: str
     usd_path: Path
     texture_path: Path
+    normal_texture_path: Path | None
+    roughness_texture_path: Path | None
     dimensions_m: tuple[float, float, float]
     local_front_axis: str
     model_type: str
@@ -82,6 +84,24 @@ def load_retail_catalog(path: str | Path) -> RetailAssetCatalog:
                 raise ValueError(
                     f"Retail asset {key} {hash_field} mismatch: expected {expected_hash}, got {actual_hash}"
                 )
+        surface_maps: dict[str, Path | None] = {}
+        for prefix in ("normal", "roughness"):
+            path_value = entry.get(f"{prefix}_texture_path")
+            hash_value = entry.get(f"{prefix}_texture_sha256")
+            if (path_value is None) != (hash_value is None):
+                raise ValueError(f"Retail asset {key} has incomplete {prefix} texture evidence")
+            if path_value is None:
+                surface_maps[prefix] = None
+                continue
+            surface_path = manifest_path.parent / str(path_value)
+            if not surface_path.is_file():
+                raise FileNotFoundError(f"Retail asset {key} {prefix} texture is missing: {surface_path}")
+            actual_hash = hashlib.sha256(surface_path.read_bytes()).hexdigest()
+            if actual_hash != str(hash_value):
+                raise ValueError(
+                    f"Retail asset {key} {prefix}_texture_sha256 mismatch: expected {hash_value}, got {actual_hash}"
+                )
+            surface_maps[prefix] = surface_path
         assembly_parts = tuple(str(value) for value in entry.get("assembly_parts", ()))
         material_classes = tuple(str(value) for value in entry.get("material_classes", ()))
         geometry_signature = str(entry.get("geometry_signature", ""))
@@ -100,6 +120,8 @@ def load_retail_catalog(path: str | Path) -> RetailAssetCatalog:
             category=str(entry["category"]),
             usd_path=usd_path,
             texture_path=texture_path,
+            normal_texture_path=surface_maps["normal"],
+            roughness_texture_path=surface_maps["roughness"],
             dimensions_m=dimensions,
             local_front_axis="+Y",
             model_type=str(entry.get("model_type", "box")),
