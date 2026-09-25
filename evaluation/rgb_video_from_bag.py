@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import cv2
@@ -31,40 +33,66 @@ CAMERA_INFO_TOPIC = "/sim/camera/rgb/camera_info"
 
 
 def _probe_decoded_video(path: Path) -> dict[str, object]:
-    """Decode the closed delivery video so a lossy/silent writer cannot pass."""
+    """Use Pixi's ffprobe decoder to count every closed-video frame."""
 
-    capture = cv2.VideoCapture(str(path))
-    if not capture.isOpened():
-        capture.release()
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
         return {
             "opened": False,
             "frame_count": 0,
             "widths": [],
             "heights": [],
             "reported_fps": None,
+            "backend": "ffprobe",
+            "error": "ffprobe executable was not found in PATH",
         }
-    frame_count = 0
-    widths: set[int] = set()
-    heights: set[int] = set()
-    reported_fps = float(capture.get(cv2.CAP_PROP_FPS))
     try:
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            if frame is None or len(frame.shape) < 2:
-                continue
-            frame_count += 1
-            heights.add(int(frame.shape[0]))
-            widths.add(int(frame.shape[1]))
-    finally:
-        capture.release()
+        completed = subprocess.run(
+            [
+                ffprobe,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-count_frames",
+                "-show_entries", "stream=width,height,avg_frame_rate,nb_read_frames",
+                "-of", "json",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120.0,
+        )
+        streams = json.loads(completed.stdout).get("streams", [])
+        if len(streams) != 1:
+            raise RuntimeError(f"expected one video stream, observed {len(streams)}")
+        stream = streams[0]
+        numerator_text, denominator_text = str(stream["avg_frame_rate"]).split("/", 1)
+        denominator = float(denominator_text)
+        if denominator == 0.0:
+            raise RuntimeError("ffprobe reported a zero frame-rate denominator")
+        reported_fps = float(numerator_text) / denominator
+        frame_count = int(stream["nb_read_frames"])
+        width = int(stream["width"])
+        height = int(stream["height"])
+    except BaseException as exc:
+        return {
+            "opened": False,
+            "frame_count": 0,
+            "widths": [],
+            "heights": [],
+            "reported_fps": None,
+            "backend": "ffprobe",
+            "executable": ffprobe,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
     return {
         "opened": True,
         "frame_count": frame_count,
-        "widths": sorted(widths),
-        "heights": sorted(heights),
+        "widths": [width],
+        "heights": [height],
         "reported_fps": reported_fps,
+        "backend": "ffprobe",
+        "executable": ffprobe,
     }
 
 
