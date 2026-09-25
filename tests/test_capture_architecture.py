@@ -19,7 +19,10 @@ from simulator.capture.inventory import export_inventory
 from simulator.capture.manifest import (
     _python_semantic_hash,
     build_experiment_hashes,
+    capture_hash,
+    seal_capture_manifest,
     sha256_file,
+    sha256_json,
     validate_capture_archive,
     validate_capture_for_slam,
 )
@@ -37,17 +40,37 @@ def _make_sensor_capture(root: Path) -> dict:
     (root / "rgb_frames.jsonl").write_text('{"frame_index":0,"stamp_s":1.0,"width":2,"height":2}\n', encoding="utf-8")
     (root / "bag_metadata.json").write_text(json.dumps({"status": "complete", "last_stamp_s": {"/sim/lidar/points": 1.0}}), encoding="utf-8")
     (root / "effective_config.json").write_text(json.dumps({"lidar": {"hz": 10.0}}), encoding="utf-8")
-    (root / "camera_info.json").write_text(json.dumps({"status": "complete", "camera_info_count": 1}), encoding="utf-8")
-    (root / "sensor_transforms.json").write_text(json.dumps({"transforms": [], "intrinsics": {}}), encoding="utf-8")
+    (root / "rgb_video.json").write_text(json.dumps({"status": "complete", "frame_count": 1, "camera_info_count": 1, "width": 2, "height": 2}), encoding="utf-8")
+    (root / "camera_info.json").write_text(json.dumps({"frame_id": "camera_optical_frame", "width": 2, "height": 2}), encoding="utf-8")
+    (root / "sensor_transforms.json").write_text(json.dumps({
+        "transforms": [
+            {"parent": "sensor_rig", "child": "camera_link"},
+            {"parent": "camera_link", "child": "camera_optical_frame"},
+            {"parent": "sensor_rig", "child": "lidar_link"},
+        ],
+        "intrinsics": {},
+    }), encoding="utf-8")
     files = [
         {"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path), "size_bytes": path.stat().st_size}
         for path in sorted(root.rglob("*")) if path.is_file()
     ]
     manifest = {
         "status": "complete", "manifest_version": 1,
-        "bag": {"uri": "sensors_bag", "topics": ["/clock", "/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info", "/sim/lidar/points", "/tf", "/tf_static"]},
+        "git_sha": "b" * 40, "git_tree": "c" * 40,
+        "bag": {
+            "uri": "sensors_bag",
+            "topics": ["/clock", "/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info", "/sim/lidar/points", "/tf", "/tf_static"],
+            "counts": {"/sim/camera/rgb/image_raw": 1, "/sim/camera/rgb/camera_info": 1},
+        },
+        "rgb": {
+            "video": "rgb_camera.mp4", "timestamp_index": "rgb_frames.jsonl",
+            "camera_info": "camera_info.json", "metadata": "rgb_video.json",
+            "frame_count": 1, "first_stamp_s": 1.0, "last_stamp_s": 1.0,
+            "width_px": 2, "height_px": 2, "fps": 1.0,
+        },
         "files": files,
     }
+    manifest["capture_sha256"] = capture_hash(manifest)
     (root / "capture_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return manifest
 
@@ -58,10 +81,13 @@ def _refresh_capture_files(root: Path, manifest: dict) -> None:
         for path in sorted(root.rglob("*"))
         if path.is_file() and path.name != "capture_manifest.json"
     ]
+    manifest["capture_sha256"] = capture_hash(manifest)
     (root / "capture_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def _add_dynamic_camera_artifact(root: Path, manifest: dict) -> tuple[Path, dict]:
+    trajectory = {"sample_hz": 1.0, "duration_s": 1.0}
+    effective_sha = sha256_json(trajectory)
     artifact = {
         "schema": "grocery.camera_head_transforms",
         "version": 1,
@@ -80,6 +106,7 @@ def _add_dynamic_camera_artifact(root: Path, manifest: dict) -> tuple[Path, dict
         "composition": "q_sensor_rig_camera_link = q_configured_mount * q_head_articulation",
         "source": {
             "trajectory_config": {"path": "config/trajectories/walking.yaml", "sha256": "a" * 64},
+            "trajectory_effective_sha256": effective_sha,
             "git_commit": "b" * 40,
             "git_tree": "c" * 40,
         },
@@ -112,8 +139,32 @@ def _add_dynamic_camera_artifact(root: Path, manifest: dict) -> tuple[Path, dict
         }],
     }
     (root / "sensor_transforms.json").write_text(json.dumps(transforms), encoding="utf-8")
+    effective = {
+        "lidar": {"hz": 10.0},
+        "camera": {"width_px": 2, "height_px": 2, "pose_in_rig": {"position_m": [0.35, 0.0, 1.65]}},
+        "trajectory": trajectory,
+        "source_bindings": {
+            "trajectory_config_sha256": "a" * 64,
+            "trajectory_effective_sha256": effective_sha,
+            "git_commit": "b" * 40,
+            "git_tree": "c" * 40,
+        },
+    }
+    (root / "effective_config.json").write_text(json.dumps(effective), encoding="utf-8")
     _refresh_capture_files(root, manifest)
     return artifact_path, artifact
+
+
+def _rewrite_dynamic_camera_artifact(root: Path, manifest: dict, artifact: dict) -> None:
+    artifact_path = root / "camera_head_transforms.json"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    transforms_path = root / "sensor_transforms.json"
+    transforms = json.loads(transforms_path.read_text(encoding="utf-8"))
+    descriptor = transforms["dynamic_transform_artifacts"][0]
+    descriptor["sha256"] = sha256_file(artifact_path)
+    descriptor["size_bytes"] = artifact_path.stat().st_size
+    transforms_path.write_text(json.dumps(transforms), encoding="utf-8")
+    _refresh_capture_files(root, manifest)
 
 
 class CaptureArchitectureTests(unittest.TestCase):
@@ -422,8 +473,8 @@ class CaptureArchitectureTests(unittest.TestCase):
                 validate_capture_for_slam(root, manifest)
             (root / "effective_config.json").write_text(json.dumps({"lidar": {"hz": 10.0}}), encoding="utf-8")
             transforms = (root / "sensor_transforms.json").read_text(encoding="utf-8")
-            (root / "sensor_transforms.json").write_text(transforms.replace("[]", "{}"), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "checksum mismatch: sensor_transforms.json"):
+            (root / "sensor_transforms.json").write_text(transforms + "corrupt", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "(size|checksum) mismatch: sensor_transforms.json"):
                 validate_capture_for_slam(root, manifest)
             (root / "sensor_transforms.json").write_text(transforms, encoding="utf-8")
             (root / "sensors_bag/bag_0.db3").unlink()
@@ -469,6 +520,7 @@ class CaptureArchitectureTests(unittest.TestCase):
             manifest["files"] = [
                 item for item in manifest["files"] if item["path"] != "camera_head_transforms.json"
             ]
+            manifest["capture_sha256"] = capture_hash(manifest)
             with self.assertRaisesRegex(ValueError, "missing checksums.*camera_head_transforms.json"):
                 validate_capture_for_slam(root, manifest)
 
@@ -518,6 +570,8 @@ class CaptureArchitectureTests(unittest.TestCase):
             (root / "rgb_frames.jsonl").write_text(
                 '{"frame_index":0,"stamp_s":0.5,"width":2,"height":2}\n', encoding="utf-8"
             )
+            manifest["rgb"]["first_stamp_s"] = 0.5
+            manifest["rgb"]["last_stamp_s"] = 0.5
             _refresh_capture_files(root, manifest)
             with self.assertRaisesRegex(ValueError, "no exact validated camera head sample"):
                 validate_capture_for_slam(root, manifest)
@@ -535,6 +589,109 @@ class CaptureArchitectureTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "cannot be both static and dynamic"):
                 validate_capture_for_slam(root, manifest)
 
+    def test_dynamic_camera_authority_is_mandatory_for_disjoint_static_graph(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            manifest = _make_sensor_capture(root)
+            artifact_path, _artifact = _add_dynamic_camera_artifact(root, manifest)
+            transforms_path = root / "sensor_transforms.json"
+            transforms = json.loads(transforms_path.read_text(encoding="utf-8"))
+            transforms.pop("dynamic_transform_artifacts")
+            transforms_path.write_text(json.dumps(transforms), encoding="utf-8")
+            artifact_path.unlink()
+            _refresh_capture_files(root, manifest)
+            with self.assertRaisesRegex(ValueError, "lack both a complete static camera route and a dynamic camera descriptor"):
+                validate_capture_for_slam(root, manifest)
+
+    def test_dynamic_camera_validation_rejects_noncanonical_rgb_rows_and_numeric_types(self):
+        invalid_rows = (
+            ([{"frame_index": 0, "stamp_s": 0.0, "width": 2, "height": 2}, {"frame_index": 0, "stamp_s": 1.0, "width": 2, "height": 2}], "row 1 is invalid"),
+            ([{"frame_index": 0, "stamp_s": 1.0, "width": 2, "height": 2}, {"frame_index": 1, "stamp_s": 1.0, "width": 2, "height": 2}], "strictly increasing"),
+            ([{"frame_index": 0, "stamp_s": True, "width": 2, "height": 2}], "row 0 is invalid"),
+            ([{"frame_index": "0", "stamp_s": 1.0, "width": 2, "height": 2}], "row 0 is invalid"),
+            ([{"frame_index": 0, "stamp_s": "1.0", "width": 2, "height": 2}], "row 0 is invalid"),
+            ([{"frame_index": 0, "stamp_s": 1.0, "width": "2", "height": 2}], "row 0 is invalid"),
+        )
+        for rows, expected in invalid_rows:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory(dir=ROOT) as directory:
+                root = Path(directory)
+                manifest = _make_sensor_capture(root)
+                _add_dynamic_camera_artifact(root, manifest)
+                (root / "rgb_frames.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+                _refresh_capture_files(root, manifest)
+                with self.assertRaisesRegex(ValueError, expected):
+                    validate_capture_for_slam(root, manifest)
+
+        for container, field, value, expected in (
+            ("descriptor", "schema_version", "1", "invalid size/hash/schema binding"),
+            ("descriptor", "size_bytes", "1", "invalid size/hash/schema binding"),
+            ("artifact", "version", "1", "schema/version"),
+            ("artifact", "sample_hz", "1.0", "sampling header"),
+            ("artifact", "duration_s", True, "sampling header"),
+        ):
+            with self.subTest(container=container, field=field), tempfile.TemporaryDirectory(dir=ROOT) as directory:
+                root = Path(directory)
+                manifest = _make_sensor_capture(root)
+                artifact_path, artifact = _add_dynamic_camera_artifact(root, manifest)
+                if container == "artifact":
+                    artifact[field] = value
+                    _rewrite_dynamic_camera_artifact(root, manifest, artifact)
+                else:
+                    transforms_path = root / "sensor_transforms.json"
+                    transforms = json.loads(transforms_path.read_text(encoding="utf-8"))
+                    transforms["dynamic_transform_artifacts"][0][field] = value
+                    transforms_path.write_text(json.dumps(transforms), encoding="utf-8")
+                    _refresh_capture_files(root, manifest)
+                with self.assertRaisesRegex(ValueError, expected):
+                    validate_capture_for_slam(root, manifest)
+
+    def test_rgb_receipts_reconcile_counts_dimensions_and_strict_manifest_types(self):
+        mutations = (
+            (lambda root, manifest: manifest["rgb"].update(frame_count="1"), "RGB frame_count"),
+            (lambda root, manifest: manifest["bag"]["counts"].update({"/sim/camera/rgb/image_raw": 2}), "bag count"),
+            (lambda root, manifest: (root / "rgb_video.json").write_text(json.dumps({"status": "complete", "frame_count": 1, "camera_info_count": 1, "width": 3, "height": 2}), encoding="utf-8"), "rgb_video.json width"),
+            (lambda root, manifest: (root / "camera_info.json").write_text(json.dumps({"frame_id": "camera_optical_frame", "width": 2, "height": 3}), encoding="utf-8"), "camera_info.json height"),
+        )
+        for mutation, expected in mutations:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory(dir=ROOT) as directory:
+                root = Path(directory)
+                manifest = _make_sensor_capture(root)
+                _add_dynamic_camera_artifact(root, manifest)
+                mutation(root, manifest)
+                _refresh_capture_files(root, manifest)
+                with self.assertRaisesRegex(ValueError, expected):
+                    validate_capture_for_slam(root, manifest)
+
+    def test_capture_seal_and_dynamic_source_calibration_bindings_fail_closed(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            manifest = _make_sensor_capture(root)
+            _add_dynamic_camera_artifact(root, manifest)
+            manifest["capture_sha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "canonical capture_sha256 seal mismatch"):
+                validate_capture_for_slam(root, manifest)
+            manifest.pop("capture_sha256")
+            with self.assertRaisesRegex(ValueError, "lacks a valid canonical capture_sha256 seal"):
+                validate_capture_for_slam(root, manifest)
+            (root / "capture_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            sealed = seal_capture_manifest(root / "capture_manifest.json")
+            self.assertEqual(sealed["capture_sha256"], capture_hash(sealed))
+            self.assertEqual(validate_capture_for_slam(root)["status"], "valid")
+
+        for mutation, expected in (
+            (lambda artifact: artifact["source"].update(git_commit="d" * 40, git_tree="e" * 40), "source/effective capture binding mismatch"),
+            (lambda artifact: artifact["source"].update(trajectory_effective_sha256="f" * 64), "source/effective capture binding mismatch"),
+            (lambda artifact: [sample.update(translation_m=[99.0, 99.0, 99.0]) for sample in artifact["samples"]], "sample 0 is invalid"),
+        ):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory(dir=ROOT) as directory:
+                root = Path(directory)
+                manifest = _make_sensor_capture(root)
+                _path, artifact = _add_dynamic_camera_artifact(root, manifest)
+                mutation(artifact)
+                _rewrite_dynamic_camera_artifact(root, manifest, artifact)
+                with self.assertRaisesRegex(ValueError, expected):
+                    validate_capture_for_slam(root, manifest)
+
     def test_archive_validation_is_separate_and_requires_truth_files(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             root = Path(directory)
@@ -545,15 +702,16 @@ class CaptureArchitectureTests(unittest.TestCase):
                 "provenance.json", "contracts.yaml", "scenario.yaml", "bag_metadata.json", "rgb_video.json", "camera_info.json",
             )
             for name in names:
-                content = json.dumps({"transforms": [], "intrinsics": {}}) if name == "sensor_transforms.json" else "fixture\n"
-                (root / name).write_text(content, encoding="utf-8")
+                if not (root / name).exists():
+                    (root / name).write_text("fixture\n", encoding="utf-8")
             (root / "sensors_bag/metadata.yaml").write_text("storage_identifier: sqlite3\nrelative_file_paths:\n  - bag_0.db3\n", encoding="utf-8")
             listed = []
             for path in sorted(root.rglob("*")):
-                if path.is_file():
+                if path.is_file() and path.name != "capture_manifest.json":
                     listed.append({"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path), "size_bytes": path.stat().st_size})
             manifest["ground_truth"] = {"evaluation_only": True, "inventory_csv": "inventory_ground_truth.csv", "inventory_json": "inventory_ground_truth.json"}
             manifest["files"] = listed
+            manifest["capture_sha256"] = capture_hash(manifest)
             self.assertTrue(validate_capture_for_slam(root, manifest)["status"] == "valid")
             self.assertTrue(validate_capture_archive(root, manifest)["truth_required"])
             (root / "inventory_ground_truth.csv").write_text("truth!!\n", encoding="utf-8")
@@ -680,7 +838,8 @@ $global:LASTEXITCODE = 0
                 "contracts.yaml", "scenario.yaml", "rgb_video.json", "camera_info.json",
             )
             for name in archive_names:
-                (archive_capture / name).write_text("fixture\n", encoding="utf-8")
+                if not (archive_capture / name).exists():
+                    (archive_capture / name).write_text("fixture\n", encoding="utf-8")
             archive_manifest["ground_truth"] = {
                 "evaluation_only": True,
                 "inventory_csv": "inventory_ground_truth.csv",
@@ -688,8 +847,9 @@ $global:LASTEXITCODE = 0
             }
             archive_manifest["files"] = [
                 {"path": path.relative_to(archive_capture).as_posix(), "sha256": sha256_file(path), "size_bytes": path.stat().st_size}
-                for path in sorted(archive_capture.rglob("*")) if path.is_file()
+                for path in sorted(archive_capture.rglob("*")) if path.is_file() and path.name != "capture_manifest.json"
             ]
+            archive_manifest["capture_sha256"] = capture_hash(archive_manifest)
             (archive_capture / "capture_manifest.json").write_text(json.dumps(archive_manifest), encoding="utf-8")
             (archive_capture / "inventory_ground_truth.csv").write_text("corrupt\n", encoding="utf-8")
             archive_command = [

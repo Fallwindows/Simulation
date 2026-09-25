@@ -253,9 +253,10 @@ try {
     software_versions="../software_versions.json"
     files=$files
   }
-  $canonical = $manifest | ConvertTo-Json -Depth 20 -Compress
-  $manifest.capture_sha256 = ([System.BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace("-","")).ToLowerInvariant()
-  $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $captureDir "capture_manifest.json") -Encoding UTF8
+  $captureManifestPath = Join-Path $captureDir "capture_manifest.json"
+  $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $captureManifestPath -Encoding UTF8
+  & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.manifest --seal-manifest $captureManifestPath | Set-Content -LiteralPath (Join-Path $logsDir "capture_manifest_seal.json") -Encoding UTF8
+  if ($LASTEXITCODE -ne 0) { throw "Canonical capture manifest sealing failed." }
   & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.manifest --validate-archive $captureDir | Set-Content -LiteralPath (Join-Path $logsDir "capture_archive_validation.json") -Encoding UTF8
   if ($LASTEXITCODE -ne 0) { throw "Full capture archive validation failed." }
   Assert-CaptureSourceUnchanged -Repo $repo -ExpectedSha $gitSha -ExpectedTree $gitTree

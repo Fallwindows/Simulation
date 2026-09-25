@@ -56,7 +56,8 @@ version 1. It contains:
 - Translation interpolation `linear`, rotation interpolation
   `shortest_arc_quaternion_slerp_xyzw`, and no extrapolation outside the closed
   0 through duration interval.
-- Exact source trajectory path and SHA-256 plus Git commit and tree.
+- Exact source trajectory path and byte SHA-256, canonical effective trajectory
+  SHA-256, plus Git commit and tree.
 - The static optical child transform and 616 ordered samples.
 
 `capture/sensor_transforms.json` discovers the artifact through:
@@ -90,6 +91,23 @@ header, every finite unit-quaternion sample, and binds every timestamp in
 `rgb_frames.jsonl` to the exact validated sample bytes. Missing files, escaped
 paths, duplicate static/dynamic edges, bad hashes or sizes, malformed samples,
 and unmatched RGB timestamps fail closed.
+
+Dynamic authority is mandatory whenever the authored static graph lacks a
+complete `sensor_rig` to camera route. Removing the descriptor and artifact
+therefore cannot downgrade an articulated capture to a legacy static capture.
+The validator also requires contiguous unique RGB frame indices, strictly
+increasing finite numeric timestamps, constant dimensions, and agreement with
+the manifest, video receipt, CameraInfo, bag counts, and effective camera
+configuration.
+
+`effective_config.json` records `source_bindings` for the trajectory bytes,
+canonical effective trajectory, Git commit, and Git tree. Validation binds
+those values to the artifact source, capture manifest identity, sampling
+header, and configured camera translation. The capture producer writes an
+unsealed manifest and invokes `python -m simulator.capture.manifest
+--seal-manifest`; both producer and validator therefore use the same canonical
+`capture_hash` bytes. A missing or mismatched seal fails before sensor inputs
+are accepted.
 
 Full production metadata exports `capture/camera_head_transforms.json` before
 the manifest inventory is sealed. Selected-pose representative capture instead
