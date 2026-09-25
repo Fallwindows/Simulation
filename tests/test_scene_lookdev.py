@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
-from simulator.environment.isaac_builder import STRUCTURAL_MATERIALS
+from simulator.environment.isaac_builder import STRUCTURAL_MATERIALS, _TEXTURE_SETS
 from simulator.environment.aisle_builder import build_aisle_layout
 from simulator.environment.retail_catalog import load_retail_catalog
 from simulator.config.loader import load_scenario
@@ -310,6 +310,17 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertLess(floor["metallic"], shelf["metallic"])
         self.assertGreater(tag["roughness"], shelf["roughness"])
         self.assertEqual(tag["metallic"], 0.0)
+
+    def test_semantic_structural_materials_bind_distinct_reviewed_texture_sets(self):
+        expected = {
+            "price_rail": ("price_rail_albedo.png", "price_rail_normal.png", "price_rail_roughness.png"),
+            "case_frame": ("case_frame_albedo.png", "case_frame_normal.png", "case_frame_roughness.png"),
+            "case_glass": (None, "case_glass_normal.png", "case_glass_roughness.png"),
+            "display_wood": ("laminate_albedo.png", "laminate_normal.png", "laminate_roughness.png"),
+            "sign_green": ("category_detail_albedo.png", "category_detail_normal.png", "category_detail_roughness.png"),
+        }
+        for kind, texture_names in expected.items():
+            self.assertEqual(_TEXTURE_SETS[kind][:3], texture_names)
 
     def test_capture_frame_selection_is_sorted_unique_and_bounded(self):
         self.assertEqual(parse_capture_frames("12, 0, 6", 13), (0, 6, 12))

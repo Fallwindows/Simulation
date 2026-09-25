@@ -244,7 +244,14 @@ _TEXTURE_SETS = {
     "ceiling": (None, "micro_normal.png", "micro_roughness.png", 0.10, 0.24, 8.0),
     "ceiling_tile_warm": (None, "micro_normal.png", "micro_roughness.png", 0.10, 0.24, 8.0),
     "ceiling_tile_cool": (None, "micro_normal.png", "micro_roughness.png", 0.10, 0.24, 8.0),
-    "display_wood": ("laminate_albedo.png", "micro_normal.png", "micro_roughness.png", 0.16, 0.42, 2.4),
+    "price_rail": ("price_rail_albedo.png", "price_rail_normal.png", "price_rail_roughness.png", 0.18, 0.72, 8.0),
+    "case_frame": ("case_frame_albedo.png", "case_frame_normal.png", "case_frame_roughness.png", 0.22, 0.82, 5.0),
+    "case_glass": (None, "case_glass_normal.png", "case_glass_roughness.png", 0.10, 0.92, 2.0),
+    "case_glass_reflection": (None, "case_glass_normal.png", "case_glass_roughness.png", 0.10, 0.92, 2.0),
+    "display_wood": ("laminate_albedo.png", "laminate_normal.png", "laminate_roughness.png", 0.20, 0.72, 2.4),
+    "sign_green": ("category_detail_albedo.png", "category_detail_normal.png", "category_detail_roughness.png", 0.14, 0.64, 3.5),
+    "end_panel_green": ("category_detail_albedo.png", "category_detail_normal.png", "category_detail_roughness.png", 0.14, 0.64, 3.5),
+    "end_panel_charcoal": ("category_detail_albedo.png", "category_detail_normal.png", "category_detail_roughness.png", 0.12, 0.58, 3.5),
 }
 
 
