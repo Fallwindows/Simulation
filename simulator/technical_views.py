@@ -46,6 +46,10 @@ IMPLEMENTATION_SOURCES = (
     "simulator/sensors/scan_projection.py",
     "simulator/sensors/feature_selection.py",
 )
+CAMERA_TRACE_BASIS = (
+    "C3 camera-pose timestamp schedule and smooth fit of timestamped estimated sensor-rig poses; "
+    "presentation-only camera guide, independent of rendered scan projection and data cutoff"
+)
 
 
 def _opencv():
@@ -92,6 +96,7 @@ class ViewSpec:
     maximum_points: int
     history_stride_scans: int
     camera_motion_role: str
+    camera_pose_window_s: tuple[float, float]
     final_hold_frames: int
 
 
@@ -108,9 +113,16 @@ def _smootherstep(value: float) -> float:
     return x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
 
 
+def _smootherstep_c3(value: float) -> float:
+    """Seventh-order smoothstep with zero derivatives through jerk at both ends."""
+
+    x = float(np.clip(value, 0.0, 1.0))
+    return x**4 * (35.0 - 84.0 * x + 70.0 * x**2 - 20.0 * x**3)
+
+
 def _smooth_window(value: float, rise_start: float, rise_end: float, fall_start: float, fall_end: float) -> float:
-    rise = _smootherstep((value - rise_start) / (rise_end - rise_start))
-    fall = 1.0 - _smootherstep((value - fall_start) / (fall_end - fall_start))
+    rise = _smootherstep_c3((value - rise_start) / (rise_end - rise_start))
+    fall = 1.0 - _smootherstep_c3((value - fall_start) / (fall_end - fall_start))
     return float(np.clip(rise * fall, 0.0, 1.0))
 
 
@@ -124,8 +136,140 @@ def _activation_ray_opacities(progress: float, count: int = 12) -> np.ndarray:
     return np.asarray([_smootherstep((activation - start) / 0.36) for start in starts], dtype=np.float32)
 
 
+class _C3TimestampCurve:
+    """Monotone piecewise septic interpolation with shared C3 knot state."""
+
+    _END_MATRIX_INVERSE = np.asarray([
+        [35.0, -15.0, 2.5, -1.0 / 6.0],
+        [-84.0, 39.0, -7.0, 0.5],
+        [70.0, -34.0, 6.5, -0.5],
+        [-20.0, 10.0, -2.0, 1.0 / 6.0],
+    ], dtype=np.float64)
+
+    def __init__(self, frames: Iterable[int], timestamps_s: Iterable[float]):
+        self.frames = np.asarray(tuple(frames), dtype=np.float64)
+        self.timestamps_s = np.asarray(tuple(timestamps_s), dtype=np.float64)
+        if (
+            len(self.frames) < 2
+            or self.frames.shape != self.timestamps_s.shape
+            or np.any(np.diff(self.frames) <= 0.0)
+            or np.any(np.diff(self.timestamps_s) <= 0.0)
+        ):
+            raise ValueError("technical camera timestamp knots must be strictly ordered")
+        spans = np.diff(self.frames)
+        secants = np.diff(self.timestamps_s) / spans
+        slopes = np.zeros_like(self.timestamps_s)
+        for index in range(1, len(slopes) - 1):
+            left = secants[index - 1]
+            right = secants[index]
+            if left > 0.0 and right > 0.0:
+                left_span = spans[index - 1]
+                right_span = spans[index]
+                w1 = 2.0 * right_span + left_span
+                w2 = right_span + 2.0 * left_span
+                slopes[index] = (w1 + w2) / (w1 / left + w2 / right)
+        # The guide begins and enters its final hold with zero velocity.  All
+        # interior knots retain a nonzero shared velocity and zero shared
+        # acceleration/jerk, avoiding per-shot stop/start pulses.
+        slopes[0] = 0.0
+        slopes[-1] = 0.0
+        coefficients: list[np.ndarray] = []
+        for index, span in enumerate(spans):
+            c0 = self.timestamps_s[index]
+            c1 = slopes[index] * span
+            known_end = c0 + c1
+            rhs = np.asarray([
+                self.timestamps_s[index + 1] - known_end,
+                slopes[index + 1] * span - c1,
+                0.0,
+                0.0,
+            ], dtype=np.float64)
+            high = self._END_MATRIX_INVERSE @ rhs
+            coefficients.append(np.concatenate((np.asarray([c0, c1, 0.0, 0.0]), high)))
+        self.coefficients = tuple(coefficients)
+
+        probes = np.linspace(self.frames[0], self.frames[-1], 4097)
+        sampled = np.asarray([self.evaluate(value) for value in probes])
+        if np.any(np.diff(sampled) < -1e-10):
+            raise ValueError("technical camera timestamp schedule is not monotone")
+
+    def evaluate(self, frame: float) -> float:
+        value = float(np.clip(frame, self.frames[0], self.frames[-1]))
+        segment = int(np.searchsorted(self.frames, value, side="right") - 1)
+        segment = min(max(segment, 0), len(self.coefficients) - 1)
+        span = self.frames[segment + 1] - self.frames[segment]
+        x = (value - self.frames[segment]) / span
+        return float(np.polynomial.polynomial.polyval(x, self.coefficients[segment]))
+
+
+class _EstimatedPoseGuide:
+    """Global smooth Bezier guide sampled only from the estimated trajectory."""
+
+    def __init__(
+        self,
+        trajectory: object,
+        rig_from_optical: np.ndarray,
+        start_s: float,
+        end_s: float,
+        sample_count: int = 12,
+    ):
+        self.start_s = float(start_s)
+        self.end_s = float(end_s)
+        timestamps = np.linspace(self.start_s, self.end_s, sample_count)
+        rig_positions: list[np.ndarray] = []
+        optical_positions: list[np.ndarray] = []
+        forwards: list[np.ndarray] = []
+        for timestamp_s in timestamps:
+            map_from_rig = trajectory.map_from_sensor_rig(float(timestamp_s))
+            rotation = np.asarray(map_from_rig[:3, :3], dtype=np.float64)
+            rig_position = np.asarray(map_from_rig[:3, 3], dtype=np.float64)
+            optical_offset = np.asarray(rig_from_optical[:3, 3], dtype=np.float64)
+            optical_axis = np.asarray(rig_from_optical[:3, 2], dtype=np.float64)
+            # Explicit products avoid dispatching a threaded BLAS kernel for
+            # twelve tiny 3x3 transforms on constrained render workers.
+            optical_position = rig_position + np.sum(rotation * optical_offset[None, :], axis=1)
+            optical_forward = np.sum(rotation * optical_axis[None, :], axis=1)
+            rig_positions.append(rig_position)
+            optical_positions.append(optical_position)
+            forwards.append(optical_forward)
+        self._rig_controls = np.stack(rig_positions)
+        self._optical_controls = np.stack(optical_positions)
+        self._forward_controls = np.stack(forwards)
+
+    def _normalized(self, timestamp_s: float | np.ndarray) -> float | np.ndarray:
+        return 2.0 * (np.asarray(timestamp_s) - self.start_s) / (self.end_s - self.start_s) - 1.0
+
+    def evaluate(self, timestamp_s: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if timestamp_s < self.start_s - 1e-9 or timestamp_s > self.end_s + 1e-9:
+            raise ValueError("technical camera pose timestamp lies outside its estimated-pose fit")
+        x = float((timestamp_s - self.start_s) / (self.end_s - self.start_s))
+
+        def bezier(controls: np.ndarray) -> np.ndarray:
+            work = controls.copy()
+            for count in range(len(work) - 1, 0, -1):
+                work[:count] = (1.0 - x) * work[:count] + x * work[1:count + 1]
+            return work[0]
+
+        rig = bezier(self._rig_controls)
+        optical = bezier(self._optical_controls)
+        forward = bezier(self._forward_controls)
+        norm = float(np.linalg.norm(forward))
+        if norm <= 1e-9:
+            raise ValueError("technical camera estimated optical direction is degenerate")
+        return rig, optical, forward / norm
+
+
 class TechnicalCameraPath:
-    """One continuous CPU camera guide across all seven technical shots."""
+    """One C3 timestamp guide and smooth estimated-pose fit across all shots.
+
+    ``EstimatedTrajectory`` intentionally interpolates its source samples
+    piecewise.  Driving a presentation camera directly from those pieces
+    exposes pose-knot acceleration changes.  This guide samples only that
+    estimated trajectory, fits a low-order global Chebyshev curve to its rig
+    position and optical direction, and evaluates it on a C3 timestamp
+    schedule.  It remains a camera guide derived from estimated poses; it does
+    not replace scan projection or alter any measured point.
+    """
 
     def __init__(
         self,
@@ -152,108 +296,63 @@ class TechnicalCameraPath:
         self.map_start_global = self.offsets[self.map_views[0].id]
         self.map_total_frames = sum(view.frames for view in self.map_views)
         self.final_hold_frames = self.map_views[-1].final_hold_frames
-        self.map_motion_frames = self.map_total_frames - self.final_hold_frames
+        self.motion_end_global = self.total_frames - self.final_hold_frames
+        self.map_motion_frames = self.motion_end_global - self.map_start_global
         if self.map_motion_frames <= 1:
             raise ValueError("technical camera path has no moving map interval")
-        self.map_start_s = self.map_views[0].display_window_s[0]
-        self.map_end_s = self.map_views[-1].display_window_s[1]
-        start = self._recorded_camera_pose(self.map_start_s, 0.0)
-        self.map_start_eye = start.eye_m
-        self.map_start_target = start.target_m
-        prior_view = views[views.index(self.map_views[0]) - 1]
-        prior_step_s = (prior_view.display_window_s[1] - prior_view.display_window_s[0]) / prior_view.frames
-        previous = self._recorded_camera_pose(self.map_start_s - prior_step_s, 0.0)
-        previous_two = self._recorded_camera_pose(self.map_start_s - 2.0 * prior_step_s, 0.0)
-        phase_step = 1.0 / self.map_motion_frames
-        desired_zero = self._desired_map_pose(0.0)
-        desired_one = self._desired_map_pose(phase_step)
-        desired_two = self._desired_map_pose(2.0 * phase_step)
-        initial_eye_derivative = (start.eye_m - previous.eye_m) / phase_step
-        initial_target_derivative = (start.target_m - previous.target_m) / phase_step
-        initial_eye_second = (start.eye_m - 2.0 * previous.eye_m + previous_two.eye_m) / (phase_step * phase_step)
-        initial_target_second = (
-            start.target_m - 2.0 * previous.target_m + previous_two.target_m
-        ) / (phase_step * phase_step)
-        desired_eye_derivative = (desired_one.eye_m - desired_zero.eye_m) / phase_step
-        desired_target_derivative = (desired_one.target_m - desired_zero.target_m) / phase_step
-        desired_eye_second = (
-            desired_two.eye_m - 2.0 * desired_one.eye_m + desired_zero.eye_m
-        ) / (phase_step * phase_step)
-        desired_target_second = (
-            desired_two.target_m - 2.0 * desired_one.target_m + desired_zero.target_m
-        ) / (phase_step * phase_step)
-        self._bridge_eye = (
-            start.eye_m - desired_zero.eye_m,
-            initial_eye_derivative - desired_eye_derivative,
-            initial_eye_second - desired_eye_second,
-        )
-        self._bridge_target = (
-            start.target_m - desired_zero.target_m,
-            initial_target_derivative - desired_target_derivative,
-            initial_target_second - desired_target_second,
+        knot_frames = [self.offsets[view.id] for view in views]
+        knot_frames.append(self.motion_end_global)
+        knot_times = [view.camera_pose_window_s[0] for view in views]
+        knot_times.append(views[-1].camera_pose_window_s[1])
+        for left, right in zip(views, views[1:]):
+            if not math.isclose(left.camera_pose_window_s[1], right.camera_pose_window_s[0], abs_tol=1e-9):
+                raise ValueError("technical camera pose dependency windows must be contiguous")
+        self._timestamp_curve = _C3TimestampCurve(knot_frames, knot_times)
+        self._pose_guide = _EstimatedPoseGuide(
+            trajectory,
+            self.rig_from_optical,
+            knot_times[0],
+            knot_times[-1],
         )
 
     def _recorded_camera_pose(self, timestamp_s: float, phase: float) -> CameraPose:
-        map_from_rig = self.trajectory.map_from_sensor_rig(timestamp_s)
-        map_from_optical = map_from_rig @ self.rig_from_optical
-        eye = map_from_optical[:3, 3]
-        forward = map_from_optical[:3, 2]
+        rig_position, eye, forward = self._pose_guide.evaluate(timestamp_s)
         target = eye + 5.0 * forward / max(float(np.linalg.norm(forward)), 1e-9)
         return CameraPose(eye.astype(np.float64), target.astype(np.float64), timestamp_s, phase)
 
-    def _desired_map_pose(self, raw_phase: float) -> CameraPose:
-        motion = _smootherstep(raw_phase)
-        source_timestamp_s = self.map_start_s + (self.map_end_s - self.map_start_s) * motion
-        map_from_rig = self.trajectory.map_from_sensor_rig(source_timestamp_s)
-        aisle_target = map_from_rig[:3, 3].astype(np.float64) + np.asarray([0.0, 0.0, 0.85])
+    def _desired_map_pose(self, raw_phase: float, source_timestamp_s: float) -> CameraPose:
+        motion = _smootherstep_c3(raw_phase)
+        rig_position, _optical_eye, _forward = self._pose_guide.evaluate(source_timestamp_s)
+        aisle_target = rig_position + np.asarray([0.0, 0.0, 0.85])
         roi_weight = _smooth_window(raw_phase, 0.16, 0.30, 0.52, 0.68)
         target = (1.0 - 0.86 * roi_weight) * aisle_target + (0.86 * roi_weight) * self.roi_focus_m
         angle = math.radians(-96.0 + 24.0 * motion)
-        radius = 9.5 - 5.0 * roi_weight + 1.5 * _smootherstep((raw_phase - 0.70) / 0.30)
+        radius = 9.5 - 5.0 * roi_weight + 1.5 * _smootherstep_c3((raw_phase - 0.70) / 0.30)
         elevation = 4.2 - 2.0 * roi_weight
         eye = target + np.asarray(
             [radius * math.cos(angle), radius * math.sin(angle), elevation], dtype=np.float64
         )
         return CameraPose(eye, target, source_timestamp_s, raw_phase)
 
-    @staticmethod
-    def _bridge_correction(
-        raw_phase: float,
-        terms: tuple[np.ndarray, np.ndarray, np.ndarray],
-        bridge_end: float = 0.25,
-    ) -> np.ndarray:
-        if raw_phase >= bridge_end:
-            return np.zeros(3, dtype=np.float64)
-        x = float(np.clip(raw_phase / bridge_end, 0.0, 1.0))
-        value_basis = 1.0 - 10.0 * x**3 + 15.0 * x**4 - 6.0 * x**5
-        derivative_basis = x - 6.0 * x**3 + 8.0 * x**4 - 3.0 * x**5
-        second_basis = 0.5 * (x**2 - 3.0 * x**3 + 3.0 * x**4 - x**5)
-        value, derivative, second = terms
-        return (
-            value_basis * value
-            + derivative_basis * bridge_end * derivative
-            + second_basis * bridge_end * bridge_end * second
-        )
-
     def state(self, spec: ViewSpec, frame_index: int) -> CameraPose:
         if frame_index < 0 or frame_index >= spec.frames:
             raise IndexError("technical camera frame index is out of range")
+        global_index = self.offsets[spec.id] + frame_index
+        timestamp_s = self._timestamp_curve.evaluate(min(global_index, self.motion_end_global))
+        phase = global_index / max(self.total_frames - 1, 1)
         if spec.camera_motion_role == "recorded_camera_optical":
-            start_s, end_s = spec.display_window_s
-            # Half-open sampling avoids duplicating the boundary pose in the
-            # next shot while preserving causal in-window source timestamps.
-            timestamp_s = start_s + (end_s - start_s) * (frame_index / spec.frames)
-            phase = (self.offsets[spec.id] + frame_index) / max(self.total_frames - 1, 1)
             return self._recorded_camera_pose(timestamp_s, phase)
         if spec.camera_motion_role != "continuous_estimated_map_path":
             raise ValueError(f"unsupported technical camera motion role: {spec.camera_motion_role}")
 
-        map_index = self.offsets[spec.id] + frame_index - self.map_start_global
+        map_index = global_index - self.map_start_global
         raw_phase = float(np.clip(map_index / self.map_motion_frames, 0.0, 1.0))
-        desired = self._desired_map_pose(raw_phase)
-        eye = desired.eye_m + self._bridge_correction(raw_phase, self._bridge_eye)
-        target = desired.target_m + self._bridge_correction(raw_phase, self._bridge_target)
-        return CameraPose(eye, target, desired.source_timestamp_s, raw_phase)
+        desired = self._desired_map_pose(raw_phase, timestamp_s)
+        recorded = self._recorded_camera_pose(timestamp_s, raw_phase)
+        bridge = _smootherstep_c3(raw_phase / 0.28)
+        eye = (1.0 - bridge) * recorded.eye_m + bridge * desired.eye_m
+        target = (1.0 - bridge) * recorded.target_m + bridge * desired.target_m
+        return CameraPose(eye, target, desired.source_timestamp_s, phase)
 
     def trace_rows(self, fps: int) -> list[dict[str, object]]:
         poses: list[tuple[ViewSpec, int, CameraPose]] = []
@@ -263,26 +362,95 @@ class TechnicalCameraPath:
         targets = np.stack([pose.target_m for _spec, _index, pose in poses])
         velocities = np.zeros_like(eyes)
         accelerations = np.zeros_like(eyes)
+        jerks = np.zeros_like(eyes)
+        target_velocities = np.zeros_like(targets)
+        target_accelerations = np.zeros_like(targets)
+        target_jerks = np.zeros_like(targets)
         velocities[1:] = np.diff(eyes, axis=0) * fps
         accelerations[2:] = np.diff(velocities[1:], axis=0) * fps
+        jerks[3:] = np.diff(accelerations[2:], axis=0) * fps
+        target_velocities[1:] = np.diff(targets, axis=0) * fps
+        target_accelerations[2:] = np.diff(target_velocities[1:], axis=0) * fps
+        target_jerks[3:] = np.diff(target_accelerations[2:], axis=0) * fps
         rows: list[dict[str, object]] = []
-        for global_index, ((spec, local_index, pose), eye, target, velocity, acceleration) in enumerate(
-            zip(poses, eyes, targets, velocities, accelerations)
+        for global_index, values in enumerate(
+            zip(poses, eyes, targets, velocities, accelerations, jerks,
+                target_velocities, target_accelerations, target_jerks)
         ):
+            ((spec, local_index, pose), eye, target, velocity, acceleration, jerk,
+             target_velocity, target_acceleration, target_jerk) = values
+            if spec.temporal_mode == "current_window":
+                cutoff_s = spec.display_window_s[0] + (
+                    spec.display_window_s[1] - spec.display_window_s[0]
+                ) * (local_index / spec.frames)
+            elif spec.temporal_mode == "past_only_reveal":
+                progress = 0.0 if spec.frames == 1 else local_index / (spec.frames - 1)
+                eased = progress * progress * (3.0 - 2.0 * progress)
+                cutoff_s = spec.display_window_s[0] + (
+                    spec.display_window_s[1] - spec.display_window_s[0]
+                ) * eased
+            else:
+                cutoff_s = spec.display_window_s[1]
             rows.append({
                 "global_frame": global_index,
                 "view_id": spec.id,
                 "view_frame": local_index,
                 "boundary_from_previous": local_index == 0 and global_index > 0,
                 "camera_motion_role": spec.camera_motion_role,
-                "source_timestamp_s": round(pose.source_timestamp_s, 9),
+                "camera_guide_pose_timestamp_s": round(pose.source_timestamp_s, 9),
+                "rendered_data_cutoff_s": round(cutoff_s, 9),
                 "motion_phase": round(pose.motion_phase, 9),
                 "eye_m": [round(float(value), 9) for value in eye],
                 "target_m": [round(float(value), 9) for value in target],
                 "eye_velocity_mps": [round(float(value), 9) for value in velocity],
                 "eye_acceleration_mps2": [round(float(value), 9) for value in acceleration],
+                "eye_jerk_mps3": [round(float(value), 9) for value in jerk],
+                "target_velocity_mps": [round(float(value), 9) for value in target_velocity],
+                "target_acceleration_mps2": [round(float(value), 9) for value in target_acceleration],
+                "target_jerk_mps3": [round(float(value), 9) for value in target_jerk],
             })
         return rows
+
+
+def _camera_trace_view_sha256(rows: Iterable[dict[str, object]]) -> str:
+    digest = hashlib.sha256()
+    for row in rows:
+        bound = {
+            "global_frame": row["global_frame"],
+            "view_frame": row["view_frame"],
+            "camera_guide_pose_timestamp_s": row["camera_guide_pose_timestamp_s"],
+            "rendered_data_cutoff_s": row["rendered_data_cutoff_s"],
+            "eye_m": row["eye_m"],
+            "target_m": row["target_m"],
+        }
+        digest.update(json.dumps(bound, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def camera_motion_receipt(spec: ViewSpec, rows: Iterable[dict[str, object]]) -> dict[str, object]:
+    values = tuple(rows)
+    if len(values) != spec.frames:
+        raise ValueError(f"technical camera trace row count is invalid for {spec.id}")
+    timestamps = [float(row["camera_guide_pose_timestamp_s"]) for row in values]
+    cutoffs = [float(row["rendered_data_cutoff_s"]) for row in values]
+    path = (
+        "presentation guide fitted to recorded camera_optical poses"
+        if spec.camera_motion_role == "recorded_camera_optical"
+        else "continuous presentation orbit fitted to estimated map poses"
+    )
+    return {
+        "role": spec.camera_motion_role,
+        "path": path,
+        "pose_time_basis": CAMERA_TRACE_BASIS,
+        "camera_pose_dependency_window_s": list(spec.camera_pose_window_s),
+        "camera_guide_pose_timestamp_range_s": [min(timestamps), max(timestamps)],
+        "rendered_data_cutoff_range_s": [min(cutoffs), max(cutoffs)],
+        "trace": "technical_camera_trace.jsonl",
+        "trace_global_frame_range": [int(values[0]["global_frame"]), int(values[-1]["global_frame"])],
+        "trace_eye_target_sha256": _camera_trace_view_sha256(values),
+        "final_hold_frames": spec.final_hold_frames,
+    }
 
 
 @dataclass(frozen=True)
@@ -396,6 +564,7 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
                 **item,
                 "source_window_s": tuple(float(value) for value in item["source_window_s"]),
                 "display_window_s": tuple(float(value) for value in item["display_window_s"]),
+                "camera_pose_window_s": tuple(float(value) for value in item["camera_pose_window_s"]),
             }
         )
         for item in payload["views"]
@@ -420,6 +589,7 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
     for index, view in enumerate(views):
         start_s, end_s = view.source_window_s
         display_start_s, display_end_s = view.display_window_s
+        pose_start_s, pose_end_s = view.camera_pose_window_s
         if not (math.isfinite(start_s) and math.isfinite(end_s) and 0.0 <= start_s <= end_s):
             raise ValueError(f"technical view {view.id} has an invalid source window")
         if not (
@@ -428,6 +598,14 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
             and start_s <= display_start_s <= display_end_s <= end_s
         ):
             raise ValueError(f"technical view {view.id} has a display window outside its source dependencies")
+        if not (
+            math.isfinite(pose_start_s)
+            and math.isfinite(pose_end_s)
+            and 0.0 <= pose_start_s < pose_end_s
+        ):
+            raise ValueError(f"technical view {view.id} has an invalid camera pose dependency window")
+        if index and not math.isclose(views[index - 1].camera_pose_window_s[1], pose_start_s, abs_tol=1e-9):
+            raise ValueError("technical camera pose dependency windows must be contiguous")
         if view.selection_mode not in allowed_modes or view.temporal_mode not in allowed_temporal:
             raise ValueError(f"technical view {view.id} has an unsupported selection or temporal mode")
         if view.maximum_points <= 0 or view.history_stride_scans <= 0:
@@ -988,6 +1166,11 @@ class TechnicalRenderer:
         roi_focus = np.median(self._planned_rois["object_detail"][0].map_xyz_m, axis=0)
         rig_from_optical = source.rig_from_lidar @ np.linalg.inv(source.optical_from_lidar)
         self.camera_path = TechnicalCameraPath(views, source.trajectory, rig_from_optical, roi_focus)
+        self._camera_trace_rows = tuple(self.camera_path.trace_rows(profile.fps))
+        self._camera_trace_by_view = {
+            spec.id: tuple(row for row in self._camera_trace_rows if row["view_id"] == spec.id)
+            for spec in views
+        }
         scale = profile.height / 720.0
         self.fonts = {
             "kicker": ImageFont.truetype(str(FONT_BOLD), max(13, int(15 * scale))),
@@ -1245,7 +1428,7 @@ class TechnicalRenderer:
         return self._typography(frame, spec, progress, timestamp_s, point_count, callouts)
 
     def camera_trace_rows(self) -> list[dict[str, object]]:
-        return self.camera_path.trace_rows(self.profile.fps)
+        return list(self._camera_trace_rows)
 
     def derivation(self, spec: ViewSpec) -> dict[str, object]:
         scans = tuple(self._used_scans.get(spec.id, {}).values())
@@ -1280,12 +1463,7 @@ class TechnicalRenderer:
                 "rigid_pose_time": "PointCloud2 header/database timestamp",
             },
             "camera_calibration": self.source.camera_calibration_receipt,
-            "camera_motion": {
-                "role": spec.camera_motion_role,
-                "path": "continuous estimated-map camera guide across technical shots",
-                "final_hold_frames": spec.final_hold_frames,
-                "trace": "technical_camera_trace.jsonl",
-            },
+            "camera_motion": camera_motion_receipt(spec, self._camera_trace_by_view[spec.id]),
         }
         history_summary = self.source.scan_summary(scans)
         if spec.id in self._used_rois:
@@ -1655,7 +1833,7 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
             "path": trace_path.name,
             "sha256": sha256_file(trace_path),
             "frame_count": sum(view.frames for view in views),
-            "basis": "CPU estimated-map eye/target with finite-difference velocity and acceleration",
+            "basis": CAMERA_TRACE_BASIS,
         },
         "view_derivations": {view.id: renderer.derivation(view) for view in views},
         "outputs": outputs,

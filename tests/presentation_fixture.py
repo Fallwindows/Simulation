@@ -8,6 +8,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import numpy as np
+
 from simulator.capture.manifest import capture_hash, write_json
 from simulator.presentation.complete_bundle import emit_complete_bundle
 from simulator.presentation.provenance import (
@@ -241,9 +243,12 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     # text and catalog bytes while the presentation validator may read LF bytes.
     technical_catalog.write_bytes(technical_catalog.read_bytes().replace(b"\n", b"\r\n"))
     from simulator.technical_views import (
+        CAMERA_TRACE_BASIS,
         SourceBundle,
+        TechnicalCameraPath,
         _source_receipt as renderer_source_receipt,
         _write_view_receipt,
+        camera_motion_receipt,
         canonical_text_sha256,
         implementation_hashes,
         load_plan as load_technical_plan,
@@ -314,7 +319,35 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     source = renderer_source_receipt(renderer_bundle)
     _, technical_specs = load_technical_plan(repo_root / "config" / "technical_views.json")
     specs_by_id = {spec.id: spec for spec in technical_specs}
+    from simulator.technical_lidar import EstimatedTrajectory
+    trajectory_timestamps = np.linspace(0.2, 20.4, 65)
+    fixture_trajectory = EstimatedTrajectory(
+        trajectory_timestamps,
+        np.column_stack((
+            0.38 * trajectory_timestamps,
+            0.12 * np.sin(trajectory_timestamps / 3.2),
+            1.1 + 0.02 * np.cos(trajectory_timestamps / 4.1),
+        )),
+        np.tile(np.asarray([0.0, 0.0, 0.0, 1.0]), (len(trajectory_timestamps), 1)),
+    )
+    camera_path = TechnicalCameraPath(
+        technical_specs,
+        fixture_trajectory,
+        np.eye(4, dtype=np.float64),
+        np.asarray([5.2, 1.4, 1.25], dtype=np.float64),
+    )
+    camera_trace_rows = camera_path.trace_rows(30)
+    camera_rows_by_view = {
+        spec.id: [row for row in camera_trace_rows if row["view_id"] == spec.id]
+        for spec in technical_specs
+    }
+    camera_trace = technical_dir / "technical_camera_trace.jsonl"
+    camera_trace.write_text(
+        "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in camera_trace_rows),
+        encoding="utf-8",
+    )
     outputs = []
+    view_derivations = {}
     for view_id, role, frame_count, color in VIEWS:
         view_spec = specs_by_id[view_id]
         scan_timestamp_s = float(view_spec.display_window_s[0])
@@ -386,6 +419,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                     "distortion_handling": "zero_coefficients_no_rectification_required",
                     "topic": "/sim/camera/rgb/camera_info",
                 },
+                "camera_motion": camera_motion_receipt(view_spec, camera_rows_by_view[view_id]),
                 **({
                     "cotimed_rgb_pairs": {"pair_count": 1, "maximum_absolute_skew_ns": rgb_skew_ns, "pairs": [
                         {"scan_timestamp_ns": scan_timestamp_ns, "rgb_frame_index": rgb_frame_index,
@@ -405,6 +439,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                 } if is_roi_view else {}),
             },
         )
+        view_derivations[view_id] = json.loads(receipt_path.read_text(encoding="utf-8"))["derivation"]
         outputs.append({
             "path": view_video.name, "sha256": video_hash, "frames": frame_count, "view_ids": [view_id],
             "presentation_role": role, "probe": probe,
@@ -425,6 +460,13 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         "storyboard_content_used": False,
         "storyboard_exclusion_basis": "generated test fixture uses only synthetic moving geometry and timestamps",
         "input_snapshot_verification": "post_render_sha256_match",
+        "camera_motion_trace": {
+            "path": camera_trace.name,
+            "sha256": sha256(camera_trace),
+            "frame_count": len(camera_trace_rows),
+            "basis": CAMERA_TRACE_BASIS,
+        },
+        "view_derivations": view_derivations,
         "selective_current_scan_goal": {
             "status": "complete",
             "representation": "feature-specific selections from timestamped raw PointCloud2 returns",

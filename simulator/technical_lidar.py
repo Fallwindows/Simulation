@@ -452,6 +452,9 @@ class SelectiveLidarSource:
         self._decoder_size: tuple[int, int] | None = None
         self._decoded_frame_index = -1
         self._decoded_frame: np.ndarray | None = None
+        self._rgb_frame_cache: OrderedDict[tuple[int, int, int], np.ndarray] = OrderedDict()
+        self.rgb_decoder_restart_count = 0
+        self.rgb_decoded_frame_count = 0
 
     def close(self) -> None:
         if self._decoder is not None:
@@ -476,6 +479,7 @@ class SelectiveLidarSource:
         self._decoder_size = (width, height)
         self._decoded_frame_index = -1
         self._decoded_frame = None
+        self.rgb_decoder_restart_count += 1
 
     def _read_decoder_bytes(self, size: int) -> bytes:
         if self._decoder is None or self._decoder.stdout is None:
@@ -699,6 +703,11 @@ class SelectiveLidarSource:
         return cached
 
     def read_rgb_frame(self, record: RgbFrameRecord, width: int, height: int) -> np.ndarray:
+        key = (width, height, record.frame_index)
+        cached = self._rgb_frame_cache.get(key)
+        if cached is not None:
+            self._rgb_frame_cache.move_to_end(key)
+            return cached.copy()
         if self._decoder_size != (width, height) or record.frame_index < self._decoded_frame_index:
             self._restart_decoder(width, height)
         frame_bytes = width * height * 3
@@ -706,6 +715,12 @@ class SelectiveLidarSource:
             payload = self._read_decoder_bytes(frame_bytes)
             self._decoded_frame = np.frombuffer(payload, dtype=np.uint8).reshape(height, width, 3).copy()
             self._decoded_frame_index += 1
+            self.rgb_decoded_frame_count += 1
+            decoded_key = (width, height, self._decoded_frame_index)
+            self._rgb_frame_cache[decoded_key] = self._decoded_frame
+            self._rgb_frame_cache.move_to_end(decoded_key)
+            while len(self._rgb_frame_cache) > 4:
+                self._rgb_frame_cache.popitem(last=False)
         if self._decoded_frame is None:
             raise ValueError(f"recorded RGB frame {record.frame_index} could not be decoded")
         return self._decoded_frame.copy()

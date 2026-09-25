@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import unittest
+from collections import OrderedDict
 from pathlib import Path
+from types import MethodType
 
 import numpy as np
 
@@ -12,6 +14,7 @@ from simulator.technical_views import (
     _activation_ray_opacities,
     load_plan,
 )
+from simulator.technical_lidar import EstimatedTrajectory, RgbFrameRecord, SelectiveLidarSource
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +59,22 @@ class TechnicalMotionTests(unittest.TestCase):
         )
         self.assertEqual([view.final_hold_frames for view in self.views], [0, 0, 0, 0, 0, 0, 24])
         self.assertEqual(len(self.trace), 810)
+        self.assertEqual(self.views[0].title, "EARLIER RECORDED SENSOR REPLAY")
+        self.assertEqual(self.views[0].subtitle, "RECORDED t=2.0–5.9s · CO-TIMED RGB + LIDAR")
+
+    def test_camera_pose_time_and_rendered_data_cutoff_are_distinct_and_in_declared_windows(self):
+        by_id = {view.id: view for view in self.views}
+        for row in self.trace:
+            spec = by_id[row["view_id"]]
+            pose_time = row["camera_guide_pose_timestamp_s"]
+            cutoff = row["rendered_data_cutoff_s"]
+            self.assertGreaterEqual(pose_time, spec.camera_pose_window_s[0] - 1e-9)
+            self.assertLessEqual(pose_time, spec.camera_pose_window_s[1] + 1e-9)
+            self.assertGreaterEqual(cutoff, spec.display_window_s[0] - 1e-9)
+            self.assertLessEqual(cutoff, spec.display_window_s[1] + 1e-9)
+        detail = [row for row in self.trace if row["view_id"] == "object_detail"]
+        self.assertGreater(detail[-1]["camera_guide_pose_timestamp_s"], 12.8)
+        self.assertTrue(all(row["rendered_data_cutoff_s"] == 12.8 for row in detail))
 
     def test_camera_steps_and_velocity_stay_continuous_at_every_boundary(self):
         eyes = np.asarray([row["eye_m"] for row in self.trace], dtype=np.float64)
@@ -99,6 +118,91 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertTrue(np.all(np.diff(samples, axis=0) >= -1e-7))
         self.assertLess(float(np.max(np.diff(samples, axis=0))), 0.13)
         self.assertGreater(np.count_nonzero((samples > 0.0) & (samples < 1.0)), 100)
+
+    def test_piecewise_estimated_trajectory_has_no_boundary_velocity_acceleration_or_jerk_spike(self):
+        timestamps = np.linspace(0.2, 20.4, 23)
+        segment = np.arange(len(timestamps) - 1, dtype=np.float64)
+        steps = np.column_stack((
+            0.28 + 0.12 * np.sin(segment * 1.7),
+            0.11 * np.sign(np.sin(segment * 1.3)),
+            0.025 * np.cos(segment * 2.1),
+        ))
+        positions = np.vstack((
+            np.asarray([0.0, 0.0, 1.1]),
+            np.asarray([0.0, 0.0, 1.1]) + np.cumsum(steps, axis=0),
+        ))
+        trajectory = EstimatedTrajectory(
+            timestamps,
+            positions,
+            np.tile(np.asarray([0.0, 0.0, 0.0, 1.0]), (len(timestamps), 1)),
+        )
+        trace = TechnicalCameraPath(
+            self.views,
+            trajectory,
+            np.eye(4, dtype=np.float64),
+            np.asarray([4.8, 1.1, 1.2]),
+        ).trace_rows(self.fps)
+        boundaries = [120, 210, 300, 420, 540, 660]
+        tolerances = {
+            "eye_velocity_mps": 0.05,
+            "eye_acceleration_mps2": 0.20,
+            "eye_jerk_mps3": 1.0,
+            "target_velocity_mps": 0.05,
+            "target_acceleration_mps2": 0.20,
+            "target_jerk_mps3": 1.0,
+        }
+        for field, absolute_tolerance in tolerances.items():
+            values = np.asarray([row[field] for row in trace], dtype=np.float64)
+            magnitudes = np.linalg.norm(values, axis=1)
+            changes = np.linalg.norm(np.diff(values, axis=0), axis=1)
+            for boundary in boundaries:
+                neighbor_magnitude = max(magnitudes[boundary - 2], magnitudes[boundary + 2])
+                self.assertLessEqual(
+                    magnitudes[boundary],
+                    neighbor_magnitude * 1.35 + absolute_tolerance,
+                    f"{field} magnitude pulse at frame {boundary}",
+                )
+                outside = np.concatenate((
+                    changes[boundary - 8:boundary - 2],
+                    changes[boundary + 2:boundary + 8],
+                ))
+                local_limit = max(absolute_tolerance, float(np.max(outside)) * 1.8)
+                self.assertLessEqual(changes[boundary - 1], local_limit, f"{field} entry jump at {boundary}")
+                self.assertLessEqual(changes[boundary], local_limit, f"{field} exit jump at {boundary}")
+
+    def test_four_frame_rgb_lru_prevents_pair_backtracking_restarts(self):
+        source = object.__new__(SelectiveLidarSource)
+        source._decoder_size = None
+        source._decoded_frame_index = -1
+        source._decoded_frame = None
+        source._rgb_frame_cache = OrderedDict()
+        source.rgb_decoder_restart_count = 0
+        source.rgb_decoded_frame_count = 0
+
+        def restart(instance, width, height):
+            instance._decoder_size = (width, height)
+            instance._decoded_frame_index = -1
+            instance._decoded_frame = None
+            instance.rgb_decoder_restart_count += 1
+
+        def read_bytes(_instance, size):
+            return bytes(size)
+
+        source._restart_decoder = MethodType(restart, source)
+        source._read_decoder_bytes = MethodType(read_bytes, source)
+        records = {
+            index: RgbFrameRecord(index, index / 30.0, 2, 2, "camera_optical_frame")
+            for index in range(175)
+        }
+        access_order: list[int] = []
+        for previous in range(0, 172, 3):
+            latest = previous + 3
+            access_order.extend((previous, latest, previous, latest))
+        for index in access_order:
+            source.read_rgb_frame(records[index], 2, 2)
+        self.assertLessEqual(source.rgb_decoder_restart_count, 1)
+        self.assertLessEqual(source.rgb_decoded_frame_count, 175)
+        self.assertLessEqual(len(source._rgb_frame_cache), 4)
 
 
 if __name__ == "__main__":

@@ -587,9 +587,30 @@ class CompletePresentationTests(unittest.TestCase):
         receipt_path = manifest_path.parent / output["receipt"]["path"]
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         mutate(receipt)
+        manifest["view_derivations"][receipt["view_id"]] = receipt["derivation"]
         forged_receipt = manifest_path.parent / f"{name}_receipt.json"
         forged_receipt.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
         output["receipt"] = {"path": forged_receipt.name, "sha256": sha256_path(forged_receipt)}
+        forged_manifest = manifest_path.parent / f"{name}_manifest.json"
+        forged_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        return forged_manifest
+
+    def _mutated_technical_trace(self, name: str, mutate):
+        manifest_path = self.fixture["technical_manifest"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        trace_path = manifest_path.parent / manifest["camera_motion_trace"]["path"]
+        rows = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        mutate(rows, manifest)
+        forged_trace = manifest_path.parent / f"{name}_camera_trace.jsonl"
+        forged_trace.write_text(
+            "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+        manifest["camera_motion_trace"].update(
+            path=forged_trace.name,
+            sha256=sha256_path(forged_trace),
+            frame_count=len(rows),
+        )
         forged_manifest = manifest_path.parent / f"{name}_manifest.json"
         forged_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
         return forged_manifest
@@ -633,6 +654,44 @@ class CompletePresentationTests(unittest.TestCase):
             manifest["source"]["artifacts"]["source_catalog"]["sha256"],
             canonical_text_sha256(self.fixture["technical_catalog"]),
         )
+
+    def test_technical_camera_trace_and_per_view_motion_binding_are_fail_closed(self):
+        manifest = json.loads(self.fixture["technical_manifest"].read_text(encoding="utf-8"))
+        manifest.pop("camera_motion_trace")
+        missing = self.fixture["technical_manifest"].with_name("missing_camera_trace_manifest.json")
+        missing.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "camera motion trace"):
+            validate_technical_delivery(missing, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        mutated_eye = self._mutated_technical_trace(
+            "mutated_camera_eye",
+            lambda rows, _manifest: rows[300]["eye_m"].__setitem__(0, rows[300]["eye_m"][0] + 1.0),
+        )
+        with self.assertRaisesRegex(ValueError, "camera motion trace"):
+            validate_technical_delivery(mutated_eye, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        wrong_pose_time = self._mutated_technical_trace(
+            "camera_pose_outside_dependency",
+            lambda rows, _manifest: rows[420].update(camera_guide_pose_timestamp_s=19.9),
+        )
+        with self.assertRaisesRegex(ValueError, "identity/time binding"):
+            validate_technical_delivery(wrong_pose_time, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        wrong_cutoff = self._mutated_technical_trace(
+            "camera_cutoff_conflation",
+            lambda rows, _manifest: rows[500].update(rendered_data_cutoff_s=14.5),
+        )
+        with self.assertRaisesRegex(ValueError, "identity/time binding"):
+            validate_technical_delivery(wrong_cutoff, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        bad_receipt = self._mutated_technical_receipt(
+            "forged_camera_motion_receipt", 4,
+            lambda receipt: receipt["derivation"]["camera_motion"].update(
+                camera_guide_pose_timestamp_range_s=[12.8, 12.8]
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "camera motion binding"):
+            validate_technical_delivery(bad_receipt, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
 
     def test_production_catalog_rejects_unlisted_fixture_bundle_by_default(self):
         catalog = json.loads(
