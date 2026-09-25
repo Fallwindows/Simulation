@@ -17,8 +17,32 @@ if (-not $CaptureDir) { $CaptureDir = Join-Path (Resolve-Path $RunDir).Path "cap
 $captureDir = (Resolve-Path -LiteralPath $CaptureDir).Path
 if (-not $RunDir) { $RunDir = Split-Path -Parent $captureDir }
 $runDir = (Resolve-Path -LiteralPath $RunDir).Path
-$slamDir = Join-Path $runDir "slam"
-if ($ExperimentName -and $ExperimentName -ne "offline_slam") { $slamDir = Join-Path $slamDir $ExperimentName }
+function Resolve-SafeSlamDirectory {
+  param([string]$RunDirectory, [string]$RequestedExperimentName)
+  if ([string]::IsNullOrWhiteSpace($RequestedExperimentName)) { throw "ExperimentName must be a non-empty safe path segment." }
+  $slamRoot = [System.IO.Path]::GetFullPath((Join-Path $RunDirectory "slam"))
+  if ($RequestedExperimentName -ieq "offline_slam") {
+    return [pscustomobject]@{slam_root=$slamRoot; slam_directory=$slamRoot; experiment_name="offline_slam"}
+  }
+  if (
+    [System.IO.Path]::IsPathRooted($RequestedExperimentName) -or
+    $RequestedExperimentName -match '[\\/]' -or
+    $RequestedExperimentName -in @(".","..") -or
+    $RequestedExperimentName.EndsWith(".") -or
+    $RequestedExperimentName.EndsWith(" ") -or
+    $RequestedExperimentName.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+    $RequestedExperimentName -match '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)'
+  ) { throw "ExperimentName must be one safe, non-reserved path segment: $RequestedExperimentName" }
+  $candidate = [System.IO.Path]::GetFullPath((Join-Path $slamRoot $RequestedExperimentName))
+  $expectedParent = [System.IO.Path]::GetFullPath($slamRoot).TrimEnd([char]92,[char]47)
+  $actualParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $candidate)).TrimEnd([char]92,[char]47)
+  if (-not $actualParent.Equals($expectedParent, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Resolved experiment directory escapes the intended run/slam root: $candidate"
+  }
+  return [pscustomobject]@{slam_root=$slamRoot; slam_directory=$candidate; experiment_name=$RequestedExperimentName}
+}
+$slamSelection = Resolve-SafeSlamDirectory -RunDirectory $runDir -RequestedExperimentName $ExperimentName
+$slamDir = [string]$slamSelection.slam_directory
 $logsDir = Join-Path $runDir "logs"
 function Start-SlamAttempt {
   param([string]$SlamDirectory)
@@ -42,7 +66,9 @@ function Start-SlamAttempt {
   if (Test-Path -LiteralPath $attemptDatabase) { throw "Fresh SLAM attempt database path already exists: $attemptDatabase" }
   $receipt = [ordered]@{
     attempt_id=$attemptId
+    receipt_kind="attempt_start_marker"
     status="started"
+    terminal_status_authority="slam_manifest.json"
     started_utc=[DateTime]::UtcNow.ToString("o")
     mapper_database_relative_path=("attempts/$attemptId/rtabmap.db")
     rotated_prior_artifacts=@($rotated)

@@ -392,9 +392,13 @@ class CaptureArchitectureTests(unittest.TestCase):
 
     def test_mapping_and_perception_scripts_have_truth_separated_entrypoints(self):
         mapping = (ROOT / "scripts/run_slam_offline.ps1").read_text(encoding="utf-8")
+        path_resolution = mapping.index("$slamSelection = Resolve-SafeSlamDirectory")
+        directory_creation = mapping.index("New-Item -ItemType Directory -Force -Path $slamDir,$logsDir")
         attempt_start = mapping.index("$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir")
         mapping_preflight = mapping.index("--validate-for-slam $captureDir")
         mapping_config_read = mapping.index('"bag_metadata.json"')
+        self.assertLess(path_resolution, directory_creation)
+        self.assertLess(directory_creation, attempt_start)
         self.assertLess(attempt_start, mapping_preflight)
         self.assertLess(mapping_preflight, mapping_config_read)
         topic_selection = next(line for line in mapping.splitlines() if "$replayTopics =" in line)

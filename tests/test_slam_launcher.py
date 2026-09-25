@@ -227,6 +227,71 @@ Write-AtomicJson -Value $payload -DestinationPath $ManifestPath -StagingDirector
         result_path.unlink()
         return result
 
+    def _run_experiment_path_harness(self, run_directory: Path, experiment_name: str) -> dict:
+        result_path = run_directory.parent / f"path-result-{time.time_ns()}.json"
+        harness = run_directory.parent / f"path-harness-{time.time_ns()}.ps1"
+        harness.write_text(
+            r'''param(
+  [string]$LauncherPath,
+  [string]$RunDirectory,
+  [string]$ExperimentName,
+  [string]$ResultPath
+)
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
+foreach ($functionName in @("Resolve-SafeSlamDirectory","Start-SlamAttempt")) {
+  $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
+  if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
+  Invoke-Expression $definition[0].Extent.Text
+}
+$selection = $null
+$attempt = $null
+$failure = $null
+try {
+  $selection = Resolve-SafeSlamDirectory -RunDirectory $RunDirectory -RequestedExperimentName $ExperimentName
+  New-Item -ItemType Directory -Force -Path $selection.slam_directory | Out-Null
+  $attempt = Start-SlamAttempt -SlamDirectory $selection.slam_directory
+} catch {
+  $failure = $_.Exception.Message
+}
+[ordered]@{
+  failure=$failure
+  slam_root=$(if ($selection) { $selection.slam_root } else { $null })
+  slam_directory=$(if ($selection) { $selection.slam_directory } else { $null })
+  attempt_id=$(if ($attempt) { $attempt.attempt_id } else { $null })
+} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+''',
+            encoding="utf-8",
+        )
+        process = subprocess.run(
+            [
+                self.pwsh,
+                "-NoProfile",
+                "-File",
+                str(harness),
+                "-LauncherPath",
+                str(LAUNCHER),
+                "-RunDirectory",
+                str(run_directory),
+                "-ExperimentName",
+                experiment_name,
+                "-ResultPath",
+                str(result_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+        harness.unlink()
+        result_path.unlink()
+        return result
+
     def test_launcher_parses_without_powershell_errors(self):
         command = (
             "$tokens=$null; $errors=$null; "
@@ -391,6 +456,44 @@ Wait-Process -Id $child.Id
             self.assertEqual(manifest["status"], "complete")
             self.assertEqual(manifest["attempt_id"], attempt["attempt_id"])
             self.assertEqual(manifest["database_artifact"]["sha256"], publication["sha256"])
+
+    def test_experiment_path_is_one_safe_contained_segment_before_attempt_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "run"
+            run.mkdir()
+            shared = root / "shared"
+            rooted = root / "rooted-target"
+            for target in (shared, rooted):
+                target.mkdir()
+                (target / "slam_manifest.json").write_text(json.dumps({"status": "complete", "sentinel": target.name}), encoding="utf-8")
+                (target / "rtabmap.db").write_bytes((target.name + "-database").encode("utf-8"))
+            sentinels = {
+                path: (path.read_bytes(), path.stat().st_mtime_ns)
+                for target in (shared, rooted)
+                for path in (target / "slam_manifest.json", target / "rtabmap.db")
+            }
+
+            invalid_names = ("..", r"..\..\shared", str(rooted), "CON", "trailing.")
+            for name in invalid_names:
+                with self.subTest(name=name):
+                    result = self._run_experiment_path_harness(run, name)
+                    self.assertIsNotNone(result["failure"])
+                    self.assertIn("safe", result["failure"].lower())
+                    self.assertIsNone(result["attempt_id"])
+            self.assertFalse((run / "slam").exists(), "invalid names must fail before output directory creation")
+            for path, (expected_bytes, expected_mtime) in sentinels.items():
+                self.assertEqual(path.read_bytes(), expected_bytes)
+                self.assertEqual(path.stat().st_mtime_ns, expected_mtime)
+
+            default = self._run_experiment_path_harness(run, "offline_slam")
+            self.assertIsNone(default["failure"])
+            self.assertEqual(Path(default["slam_directory"]), (run / "slam").resolve())
+            self.assertIsNotNone(default["attempt_id"])
+            named = self._run_experiment_path_harness(run, "named experiment")
+            self.assertIsNone(named["failure"])
+            self.assertEqual(Path(named["slam_directory"]), (run / "slam" / "named experiment").resolve())
+            self.assertIsNotNone(named["attempt_id"])
 
 
 if __name__ == "__main__":
