@@ -5,14 +5,29 @@ param(
   [string]$RosWorkspace = "",
   [int]$Frames = 0,
   [switch]$Realtime,
+  [ValidateRange(0.05, 1.0)]
+  [double]$RealtimeFactor = 1.0,
   [string]$StatusPath = "",
   [switch]$PreflightOnly,
   [switch]$StartZenohRouter,
   [switch]$Gui,
-  [switch]$Headless
+  [switch]$Headless,
+  [ValidateSet("RaytracedLighting", "PathTracing")]
+  [string]$Renderer = "RaytracedLighting",
+  [string]$CaptureDir = "",
+  [string]$CaptureFrames = "",
+  [ValidateRange(64, 3840)]
+  [int]$CaptureWidth = 1280,
+  [ValidateRange(64, 3840)]
+  [int]$CaptureHeight = 720,
+  [ValidateRange(1, 32)]
+  [int]$CaptureRtSubframes = 4,
+  [switch]$CaptureOnly,
+  [switch]$RequireSensorSamples
 )
 $ErrorActionPreference = "Stop"
 if ($Gui -and $Headless) { throw "Choose either -Gui or -Headless, not both." }
+if ([bool]$CaptureDir -ne [bool]$CaptureFrames) { throw "-CaptureDir and -CaptureFrames must be supplied together." }
 $pathHelper = Join-Path $PSScriptRoot "resolve_runtime_paths.ps1"
 . $pathHelper
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
@@ -20,8 +35,13 @@ $scenarioPath = if ([IO.Path]::IsPathRooted($Scenario)) { $Scenario } else { Joi
 if (-not (Test-Path -LiteralPath $scenarioPath)) { throw "Scenario file not found: $scenarioPath" }
 $pixiWorkspace = Resolve-RosWorkspace $RosWorkspace
 $pixi = Resolve-PixiExecutable $PixiPath
+Remove-Item Env:ROS_DISTRO -ErrorAction SilentlyContinue
 $env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"
 $env:ROS_DOMAIN_ID = "0"
+$env:ZENOH_SESSION_CONFIG_URI = (Resolve-Path -LiteralPath (Join-Path $repo "config\ros2\production_zenoh_session.json5")).Path
+$env:ZENOH_ROUTER_CONFIG_URI = (Resolve-Path -LiteralPath (Join-Path $repo "config\ros2\production_zenoh_router.json5")).Path
+$env:ROS_LOG_DIR = Join-Path $repo "runs\ros_logs"
+New-Item -ItemType Directory -Force -Path $env:ROS_LOG_DIR | Out-Null
 if ($PreflightOnly) {
   Push-Location $repo
   try {
@@ -32,33 +52,56 @@ if ($PreflightOnly) {
   exit $LASTEXITCODE
 }
 $zenohRouter = $null
+$status = if ($StatusPath) { $StatusPath } else { Join-Path $repo "runs\isaac_runtime_status.json" }
 
 function Stop-ProcessTree([int]$RootPid) {
-  $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $RootPid" | Select-Object -ExpandProperty ProcessId)
-  foreach ($childPid in $children) {
-    Stop-ProcessTree -RootPid ([int]$childPid)
-    Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue
-  }
+  & taskkill.exe /PID $RootPid /T /F 2>$null | Out-Null
   Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
 }
 
 if (-not (Test-Path -LiteralPath $IsaacPython)) { throw "Isaac Python launcher not found: $IsaacPython" }
 if ($StartZenohRouter) {
-  $zenohRouter = Start-Process -FilePath $pixi -ArgumentList @("run", "--manifest-path", (Join-Path $pixiWorkspace "pixi.toml"), "ros2", "run", "rmw_zenoh_cpp", "rmw_zenohd") -WorkingDirectory $pixiWorkspace -WindowStyle Hidden -PassThru
-  Start-Sleep -Seconds 2
+  $routerLogBase = [IO.Path]::GetFullPath("$status.zenoh")
+  $routerLogParent = Split-Path -Parent $routerLogBase
+  New-Item -ItemType Directory -Force -Path $routerLogParent | Out-Null
+  $zenohRouter = Start-Process -FilePath $pixi -ArgumentList @("run", "--manifest-path", (Join-Path $pixiWorkspace "pixi.toml"), "ros2", "run", "rmw_zenoh_cpp", "rmw_zenohd") -WorkingDirectory $pixiWorkspace -WindowStyle Hidden -RedirectStandardOutput "$routerLogBase.stdout.log" -RedirectStandardError "$routerLogBase.stderr.log" -PassThru
+  Start-Sleep -Seconds 6
+  if ($zenohRouter.HasExited) { throw "Zenoh router exited during startup; see $routerLogBase.stderr.log" }
 }
 
 $runtime = Join-Path $repo "simulator\runtime\isaac_sim_runner.py"
-$status = if ($StatusPath) { $StatusPath } else { Join-Path $repo "runs\isaac_runtime_status.json" }
-$arguments = @($runtime, "--scenario", $scenarioPath, "--status-path", $status)
+$arguments = @($runtime, "--scenario", $scenarioPath, "--status-path", $status, "--renderer", $Renderer)
 if ($Frames -gt 0) { $arguments += @("--frames", $Frames) }
 if ($Headless) { $arguments += "--headless" }
-if ($Realtime) { $arguments += "--realtime" }
+if ($Realtime) { $arguments += @("--realtime", "--realtime-factor", ([string]$RealtimeFactor)) }
+if ($CaptureOnly) { $arguments += "--capture-only" }
+if ($CaptureDir) {
+  $capturePathCandidate = if ([IO.Path]::IsPathRooted($CaptureDir)) { $CaptureDir } else { Join-Path $repo $CaptureDir }
+  $resolvedCaptureDir = [IO.Path]::GetFullPath($capturePathCandidate)
+  $arguments += @(
+    "--capture-dir", $resolvedCaptureDir,
+    "--capture-frames", $CaptureFrames,
+    "--capture-width", ([string]$CaptureWidth),
+    "--capture-height", ([string]$CaptureHeight),
+    "--capture-rt-subframes", ([string]$CaptureRtSubframes)
+  )
+}
 Push-Location $repo
+$isaacExitCode = 0
 try {
   & $IsaacPython @arguments
+  $isaacExitCode = $LASTEXITCODE
 } finally {
   Pop-Location
   if ($zenohRouter -and -not $zenohRouter.HasExited) { Stop-ProcessTree -RootPid $zenohRouter.Id }
 }
-if ($LASTEXITCODE -ne 0) { throw "Isaac Sim runtime exited with code $LASTEXITCODE" }
+if ($isaacExitCode -ne 0) { throw "Isaac Sim runtime exited with code $isaacExitCode" }
+if (-not (Test-Path -LiteralPath $status)) { throw "Isaac Sim runtime did not write status: $status" }
+$runtimeStatus = Get-Content -LiteralPath $status -Raw | ConvertFrom-Json
+if ($runtimeStatus.status -eq "error") { throw "Isaac Sim runtime reported $($runtimeStatus.error_type): $($runtimeStatus.error)" }
+if ($RequireSensorSamples) {
+  if ($runtimeStatus.observed_rgb_frames -le 0) { throw "Isaac Sim produced no observed RGB frames." }
+  if ($runtimeStatus.observed_clock_samples -le 0) { throw "Isaac Sim produced no observed /clock messages." }
+  if ($runtimeStatus.observed_lidar_clouds -le 0) { throw "Isaac Sim produced no observed RTX LiDAR clouds." }
+  if ($runtimeStatus.lidar_cloud_points.min_points -le 0) { throw "Isaac Sim RTX LiDAR clouds contained no real returns." }
+}
