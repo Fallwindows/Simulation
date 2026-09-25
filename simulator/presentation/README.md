@@ -4,7 +4,7 @@
 fixes the half-open frame intervals, the native 1920x1080 delivery profile, and
 the 1280x720 preview profile at 30 fps and 1,350 frames.
 
-Complete rendering accepts a schema-v3 shot bundle only when its RGB capture
+Complete rendering accepts a schema-v4 shot bundle only when its RGB capture
 and seven technical-view receipts validate against reviewed source catalogs. The
 machine-readable catalog in `config/presentation/input_schemas.json` names the
 exact schemas, repository producer IDs/source files, and artifact types for
@@ -36,8 +36,11 @@ requires exact membership in
 `config/presentation/accepted_rgb_captures.json`, including capture hash,
 producer revision/blob, and required artifact hashes, before writing a
 receipt. The repaired capture manifest v1 contains exactly six raw topics,
-including `/sim/camera/rgb/camera_info`. RGB shots
-consume source frames 0-539, so a genuine 20.5-second capture is sufficient.
+including `/sim/camera/rgb/camera_info`. RGB shots consume source frames
+0-539. The complete-bundle producer additionally requires hash-bound RGB video
+and contiguous observed frame-index stamps through source frame 548 for the
+moving outgoing half of the frame-540 transition. This does not extend the
+editorial shot interval; a genuine 20.5-second capture is still sufficient.
 The receipt records its actual first/last simulation stamps and copies the
 exact `presentation_transform` from the accepted catalog entry. Only the
 reviewed `none` and legacy/test `hflip` operations are supported, with exact
@@ -70,7 +73,7 @@ receipt binds capture, map, trajectory, object-state versions, simulation-time
 extent, producer commits, and the reviewed source catalog. Hand-written or
 cross-source replacements fail before rendering.
 
-Combine accepted producer outputs into schema-v3 shot inputs:
+Combine accepted producer outputs into schema-v4 shot inputs:
 
 ```powershell
 C:\isaacsim\python.bat -m simulator.presentation.complete_bundle `
@@ -148,11 +151,17 @@ Renderer code, technical plan, and source-catalog receipt hashes canonicalize
 text line endings to LF. Producer receipts therefore validate identically from
 Windows CRLF and LF checkouts.
 
-The production `storyboard.yaml` applies short symmetric smoothstep blends at
-frames 540, 660, 750, 840, 960, 1080, and 1200. Each window freezes only the
-edge frames needed to straddle its boundary, consumes no extra timeline frames,
-and preserves the exact 1,350-frame delivery budget. RGB shots 01-05 remain
-frame-contiguous from the original capture without added dissolves.
+The production `storyboard.yaml` applies short smoothstep blends at frames 540,
+660, 750, 840, 960, 1080, and 1200. Each window consumes no extra timeline
+frames and preserves the exact 1,350-frame delivery budget. At frame 540 the
+outgoing RGB source advances continuously from frames 531 through 548 while M1
+remains in its declared 1.13889 m/s forward cruise; shot 05
+therefore trims through source frame 548 with no outgoing stop clone. The
+incoming technical source retains nine cloned start frames because its producer
+does not provide a validated frame-level preroll mapping. The other six
+boundaries retain their established symmetric edge clones. RGB shots 01-05
+remain frame-contiguous from the original capture without added internal
+dissolves.
 FFmpeg's custom-xfade progress `P` descends from one toward zero, so the
 renderer weights the outgoing source with `smoothstep(P)` and the incoming
 source with `1-smoothstep(P)`. The generated moving-geometry fixture checks
@@ -164,12 +173,14 @@ blend between independently rendered clips. It explicitly records that the
 frames are neither co-timed measurements nor sensor, geometry, or map fusion.
 Each mixed frame is shared between both shots; its nominal timeline shot is
 retained only as an index. The manifest binds the exact outgoing and incoming
-videos and receipts, the cloned edge-frame numbers, their independent time
-bases and data extents, the clone ranges, and the smoothstep weights for every
-mixed frame. Source clip PTS is recorded independently from sensor time. RGB
-edge frames retain their validated frame-index-to-simulation-stamp binding.
+videos and receipts, each per-film-frame source-frame selection, their
+independent time bases and data extents, clone or contiguous-post-roll policy,
+and the smoothstep weights for every mixed frame. Source clip PTS is recorded
+independently from sensor time. The frame-540 outgoing RGB samples retain their
+exact validated frame-index-to-observed-simulation-stamp bindings through
+source frame 548.
 Technical receipts currently provide only aggregate source-data extents, so
-their held-frame measurement timestamps remain explicitly unavailable rather
+their per-frame measurement timestamps remain explicitly unavailable rather
 than reusing an extent endpoint.
 
 ## Current new-goal limitations

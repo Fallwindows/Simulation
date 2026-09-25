@@ -595,7 +595,7 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertEqual([item.source_start_frame for item in segments[:5]], [0, 90, 180, 300, 420])
         self.assertEqual([item.source_start_frame for item in segments[5:]], [0] * 7)
         self.assertEqual([item.shot.frame_count for item in segments[5:]], [120, 90, 90, 120, 120, 120, 150])
-        self.assertAlmostEqual(segments[4].source_time_range_s[1], 539 / 30.0)
+        self.assertAlmostEqual(segments[4].source_time_range_s[1], 548 / 30.0)
         self.assertEqual(len({item.video_sha256 for item in segments[5:]}), 7)
 
     def test_real_renderer_receipts_round_trip_across_windows_crlf_checkout(self):
@@ -733,6 +733,11 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertTrue(all(item["frame_budget_delta"] == 0 for item in manifest["transitions"]))
         self.assertTrue(all(item["presentation_transform"] == PRESENTATION_TRANSFORM_HFLIP for item in manifest["shots"][:5]))
         self.assertTrue(all(item["presentation_transform"] is None for item in manifest["shots"][5:]))
+        self.assertEqual(manifest["shots"][4]["source_end_frame_exclusive"], 549)
+        self.assertEqual(
+            [item["source_end_frame_exclusive"] for item in manifest["shots"][:4]],
+            [90, 180, 300, 420],
+        )
         from PIL import Image
 
         frame = Image.open(output / manifest["representative_frames"][0]["path"])

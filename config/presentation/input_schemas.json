@@ -168,6 +168,18 @@
     "schema_id": "simulation.presentation.complete_bundle.v4",
     "producer_id": "simulator.presentation.complete_bundle_emitter.v1",
     "technical_producer_id": "grocery_sim.technical_views.cpu.v1",
+    "required_rgb_source_bindings": [
+      "view_video_sha256",
+      "frame_index_sha256",
+      "required_source_frame_end_exclusive",
+      "postroll"
+    ],
+    "frame_540_sampling": {
+      "outgoing": "contiguous RGB source frames 531-548 with observed stamps",
+      "postroll": "source frames 540-548",
+      "incoming": "nine cloned technical start frames; measurement time unavailable without producer mapping",
+      "classification": "editorial temporal blend; not co-timed and not sensor/geometry fusion"
+    },
     "technical_views": [
       "sensor_activation",
       "lidar_environment",

@@ -36,7 +36,7 @@
             "frame_count": 9,
             "source_frame_start": 540,
             "source_frame_end_exclusive": 549,
-            "reason": "M1 remains in forward cruise through the outgoing half-window"
+            "reason": "M1 remains in forward cruise at 1.13889 m/s through the outgoing half-window"
           },
           "incoming": {
             "mode": "edge_clone",

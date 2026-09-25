@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .provenance import sha256_path, source_text_sha256, validate_presentation_transform
+from .provenance import (
+    RGB_TIMESTAMP_PERIOD_S,
+    RGB_TIMESTAMP_TOLERANCE_S,
+    sha256_path,
+    source_text_sha256,
+    validate_presentation_transform,
+)
 from .technical_bundle import ValidatedTechnicalDelivery, validate_technical_delivery
 
 
@@ -87,6 +93,8 @@ def _rgb_sources(
     presentation_transform = validate_presentation_transform(receipt.get("presentation_transform"))
     capture_manifest = _json(role.artifacts["capture_manifest"])
     for artifact_name in ("view_video", "frame_index"):
+        if not role.artifacts[artifact_name].is_file():
+            raise ValueError(f"RGB {artifact_name} is missing after hash-bound role validation")
         if sha256_path(role.artifacts[artifact_name]) != role.artifact_sha256[artifact_name]:
             raise ValueError(f"RGB {artifact_name} changed after hash-bound role validation")
     rows = []
@@ -104,6 +112,11 @@ def _rgb_sources(
         raise ValueError("RGB frame index must cover contiguous observed source frames 0-548")
     if any(not (first < second) for first, second in zip(observed_stamps, observed_stamps[1:])):
         raise ValueError("RGB observed stamps through source frame 548 must be strictly increasing")
+    if any(
+        abs((second - first) - RGB_TIMESTAMP_PERIOD_S) > RGB_TIMESTAMP_TOLERANCE_S
+        for first, second in zip(observed_stamps, observed_stamps[1:])
+    ):
+        raise ValueError("RGB observed stamps through source frame 548 must be contiguous at 30 fps")
     video_probe = probe_video(role.artifacts["view_video"], ffprobe)
     if video_probe["frame_count"] < required_end:
         raise ValueError("RGB video must contain source frames 0-548 for the moving post-roll")
@@ -118,6 +131,7 @@ def _rgb_sources(
             raise ValueError(f"RGB source-frame mapping is not contiguous for shot {shot.number:02d}")
         transition_boundary_frame = None
         transition_source_samples: tuple[tuple[int, float], ...] = ()
+        source_last_stamp = float(selected[-1]["stamp_s"])
         outgoing_transition = plan.transition_for_boundary(shot.end_frame_exclusive)
         if outgoing_transition is not None and outgoing_transition.outgoing_sampling.mode == "contiguous_postroll":
             transition_boundary_frame = outgoing_transition.boundary_frame
@@ -129,6 +143,7 @@ def _rgb_sources(
             transition_source_samples = tuple(
                 (int(row["frame_index"]), float(row["stamp_s"])) for row in transition_rows
             )
+            source_last_stamp = transition_source_samples[-1][1]
         shots.append(
             CompleteShotSource(
                 shot.number,
@@ -136,7 +151,7 @@ def _rgb_sources(
                 role.artifact_sha256["view_video"],
                 source_start,
                 shot.frame_count,
-                (float(selected[0]["stamp_s"]), float(selected[-1]["stamp_s"])),
+                (float(selected[0]["stamp_s"]), source_last_stamp),
                 "rgb_frames.jsonl:stamp_s",
                 "rgb_capture",
                 "rgb",
