@@ -197,6 +197,7 @@ function Start-SlamAttempt {
     [string]$ContainmentRoot,
     [string]$SlamRoot = "",
     [string]$LogsDirectory = "",
+    [scriptblock]$BeforeChildCreationHook = $null,
     [scriptblock]$BeforeMutationHook = $null
   )
   $guards = [System.Collections.Generic.List[System.IDisposable]]::new()
@@ -204,6 +205,10 @@ function Start-SlamAttempt {
   try {
     Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $SlamDirectory
     if ([string]::IsNullOrWhiteSpace($SlamRoot)) { $SlamRoot = $SlamDirectory }
+    if (-not [string]::IsNullOrWhiteSpace($LogsDirectory)) {
+      Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $LogsDirectory
+    }
+    Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $SlamRoot
     foreach ($guardRequest in @(
       [pscustomobject]@{path=$ContainmentRoot; label="Run directory"}
       [pscustomobject]@{path=$LogsDirectory; label="Log directory"}
@@ -214,6 +219,10 @@ function Start-SlamAttempt {
       if (-not [string]::IsNullOrWhiteSpace($guardPath)) {
         $guardPath = [System.IO.Path]::GetFullPath($guardPath).TrimEnd([char]92,[char]47)
         if ($guardedPaths.Add($guardPath)) {
+          if (-not $guardPath.Equals([System.IO.Path]::GetFullPath($ContainmentRoot).TrimEnd([char]92,[char]47), [System.StringComparison]::OrdinalIgnoreCase)) {
+            if ($BeforeChildCreationHook) { & $BeforeChildCreationHook $guardPath ([string]$guardRequest.label) }
+            New-Item -ItemType Directory -Force -Path $guardPath | Out-Null
+          }
           $guards.Add((Open-DirectoryMutationGuard -Path $guardPath -Label ([string]$guardRequest.label)))
         }
       }
@@ -270,10 +279,6 @@ function Start-SlamAttempt {
     throw
   }
 }
-Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $logsDir
-New-Item -ItemType Directory -Force -Path $slamDir,$logsDir | Out-Null
-Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $slamDir
-Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $logsDir
 $slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir -ContainmentRoot $runDir -SlamRoot ([string]$slamSelection.slam_root) -LogsDirectory $logsDir
 
 $manifestPath = Join-Path $captureDir "capture_manifest.json"

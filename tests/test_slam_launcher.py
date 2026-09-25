@@ -408,6 +408,91 @@ $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultPath -Encodi
         result_path.unlink()
         return result
 
+    def _run_precreation_race_harness(self, run_directory: Path, outside_directory: Path) -> dict:
+        result_path = run_directory.parent / f"precreation-result-{time.time_ns()}.json"
+        harness = run_directory.parent / f"precreation-harness-{time.time_ns()}.ps1"
+        harness.write_text(
+            r'''param(
+  [string]$LauncherPath,
+  [string]$RunDirectory,
+  [string]$OutsideDirectory,
+  [string]$ResultPath
+)
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
+foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Open-DirectoryMutationGuard","Start-SlamAttempt")) {
+  $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
+  if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
+  Invoke-Expression $definition[0].Extent.Text
+}
+$script:hookInvocations = 0
+$script:hookFailure = $null
+$script:replacementCreated = $false
+$renamedRun = $RunDirectory + "-checked"
+$hook = {
+  param($childPath, $label)
+  $script:hookInvocations += 1
+  if ($script:hookInvocations -ne 1) { return }
+  try {
+    Move-Item -LiteralPath $RunDirectory -Destination $renamedRun -ErrorAction Stop
+    New-Item -ItemType Junction -Path $RunDirectory -Target $OutsideDirectory -ErrorAction Stop | Out-Null
+    $script:replacementCreated = $true
+  } catch {
+    $script:hookFailure = $_.Exception.Message
+  }
+}
+$attempt = Start-SlamAttempt `
+  -SlamDirectory (Join-Path $RunDirectory "slam\selected") `
+  -ContainmentRoot $RunDirectory `
+  -SlamRoot (Join-Path $RunDirectory "slam") `
+  -LogsDirectory (Join-Path $RunDirectory "logs") `
+  -BeforeChildCreationHook $hook
+$guardCount = @($attempt.mutation_guards).Count
+foreach ($guard in @($attempt.mutation_guards)) { $guard.Dispose() }
+[ordered]@{
+  hook_invocations=$script:hookInvocations
+  hook_failure=$script:hookFailure
+  replacement_created=$script:replacementCreated
+  run_is_junction=((Get-Item -LiteralPath $RunDirectory -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+  renamed_run_exists=(Test-Path -LiteralPath $renamedRun)
+  logs_exists=(Test-Path -LiteralPath (Join-Path $RunDirectory "logs"))
+  slam_root_exists=(Test-Path -LiteralPath (Join-Path $RunDirectory "slam"))
+  selected_exists=(Test-Path -LiteralPath (Join-Path $RunDirectory "slam\selected"))
+  attempt_receipt_exists=(Test-Path -LiteralPath (Join-Path $attempt.attempt_directory "attempt.json"))
+  guard_count=$guardCount
+} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+''',
+            encoding="utf-8",
+        )
+        process = subprocess.run(
+            [
+                self.pwsh,
+                "-NoProfile",
+                "-File",
+                str(harness),
+                "-LauncherPath",
+                str(LAUNCHER),
+                "-RunDirectory",
+                str(run_directory),
+                "-OutsideDirectory",
+                str(outside_directory),
+                "-ResultPath",
+                str(result_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+        harness.unlink()
+        result_path.unlink()
+        return result
+
     def test_launcher_parses_without_powershell_errors(self):
         command = (
             "$tokens=$null; $errors=$null; "
@@ -707,6 +792,40 @@ Wait-Process -Id $child.Id
                 for path, (expected_hash, expected_mtime) in sentinel_state.items():
                     self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected_hash)
                     self.assertEqual(path.stat().st_mtime_ns, expected_mtime)
+
+    def test_run_is_leased_before_initial_output_directory_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "run"
+            outside = root / "outside"
+            run.mkdir()
+            outside.mkdir()
+            outside_manifest = outside / "slam_manifest.json"
+            outside_database = outside / "rtabmap.db"
+            outside_manifest.write_text(json.dumps({"status": "complete", "sentinel": "outside"}), encoding="utf-8")
+            outside_database.write_bytes(b"outside-database")
+            sentinel_state = {
+                path: (hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_mtime_ns)
+                for path in (outside_manifest, outside_database)
+            }
+
+            result = self._run_precreation_race_harness(run, outside)
+
+            self.assertEqual(result["hook_invocations"], 3)
+            self.assertIsNotNone(result["hook_failure"])
+            self.assertFalse(result["replacement_created"])
+            self.assertFalse(result["run_is_junction"])
+            self.assertFalse(result["renamed_run_exists"])
+            self.assertTrue(result["logs_exists"])
+            self.assertTrue(result["slam_root_exists"])
+            self.assertTrue(result["selected_exists"])
+            self.assertTrue(result["attempt_receipt_exists"])
+            self.assertEqual(result["guard_count"], 7)
+            self.assertFalse((outside / "logs").exists())
+            self.assertFalse((outside / "slam").exists())
+            for path, (expected_hash, expected_mtime) in sentinel_state.items():
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected_hash)
+                self.assertEqual(path.stat().st_mtime_ns, expected_mtime)
 
 
 if __name__ == "__main__":
