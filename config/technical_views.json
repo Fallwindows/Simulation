@@ -19,7 +19,7 @@
       "capability_focus": "camera-aligned corridor boundaries and near-surface returns",
       "point_source": "raw timestamped PointCloud2 returns selected from corridor sides and near surfaces by nearest projected cell",
       "selective_current_scan_status": "complete", "selection_mode": "camera_occlusion_surfaces",
-      "temporal_mode": "current_window", "source_window_s": [2.0, 5.9], "rgb_context": true,
+      "temporal_mode": "current_window", "source_window_s": [2.0, 5.9], "display_window_s": [2.0, 5.9], "rgb_context": true,
       "maximum_points": 1000, "history_stride_scans": 1
     },
     {
@@ -28,7 +28,7 @@
       "capability_focus": "obstacle and traversable-boundary perception",
       "point_source": "raw current PointCloud2 returns filtered by sensor-frame range and boundary geometry",
       "selective_current_scan_status": "complete", "selection_mode": "navigation_boundaries",
-      "temporal_mode": "current_window", "source_window_s": [5.9, 8.8], "rgb_context": false,
+      "temporal_mode": "current_window", "source_window_s": [5.9, 8.8], "display_window_s": [5.9, 8.8], "rgb_context": false,
       "maximum_points": 3000, "history_stride_scans": 1
     },
     {
@@ -37,7 +37,7 @@
       "capability_focus": "persistent mapping from observed structure",
       "point_source": "bounded structural subsets of raw scans at or before the displayed cutoff",
       "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
-      "temporal_mode": "past_only_reveal", "source_window_s": [8.8, 11.7], "rgb_context": false,
+      "temporal_mode": "past_only_reveal", "source_window_s": [0.2, 11.7], "display_window_s": [8.8, 11.7], "rgb_context": false,
       "maximum_points": 22000, "history_stride_scans": 3
     },
     {
@@ -46,7 +46,7 @@
       "capability_focus": "estimated object-region association",
       "point_source": "front-surface raw returns inside ground-truth-free estimated RGB regions",
       "selective_current_scan_status": "complete", "selection_mode": "estimated_roi_front_surfaces",
-      "temporal_mode": "snapshot_orbit", "source_window_s": [10.8, 12.8], "rgb_context": false,
+      "temporal_mode": "snapshot_orbit", "source_window_s": [0.2, 12.8], "display_window_s": [10.8, 12.8], "rgb_context": false,
       "maximum_points": 8000, "history_stride_scans": 4
     },
     {
@@ -55,7 +55,7 @@
       "capability_focus": "one estimated region and its measured support",
       "point_source": "one selected estimated RGB region with nearest front-surface raw returns",
       "selective_current_scan_status": "complete", "selection_mode": "estimated_roi_front_surfaces",
-      "temporal_mode": "snapshot_orbit", "source_window_s": [10.8, 12.8], "rgb_context": false,
+      "temporal_mode": "snapshot_orbit", "source_window_s": [0.2, 12.8], "display_window_s": [10.8, 12.8], "rgb_context": false,
       "maximum_points": 3600, "history_stride_scans": 4
     },
     {
@@ -64,7 +64,7 @@
       "capability_focus": "integrated observed-aisle overview",
       "point_source": "past-only structural raw-return subsets and estimated trajectory",
       "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
-      "temporal_mode": "past_only_orbit", "source_window_s": [12.8, 17.4], "rgb_context": false,
+      "temporal_mode": "past_only_orbit", "source_window_s": [0.2, 17.4], "display_window_s": [12.8, 17.4], "rgb_context": false,
       "maximum_points": 26000, "history_stride_scans": 3
     },
     {
@@ -73,7 +73,7 @@
       "capability_focus": "final technical summary",
       "point_source": "past-only structural raw-return subsets and estimated trajectory",
       "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
-      "temporal_mode": "past_only_orbit", "source_window_s": [17.4, 18.5], "rgb_context": false,
+      "temporal_mode": "past_only_orbit", "source_window_s": [0.2, 18.5], "display_window_s": [17.4, 18.5], "rgb_context": false,
       "maximum_points": 18000, "history_stride_scans": 3
     }
   ]

@@ -292,6 +292,11 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     specs_by_id = {spec.id: spec for spec in technical_specs}
     outputs = []
     for view_id, role, frame_count, color in VIEWS:
+        view_spec = specs_by_id[view_id]
+        scan_timestamp_s = float(view_spec.display_window_s[0])
+        scan_timestamp_ns = int(round(scan_timestamp_s * 1_000_000_000))
+        is_roi_view = view_spec.selection_mode == "estimated_roi_front_surfaces"
+        primary_scan_hash = digest(f"roi {view_id}") if is_roi_view else digest(f"scan {view_id}")
         view_video = technical_dir / f"{view_id}_1080p.mp4"
         _video(ffmpeg, view_video, frame_count, color)
         video_hash = sha256(view_video)
@@ -301,13 +306,14 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             renderer_bundle, renderer_hash, dependency_hashes, plan_hash,
             {
                 "point_projection": "generated fixture projection",
-                "selection_mode": specs_by_id[view_id].selection_mode,
-                "temporal_mode": specs_by_id[view_id].temporal_mode,
-                "source_window_s": list(specs_by_id[view_id].source_window_s),
-                "rendered_context_point_budget": specs_by_id[view_id].maximum_points,
+                "selection_mode": view_spec.selection_mode,
+                "temporal_mode": view_spec.temporal_mode,
+                "source_window_s": list(view_spec.source_window_s),
+                "display_window_s": list(view_spec.display_window_s),
+                "rendered_context_point_budget": view_spec.maximum_points,
                 "context_treatment": (
                     "local sparse structural silhouette around the estimated ROI"
-                    if specs_by_id[view_id].selection_mode == "estimated_roi_front_surfaces"
+                    if is_roi_view
                     else "bounded structural or current-return subset"
                 ),
                 "future_returns_consumed": False,
@@ -317,16 +323,31 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                 "scene_or_asset_metadata_consumed": False,
                 "selective_current_scan_status": "complete",
                 "scan_selection": {
-                    "scan_count": 1, "selected_return_count": 3,
+                    "scan_count": 1, "time_range_s": [scan_timestamp_s, scan_timestamp_s],
+                    "selected_return_count": 3,
                     "scans": [{
-                        "message_id": 1, "timestamp_ns": 200000000, "raw_point_count": 6,
-                        "selected_return_count": 3, "selected_raw_indices_sha256": digest(f"scan {view_id}"),
-                        "selection_mode": specs_by_id[view_id].selection_mode,
+                        "message_id": 1, "timestamp_ns": scan_timestamp_ns, "raw_point_count": 6,
+                        "selected_return_count": 3, "selected_raw_indices_sha256": primary_scan_hash,
+                        "selection_mode": view_spec.selection_mode,
                         "source_frame_id": "lidar_link", "point_fields": ["x", "y", "z", "intensity"],
                         "per_return_timing": "absent_in_point_fields; rigid_header_stamp_projection_without_deskew",
                     }],
                 },
-                "rgb_context": specs_by_id[view_id].rgb_context,
+                **({
+                    "context_scan_selection": {
+                        "scan_count": 1, "time_range_s": [scan_timestamp_s, scan_timestamp_s],
+                        "selected_return_count": 3,
+                        "scans": [{
+                            "message_id": 1, "timestamp_ns": scan_timestamp_ns, "raw_point_count": 6,
+                            "selected_return_count": 3,
+                            "selected_raw_indices_sha256": digest(f"context {view_id}"),
+                            "selection_mode": "past_structural_history", "source_frame_id": "lidar_link",
+                            "point_fields": ["x", "y", "z", "intensity"],
+                            "per_return_timing": "absent_in_point_fields; rigid_header_stamp_projection_without_deskew",
+                        }],
+                    }
+                } if is_roi_view else {}),
+                "rgb_context": view_spec.rgb_context,
                 "scan_time_model": {
                     "per_return_timing": "absent_in_bound_PointCloud2_fields", "deskew": "not_applied",
                     "rigid_pose_time": "PointCloud2 header/database timestamp",
@@ -339,19 +360,19 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                 },
                 **({
                     "cotimed_rgb_pairs": {"pair_count": 1, "maximum_absolute_skew_ns": 0, "pairs": [
-                        {"scan_timestamp_ns": 200000000, "rgb_frame_index": 3, "absolute_skew_ns": 0}
+                        {"scan_timestamp_ns": scan_timestamp_ns, "rgb_frame_index": 3, "absolute_skew_ns": 0}
                     ]}
-                } if specs_by_id[view_id].rgb_context else {}),
+                } if view_spec.rgb_context else {}),
                 **({
                     "estimated_roi_selection": {"roi_count": 1, "rois": [{
-                        "scan_message_id": 1, "scan_timestamp_ns": 200000000, "rgb_frame_index": 3,
-                        "rgb_timestamp_s": 0.2, "track_id": 7, "raw_track_id": 11,
+                        "scan_message_id": 1, "scan_timestamp_ns": scan_timestamp_ns, "rgb_frame_index": 3,
+                        "rgb_timestamp_s": scan_timestamp_s, "track_id": 7, "raw_track_id": 11,
                         "absolute_rgb_skew_ns": 0,
                         "bbox_xyxy": [1, 1, 4, 4], "selected_return_count": 3,
-                        "selected_raw_indices_sha256": digest(f"roi {view_id}"),
+                        "selected_raw_indices_sha256": primary_scan_hash,
                         "selection": "bbox_nearest_front_surface",
                     }]}
-                } if specs_by_id[view_id].selection_mode == "estimated_roi_front_surfaces" else {}),
+                } if is_roi_view else {}),
             },
         )
         outputs.append({

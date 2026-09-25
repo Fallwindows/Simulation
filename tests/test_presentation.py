@@ -679,6 +679,109 @@ class CompletePresentationTests(unittest.TestCase):
                 bad_implementation, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
             )
 
+    def test_technical_receipt_cross_field_contradictions_are_rejected(self):
+        attacks = [
+            (
+                "scan_outside_window", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].update(
+                    timestamp_ns=999_000_000_000
+                ),
+                "outside the source window",
+            ),
+            (
+                "wrong_scan_selection_mode", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].update(
+                    selection_mode="past_structural_history"
+                ),
+                "selected-return receipt row",
+            ),
+            (
+                "forged_aggregate_count", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"].update(
+                    selected_return_count=999999
+                ),
+                "aggregate selected-return count",
+            ),
+            (
+                "forged_aggregate_time_range", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"].update(
+                    time_range_s=[0.0, 0.0]
+                ),
+                "aggregate time range",
+            ),
+            (
+                "wrong_roi_context", 3,
+                lambda receipt: receipt["derivation"].update(
+                    context_treatment="bounded structural or current-return subset"
+                ),
+                "context treatment",
+            ),
+            (
+                "missing_roi_method", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop("selection"),
+                "ROI method/index receipt",
+            ),
+            (
+                "missing_roi_index_hash", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "selected_raw_indices_sha256"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
+                "missing_roi_count", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "selected_return_count"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
+                "missing_roi_bbox", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "bbox_xyxy"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
+                "wrong_roi_message", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    scan_message_id=999
+                ),
+                "not bound to a valid in-window selected scan",
+            ),
+            (
+                "roi_timestamp_outside_window", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    scan_timestamp_ns=999_000_000_000
+                ),
+                "not bound to a valid in-window selected scan",
+            ),
+            (
+                "rgb_pair_not_selected", 0,
+                lambda receipt: receipt["derivation"]["cotimed_rgb_pairs"]["pairs"][0].update(
+                    scan_timestamp_ns=3_000_000_000
+                ),
+                "does not bind a selected current scan",
+            ),
+        ]
+        for name, output_index, mutate, message in attacks:
+            with self.subTest(name=name):
+                forged = self._mutated_technical_receipt(name, output_index, mutate)
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_technical_delivery(
+                        forged, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+                    )
+
+        def duplicate_scan(receipt):
+            selection = receipt["derivation"]["scan_selection"]
+            selection["scans"].append(dict(selection["scans"][0]))
+            selection["scan_count"] = 2
+            selection["selected_return_count"] *= 2
+
+        forged = self._mutated_technical_receipt("duplicate_scan", 0, duplicate_scan)
+        with self.assertRaisesRegex(ValueError, "selected-return receipt row"):
+            validate_technical_delivery(forged, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
     def test_complete_preview_is_exact_and_applies_declared_rgb_hflip(self):
         output = self.root / "preview"
         mutated_inputs = self.fixture["complete_inputs"].with_name("label_mutated_complete_inputs.json")

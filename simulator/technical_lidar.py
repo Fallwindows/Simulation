@@ -94,6 +94,10 @@ class RoiObservation:
     depth_m: np.ndarray
     raw_point_indices: np.ndarray
     absolute_rgb_skew_ns: int
+    raw_point_count: int
+    source_frame_id: str
+    point_fields: tuple[str, ...]
+    per_return_timing: str
 
 
 def _indices_sha256(indices: np.ndarray) -> str:
@@ -619,12 +623,16 @@ class SelectiveLidarSource:
             self._selection_cache.popitem(last=False)
         return cached
 
-    def history_scans(self, cutoff_s: float, stride: int, limit_per_scan: int) -> tuple[PreparedScan, ...]:
+    def history_scans(
+        self, start_s: float, cutoff_s: float, stride: int, limit_per_scan: int,
+    ) -> tuple[PreparedScan, ...]:
         if stride <= 0:
             raise ValueError("history stride must be positive")
         eligible = [
             item for item in self.scan_records
-            if self.trajectory.timestamps_s[0] - 1e-9 <= item.timestamp_s <= min(cutoff_s, self.trajectory.timestamps_s[-1]) + 1e-9
+            if max(start_s, self.trajectory.timestamps_s[0]) - 1e-9
+            <= item.timestamp_s
+            <= min(cutoff_s, self.trajectory.timestamps_s[-1]) + 1e-9
         ]
         return tuple(
             self.prepare_scan(record, "past_structural_history", limit_per_scan)
@@ -651,7 +659,7 @@ class SelectiveLidarSource:
         candidates.sort(key=lambda item: (item[0], item[1], item[2].timestamp_ns))
         result: list[RoiObservation] = []
         for _negative_count, _distance, record, frame, detections in candidates[:8]:
-            projected, _raw_count, _field_names = self._projected(record)
+            projected, raw_count, field_names = self._projected(record)
             ranked = sorted(
                 detections,
                 key=lambda item: -((item.bbox_xyxy[2] - item.bbox_xyxy[0] + 1.0) * (item.bbox_xyxy[3] - item.bbox_xyxy[1] + 1.0)),
@@ -674,6 +682,10 @@ class SelectiveLidarSource:
                         support.depth_m,
                         support.raw_point_indices,
                         int(round(abs(frame.timestamp_s - record.timestamp_s) * 1_000_000_000)),
+                        raw_count,
+                        self.lidar_frame_id,
+                        field_names,
+                        "absent_in_point_fields; rigid_header_stamp_projection_without_deskew",
                     )
                 )
                 if len(result) >= limit:
@@ -744,4 +756,41 @@ class SelectiveLidarSource:
                 }
                 for item in values
             ],
+        }
+
+    @staticmethod
+    def roi_scan_summary(observations: Iterable[RoiObservation]) -> dict[str, object]:
+        values = tuple(observations)
+        grouped: dict[tuple[int, int], list[RoiObservation]] = {}
+        for item in values:
+            grouped.setdefault((item.record.timestamp_ns, item.record.message_id), []).append(item)
+        rows: list[dict[str, object]] = []
+        for (timestamp_ns, message_id), items in sorted(grouped.items()):
+            selected = np.unique(np.concatenate([item.raw_point_indices for item in items])).astype(np.int64)
+            first = items[0]
+            if any(
+                item.raw_point_count != first.raw_point_count
+                or item.source_frame_id != first.source_frame_id
+                or item.point_fields != first.point_fields
+                or item.per_return_timing != first.per_return_timing
+                for item in items[1:]
+            ):
+                raise ValueError("ROI observations from one scan have inconsistent source metadata")
+            rows.append({
+                "message_id": message_id,
+                "timestamp_ns": timestamp_ns,
+                "raw_point_count": first.raw_point_count,
+                "selected_return_count": len(selected),
+                "selected_raw_indices_sha256": _indices_sha256(selected),
+                "selection_mode": "estimated_roi_front_surfaces",
+                "source_frame_id": first.source_frame_id,
+                "point_fields": list(first.point_fields),
+                "per_return_timing": first.per_return_timing,
+            })
+        return {
+            "scan_count": len(rows),
+            "time_range_s": [rows[0]["timestamp_ns"] / 1_000_000_000.0, rows[-1]["timestamp_ns"] / 1_000_000_000.0]
+            if rows else None,
+            "selected_return_count": sum(int(row["selected_return_count"]) for row in rows),
+            "scans": rows,
         }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import subprocess
 from dataclasses import dataclass
 from fractions import Fraction
@@ -137,6 +138,81 @@ def _require_git_commit(repo_root: Path, revision: object, producer: str) -> str
     if result.returncode:
         raise ValueError(f"technical {producer} revision is not a repository commit")
     return value
+
+
+def _plain_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_scan_selection(
+    selection: object,
+    *,
+    view_id: str,
+    label: str,
+    expected_mode: str,
+    source_window_s: tuple[float, float],
+    lidar_frame_id: str,
+) -> tuple[dict[str, Any], ...]:
+    if not isinstance(selection, dict) or set(selection) != {
+        "scan_count", "time_range_s", "selected_return_count", "scans",
+    }:
+        raise ValueError(f"technical {label} schema is invalid for {view_id}")
+    rows = selection.get("scans")
+    if (
+        not isinstance(rows, list)
+        or not rows
+        or not _plain_int(selection.get("scan_count"))
+        or selection["scan_count"] != len(rows)
+    ):
+        raise ValueError(f"technical {label} scan list is invalid for {view_id}")
+    validated: list[dict[str, Any]] = []
+    prior_timestamp = -1
+    message_ids: set[int] = set()
+    timing_fields = {"time", "t", "timestamp", "offset_time", "time_offset", "timestamp_ns"}
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {
+            "message_id", "timestamp_ns", "raw_point_count", "selected_return_count",
+            "selected_raw_indices_sha256", "selection_mode", "source_frame_id", "point_fields",
+            "per_return_timing",
+        }:
+            raise ValueError(f"technical {label} selected-return receipt row schema is invalid for {view_id}")
+        fields = row.get("point_fields")
+        message_id = row.get("message_id")
+        timestamp_ns = row.get("timestamp_ns")
+        raw_count = row.get("raw_point_count")
+        selected_count = row.get("selected_return_count")
+        if (
+            not all(_plain_int(value) for value in (message_id, timestamp_ns, raw_count, selected_count))
+            or message_id <= 0
+            or timestamp_ns <= prior_timestamp
+            or message_id in message_ids
+            or raw_count <= 0
+            or selected_count <= 0
+            or selected_count > raw_count
+            or not SHA256_PATTERN.fullmatch(str(row.get("selected_raw_indices_sha256", "")))
+            or row.get("selection_mode") != expected_mode
+            or row.get("source_frame_id") != lidar_frame_id
+            or not isinstance(fields, list)
+            or not all(isinstance(name, str) and name for name in fields)
+            or len(fields) != len(set(fields))
+            or not {"x", "y", "z"}.issubset(fields)
+            or any(name in timing_fields for name in fields)
+            or row.get("per_return_timing") != PER_RETURN_TIMING
+        ):
+            raise ValueError(f"technical {label} selected-return receipt row is invalid for {view_id}")
+        timestamp_s = timestamp_ns / 1_000_000_000.0
+        if not (source_window_s[0] - 1e-9 <= timestamp_s <= source_window_s[1] + 1e-9):
+            raise ValueError(f"technical {label} scan timestamp lies outside the source window for {view_id}")
+        prior_timestamp = timestamp_ns
+        message_ids.add(message_id)
+        validated.append(row)
+    expected_count = sum(int(row["selected_return_count"]) for row in validated)
+    if selection.get("selected_return_count") != expected_count:
+        raise ValueError(f"technical {label} aggregate selected-return count is invalid for {view_id}")
+    expected_range = [validated[0]["timestamp_ns"] / 1_000_000_000.0, validated[-1]["timestamp_ns"] / 1_000_000_000.0]
+    if selection.get("time_range_s") != expected_range:
+        raise ValueError(f"technical {label} aggregate time range is invalid for {view_id}")
+    return tuple(validated)
 
 
 def _catalog_source(catalog_path: Path, capture_id: str, source_id: str) -> dict[str, Any]:
@@ -385,12 +461,17 @@ def validate_technical_delivery(
         expected_window = expected_plan.get("source_window_s")
         if derivation.get("source_window_s") != expected_window:
             raise ValueError(f"technical receipt source window is invalid for {view_id}")
+        expected_display_window = expected_plan.get("display_window_s")
+        if derivation.get("display_window_s") != expected_display_window:
+            raise ValueError(f"technical receipt display window is invalid for {view_id}")
         if derivation.get("rendered_context_point_budget") != expected_plan.get("maximum_points"):
             raise ValueError(f"technical receipt context point budget is invalid for {view_id}")
-        if derivation.get("context_treatment") not in {
-            "local sparse structural silhouette around the estimated ROI",
-            "bounded structural or current-return subset",
-        }:
+        is_roi_view = expected_plan.get("selection_mode") == "estimated_roi_front_surfaces"
+        expected_context_treatment = (
+            "local sparse structural silhouette around the estimated ROI"
+            if is_roi_view else "bounded structural or current-return subset"
+        )
+        if derivation.get("context_treatment") != expected_context_treatment:
             raise ValueError(f"technical receipt context treatment is invalid for {view_id}")
         if (
             derivation.get("selective_current_scan_status") != "complete"
@@ -426,50 +507,144 @@ def validate_technical_delivery(
                 raise ValueError(f"technical observed calibration disclosure is invalid for {view_id}")
         else:
             raise ValueError(f"technical camera calibration provenance is unsupported for {view_id}")
-        scan_selection = derivation.get("scan_selection")
-        if not isinstance(scan_selection, dict) or int(scan_selection.get("scan_count", 0)) <= 0:
-            raise ValueError(f"technical receipt has no selected raw scans for {view_id}")
-        scan_rows = scan_selection.get("scans")
-        if not isinstance(scan_rows, list) or len(scan_rows) != scan_selection.get("scan_count"):
-            raise ValueError(f"technical scan receipt list is invalid for {view_id}")
-        for scan in scan_rows:
-            fields = scan.get("point_fields") if isinstance(scan, dict) else None
-            if (
-                not isinstance(scan, dict)
-                or int(scan.get("raw_point_count", 0)) <= 0
-                or int(scan.get("selected_return_count", 0)) <= 0
-                or not SHA256_PATTERN.fullmatch(str(scan.get("selected_raw_indices_sha256", "")))
-                or scan.get("source_frame_id") != source["paired_capture_state"]["lidar_frame_id"]
-                or not isinstance(fields, list)
-                or not {"x", "y", "z"}.issubset(fields)
-                or any(name in {"time", "t", "timestamp", "offset_time", "time_offset", "timestamp_ns"} for name in fields)
-                or scan.get("per_return_timing") != PER_RETURN_TIMING
-            ):
-                raise ValueError(f"technical selected-return receipt is invalid for {view_id}")
+        source_window = tuple(float(value) for value in expected_window)
+        display_window = tuple(float(value) for value in expected_display_window)
+        primary_window = display_window if (
+            expected_plan.get("temporal_mode") == "current_window" or is_roi_view
+        ) else source_window
+        scan_rows = _validate_scan_selection(
+            derivation.get("scan_selection"),
+            view_id=view_id,
+            label="primary scan selection",
+            expected_mode=str(expected_plan.get("selection_mode")),
+            source_window_s=primary_window,
+            lidar_frame_id=str(source["paired_capture_state"]["lidar_frame_id"]),
+        )
+        scan_by_timestamp = {int(row["timestamp_ns"]): row for row in scan_rows}
+        scan_by_identity = {(int(row["message_id"]), int(row["timestamp_ns"])): row for row in scan_rows}
+        if is_roi_view:
+            _validate_scan_selection(
+                derivation.get("context_scan_selection"),
+                view_id=view_id,
+                label="ROI context scan selection",
+                expected_mode="past_structural_history",
+                source_window_s=source_window,
+                lidar_frame_id=str(source["paired_capture_state"]["lidar_frame_id"]),
+            )
+        elif "context_scan_selection" in derivation:
+            raise ValueError(f"technical non-ROI receipt has unexpected context scan selection for {view_id}")
         if bool(expected_plan.get("rgb_context")):
             pairs = derivation.get("cotimed_rgb_pairs")
-            if (
-                not isinstance(pairs, dict)
-                or int(pairs.get("pair_count", 0)) <= 0
-                or int(pairs.get("maximum_absolute_skew_ns", 99_999_999)) > 17_000_001
-            ):
+            pair_rows = pairs.get("pairs") if isinstance(pairs, dict) else None
+            if not isinstance(pairs, dict) or set(pairs) != {
+                "pair_count", "maximum_absolute_skew_ns", "pairs",
+            } or not isinstance(pair_rows, list) or not pair_rows:
                 raise ValueError(f"technical current scan lacks co-timed RGB binding for {view_id}")
-        if expected_plan.get("selection_mode") == "estimated_roi_front_surfaces":
+            seen_pairs: set[tuple[int, int]] = set()
+            skews: list[int] = []
+            paired_scan_timestamps: set[int] = set()
+            for pair in pair_rows:
+                if not isinstance(pair, dict) or set(pair) != {
+                    "scan_timestamp_ns", "rgb_frame_index", "absolute_skew_ns",
+                }:
+                    raise ValueError(f"technical RGB pair schema is invalid for {view_id}")
+                scan_timestamp = pair.get("scan_timestamp_ns")
+                frame_index = pair.get("rgb_frame_index")
+                skew_ns = pair.get("absolute_skew_ns")
+                identity = (scan_timestamp, frame_index)
+                if (
+                    not all(_plain_int(value) for value in (scan_timestamp, frame_index, skew_ns))
+                    or scan_timestamp not in scan_by_timestamp
+                    or frame_index < 0
+                    or skew_ns < 0
+                    or skew_ns > source["paired_capture_state"]["maximum_rgb_skew_ns"]
+                    or identity in seen_pairs
+                ):
+                    raise ValueError(f"technical RGB pair does not bind a selected current scan for {view_id}")
+                seen_pairs.add(identity)
+                skews.append(skew_ns)
+                paired_scan_timestamps.add(scan_timestamp)
+            if (
+                pairs.get("pair_count") != len(pair_rows)
+                or pairs.get("maximum_absolute_skew_ns") != max(skews)
+                or paired_scan_timestamps != set(scan_by_timestamp)
+            ):
+                raise ValueError(f"technical RGB pair aggregates are invalid for {view_id}")
+        elif "cotimed_rgb_pairs" in derivation:
+            raise ValueError(f"technical non-RGB receipt has unexpected co-timed RGB pairs for {view_id}")
+        if is_roi_view:
             rois = derivation.get("estimated_roi_selection")
             roi_rows = rois.get("rois") if isinstance(rois, dict) else None
             if (
                 not isinstance(rois, dict)
-                or int(rois.get("roi_count", 0)) <= 0
+                or not _plain_int(rois.get("roi_count"))
+                or rois["roi_count"] <= 0
                 or not isinstance(roi_rows, list)
-                or len(roi_rows) != int(rois.get("roi_count", 0))
+                or len(roi_rows) != rois["roi_count"]
             ):
                 raise ValueError(f"technical estimated ROI support is missing for {view_id}")
-            if any(
-                not isinstance(roi, dict) or int(roi.get("absolute_rgb_skew_ns", 99_999_999)) > 17_000_001
-                for roi in roi_rows
+            seen_rois: set[tuple[object, ...]] = set()
+            referenced_scans: set[tuple[int, int]] = set()
+            roi_count_by_scan: dict[tuple[int, int], int] = {}
+            for roi in roi_rows:
+                if not isinstance(roi, dict) or set(roi) != {
+                    "scan_message_id", "scan_timestamp_ns", "rgb_frame_index", "rgb_timestamp_s",
+                    "absolute_rgb_skew_ns", "track_id", "raw_track_id", "bbox_xyxy",
+                    "selected_return_count", "selected_raw_indices_sha256", "selection",
+                }:
+                    raise ValueError(f"technical ROI method/index receipt is invalid for {view_id}")
+                message_id = roi.get("scan_message_id")
+                timestamp_ns = roi.get("scan_timestamp_ns")
+                frame_index = roi.get("rgb_frame_index")
+                rgb_timestamp_s = roi.get("rgb_timestamp_s")
+                skew_ns = roi.get("absolute_rgb_skew_ns")
+                track_id = roi.get("track_id")
+                raw_track_id = roi.get("raw_track_id")
+                count = roi.get("selected_return_count")
+                bbox = roi.get("bbox_xyxy")
+                scan_identity = (message_id, timestamp_ns)
+                if (
+                    not all(_plain_int(value) for value in (message_id, timestamp_ns, frame_index, skew_ns, track_id, count))
+                    or (raw_track_id is not None and not _plain_int(raw_track_id))
+                    or scan_identity not in scan_by_identity
+                    or frame_index < 0
+                    or count <= 0
+                    or count > int(scan_by_identity[scan_identity]["selected_return_count"])
+                    or roi.get("selection") != "bbox_nearest_front_surface"
+                    or not SHA256_PATTERN.fullmatch(str(roi.get("selected_raw_indices_sha256", "")))
+                    or not isinstance(rgb_timestamp_s, (int, float))
+                    or isinstance(rgb_timestamp_s, bool)
+                    or not math.isfinite(float(rgb_timestamp_s))
+                    or not isinstance(bbox, list)
+                    or len(bbox) != 4
+                    or not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) for value in bbox)
+                    or float(bbox[2]) < float(bbox[0])
+                    or float(bbox[3]) < float(bbox[1])
+                    or skew_ns < 0
+                    or skew_ns > source["paired_capture_state"]["maximum_rgb_skew_ns"]
+                    or int(round(abs(float(rgb_timestamp_s) - timestamp_ns / 1_000_000_000.0) * 1_000_000_000)) != skew_ns
+                    or not (
+                        display_window[0] - skew_ns / 1_000_000_000.0 - 1e-9
+                        <= float(rgb_timestamp_s)
+                        <= display_window[1] + skew_ns / 1_000_000_000.0 + 1e-9
+                    )
+                ):
+                    raise ValueError(
+                        f"technical ROI row is not bound to a valid in-window selected scan or co-timed RGB frame for {view_id}"
+                    )
+                identity = (message_id, timestamp_ns, track_id, tuple(float(value) for value in bbox), roi["selected_raw_indices_sha256"])
+                if identity in seen_rois:
+                    raise ValueError(f"technical ROI rows are not unique for {view_id}")
+                seen_rois.add(identity)
+                referenced_scans.add(scan_identity)
+                roi_count_by_scan[scan_identity] = roi_count_by_scan.get(scan_identity, 0) + count
+            if referenced_scans != set(scan_by_identity) or any(
+                int(scan_by_identity[key]["selected_return_count"]) > total
+                for key, total in roi_count_by_scan.items()
             ):
-                raise ValueError(f"technical estimated ROI lacks co-timed RGB binding for {view_id}")
-        source_window = tuple(float(value) for value in expected_window)
+                raise ValueError(f"technical ROI aggregates do not cover the selected ROI scans for {view_id}")
+        elif "estimated_roi_selection" in derivation:
+            raise ValueError(f"technical non-ROI receipt has unexpected ROI selection for {view_id}")
         shots.append(
             TechnicalShotSource(
                 shot_number,

@@ -210,6 +210,13 @@ class TechnicalViewTests(unittest.TestCase):
         )
         self.assertTrue(payload["views"][0]["rgb_context"])
         self.assertTrue(all(not item["rgb_context"] for item in payload["views"][1:]))
+        self.assertTrue(all(
+            item["source_window_s"][0] <= item["display_window_s"][0]
+            <= item["display_window_s"][1] <= item["source_window_s"][1]
+            for item in payload["views"]
+        ))
+        self.assertEqual(payload["views"][-1]["source_window_s"], [0.2, 18.5])
+        self.assertEqual(payload["views"][-1]["display_window_s"], [17.4, 18.5])
 
     def test_numpy_dependent_selectors_and_projection_run_in_subprocess(self):
         script = """

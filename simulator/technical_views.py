@@ -87,6 +87,7 @@ class ViewSpec:
     selection_mode: str
     temporal_mode: str
     source_window_s: tuple[float, float]
+    display_window_s: tuple[float, float]
     rgb_context: bool
     maximum_points: int
     history_stride_scans: int
@@ -202,6 +203,7 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
             **{
                 **item,
                 "source_window_s": tuple(float(value) for value in item["source_window_s"]),
+                "display_window_s": tuple(float(value) for value in item["display_window_s"]),
             }
         )
         for item in payload["views"]
@@ -225,8 +227,15 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
     allowed_temporal = {"current_window", "past_only_reveal", "snapshot_orbit", "past_only_orbit"}
     for view in views:
         start_s, end_s = view.source_window_s
+        display_start_s, display_end_s = view.display_window_s
         if not (math.isfinite(start_s) and math.isfinite(end_s) and 0.0 <= start_s <= end_s):
             raise ValueError(f"technical view {view.id} has an invalid source window")
+        if not (
+            math.isfinite(display_start_s)
+            and math.isfinite(display_end_s)
+            and start_s <= display_start_s <= display_end_s <= end_s
+        ):
+            raise ValueError(f"technical view {view.id} has a display window outside its source dependencies")
         if view.selection_mode not in allowed_modes or view.temporal_mode not in allowed_temporal:
             raise ValueError(f"technical view {view.id} has an unsupported selection or temporal mode")
         if view.maximum_points <= 0 or view.history_stride_scans <= 0:
@@ -845,9 +854,12 @@ class TechnicalRenderer:
         cv2.polylines(frame, [housing], True, (68, 210, 235), max(1, int(2 * scale)), cv2.LINE_AA)
 
     def _current_frame(self, spec: ViewSpec, progress: float) -> tuple[np.ndarray, float, int]:
-        start_s, end_s = spec.source_window_s
+        start_s, end_s = spec.display_window_s
         timestamp_s = start_s + (end_s - start_s) * progress
         previous_record, latest_record, alpha = self.source.causal_scan_pair(timestamp_s)
+        if previous_record.timestamp_s < start_s - 1e-9:
+            previous_record = latest_record
+            alpha = 1.0
         scans = [
             self.source.prepare_scan(previous_record, spec.selection_mode, spec.maximum_points),
             self.source.prepare_scan(latest_record, spec.selection_mode, spec.maximum_points),
@@ -904,13 +916,14 @@ class TechnicalRenderer:
             cv2.circle(frame, tuple(pixels[-1]), max(5, self.profile.height // 100), (68, 241, 255), -1, cv2.LINE_AA)
 
     def _map_frame(self, spec: ViewSpec, progress: float) -> tuple[np.ndarray, float, int, list[tuple[int, tuple[int, int], int]]]:
-        start_s, end_s = spec.source_window_s
+        source_start_s, source_end_s = spec.source_window_s
+        start_s, end_s = spec.display_window_s
         eased = progress * progress * (3.0 - 2.0 * progress)
         cutoff_s = start_s + (end_s - start_s) * eased if spec.temporal_mode == "past_only_reveal" else end_s
         prepared = self._history_views.get(spec.id)
         if prepared is None:
             per_scan_limit = max(400, min(2600, spec.maximum_points // 20))
-            scans = self.source.history_scans(end_s, spec.history_stride_scans, per_scan_limit)
+            scans = self.source.history_scans(source_start_s, source_end_s, spec.history_stride_scans, per_scan_limit)
             if not scans:
                 raise ValueError(f"technical view {spec.id} has no past LiDAR history in its source window")
             all_points = np.concatenate([scan.map_xyz_m for scan in scans], axis=0)
@@ -919,11 +932,9 @@ class TechnicalRenderer:
             self._history_views[spec.id] = prepared
         history, all_points, offsets = prepared
         scan_count = int(np.searchsorted([scan.record.timestamp_s for scan in history], cutoff_s, side="right"))
-        if scan_count <= 0:
-            raise ValueError(f"technical view {spec.id} cutoff precedes its first available past scan")
         for scan in history[:scan_count]:
             self._register_scan(spec.id, scan)
-        point_end = int(offsets[scan_count - 1])
+        point_end = int(offsets[scan_count - 1]) if scan_count else 0
         history_points = all_points[:point_end]
         rois: tuple[RoiObservation, ...] = ()
         detail = spec.temporal_mode == "snapshot_orbit"
@@ -1031,13 +1042,13 @@ class TechnicalRenderer:
             "selection_mode": spec.selection_mode,
             "temporal_mode": spec.temporal_mode,
             "source_window_s": list(spec.source_window_s),
+            "display_window_s": list(spec.display_window_s),
             "future_returns_consumed": False,
             "causal_display_policy": "latest and previous scans only; maximum current age is 2 configured scan periods",
             "storyboard_pixels_consumed": False,
             "simulator_truth_consumed": False,
             "scene_or_asset_metadata_consumed": False,
             "selective_current_scan_status": "complete",
-            "scan_selection": self.source.scan_summary(scans),
             "rgb_context": spec.rgb_context,
             "rendered_context_point_budget": spec.maximum_points,
             "context_treatment": (
@@ -1052,6 +1063,12 @@ class TechnicalRenderer:
             },
             "camera_calibration": self.source.camera_calibration_receipt,
         }
+        history_summary = self.source.scan_summary(scans)
+        if spec.id in self._used_rois:
+            result["scan_selection"] = self.source.roi_scan_summary(self._used_rois[spec.id])
+            result["context_scan_selection"] = history_summary
+        else:
+            result["scan_selection"] = history_summary
         if rgb_pairs:
             result["cotimed_rgb_pairs"] = {
                 "pair_count": len(rgb_pairs),
