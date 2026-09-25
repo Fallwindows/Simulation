@@ -567,14 +567,39 @@ class CaptureArchitectureTests(unittest.TestCase):
 
     def test_mapping_and_perception_scripts_have_truth_separated_entrypoints(self):
         mapping = (ROOT / "scripts/run_slam_offline.ps1").read_text(encoding="utf-8")
+        path_resolution = mapping.index("$slamSelection = Resolve-SafeSlamDirectory")
+        directory_creation = mapping.index("New-Item -ItemType Directory -Force -Path $slamDir,$logsDir")
+        attempt_start = mapping.index("$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir -ContainmentRoot $runDir")
         mapping_preflight = mapping.index("--validate-for-slam $captureDir")
         mapping_config_read = mapping.index('"bag_metadata.json"')
+        self.assertLess(path_resolution, directory_creation)
+        self.assertLess(directory_creation, attempt_start)
+        self.assertLess(attempt_start, mapping_preflight)
         self.assertLess(mapping_preflight, mapping_config_read)
         topic_selection = next(line for line in mapping.splitlines() if "$replayTopics =" in line)
         self.assertIn("--clock", mapping)
         self.assertIn('"--topics"', topic_selection)
         self.assertNotIn('"/clock"', topic_selection)
-        self.assertIn('"--database-path",$database', mapping)
+        self.assertIn('"database_path:=$databaseArg"', mapping)
+        self.assertIn('"--target-clock-seconds",([string]$targetClockStamp)', mapping)
+        self.assertIn('"--expected-first-clock-seconds",([string]$firstClockStamp)', mapping)
+        self.assertIn('"--clock-start-tolerance-seconds",([string]$clockStartTolerance)', mapping)
+        self.assertIn('"--delay",([string]$replayDiscoveryDelaySeconds)', mapping)
+        self.assertIn('status -ne "pending_database_validation"', mapping)
+        self.assertIn('$attemptDatabase = [string]$slamAttempt.database_path', mapping)
+        self.assertIn('$databaseArg = $attemptDatabase.Replace', mapping)
+        mapper_stop = mapping.index("Stop-ProcessTree -RootPid $mappingProcess.Id")
+        mapper_exit = mapping.index("$mappingProcess.WaitForExit(30000)")
+        database_validation = mapping.index('"scripts/validate_rtabmap_db.py"')
+        database_publication = mapping.index("$databasePublication = Publish-ValidatedDatabase")
+        observer_completion = mapping.index('$observerMeta.status = "complete"')
+        slam_manifest = mapping.index("Write-AtomicJson -Value $slamManifest")
+        self.assertLess(mapper_stop, database_validation)
+        self.assertLess(mapper_exit, database_validation)
+        self.assertLess(database_validation, database_publication)
+        self.assertLess(database_publication, observer_completion)
+        self.assertLess(database_validation, observer_completion)
+        self.assertLess(observer_completion, slam_manifest)
         self.assertNotIn("service call /rtabmap/publish_map", mapping)
 
         perception = (ROOT / "scripts/run_inventory_offline.ps1").read_text(encoding="utf-8")
@@ -867,13 +892,6 @@ $global:LASTEXITCODE = 0
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             signal = Path(directory) / "bag_replay.complete"
             signal.write_text("done\n", encoding="utf-8")
-            database = Path(directory) / "rtabmap.db"
-            connection = sqlite3.connect(database)
-            with connection:
-                connection.execute("create table Node (stamp real)")
-                connection.execute("insert into Node values (11.5)")
-            connection.close()
-
             class Future:
                 def __init__(self): self.is_done = False
                 def done(self): return self.is_done
@@ -934,11 +952,6 @@ $global:LASTEXITCODE = 0
                 def ok(self): return True
                 def spin_once(self, node, timeout_sec):
                     self.spin_count += 1
-                    if self.spin_count == 2:
-                        connection = sqlite3.connect(database)
-                        with connection:
-                            connection.execute("update Node set stamp=12.0")
-                        connection.close()
                     future = self.observer.publish_map_client.future
                     if future is not None and not future.done():
                         message = type("Message", (), {
@@ -958,15 +971,18 @@ $global:LASTEXITCODE = 0
 
             observer = SlamObserver.__new__(SlamObserver)
             ros = FakeRos()
-            observer.rclpy = ros; observer.node = Node(); observer.duration_s = 2.0
+            observer.rclpy = ros; observer.node = Node()
             observer.started_wall = __import__("time").monotonic() - 5.0; observer.startup_timeout_s = 30.0
             observer.first_clock_s = 10.0; observer.last_clock_s = 12.0; observer.target_clock_s = 12.0
+            observer.expected_first_clock_s = 10.0; observer.clock_start_tolerance_s = 0.1; observer.clock_start_covered = True
+            observer.replay_span_s = 2.0
             observer.clock_regressions = 0; observer.clock_target_reached = True
             observer.replay_complete_signal = signal; observer.replay_complete_signal_observed = False
             observer.drain_complete = False; observer.callback_generation = 0; observer.drain_quiet_polls = 0
             observer.replay_drained = False; observer.publish_map_acknowledged = False
-            observer.final_map_span = False; observer.mapper_database_span = False
-            observer.database_path = database; observer.database_node_count = 0; observer.database_last_stamp_s = None
+            observer.final_map_span = False; observer.mapper_database_span = None
+            observer.database_node_count = None; observer.database_last_stamp_s = None
+            observer.database_verification_stage = "pending_post_mapper_shutdown"
             observer.expected_sensor_last_stamp_s = 12.0; observer.sensor_scan_period_s = 0.1
             observer.last_odom_stamp_s = 11.95
             # Deliberately append unique samples out of timestamp order, as can
@@ -1014,7 +1030,7 @@ $global:LASTEXITCODE = 0
             self.assertTrue(observer.drain_complete)
             self.assertTrue(observer.replay_drained)
             self.assertTrue(observer.publish_map_acknowledged)
-            self.assertTrue(observer.mapper_database_span)
+            self.assertIsNone(observer.mapper_database_span)
             self.assertTrue(observer.final_map_span)
             self.assertEqual(observer.map_messages_before_publish, 1)
             self.assertEqual(observer.map_messages, 2)
@@ -1032,11 +1048,12 @@ $global:LASTEXITCODE = 0
             observer.output_dir = Path(directory) / "observer_output"
             observer.output_dir.mkdir()
             result = observer.close()
-            self.assertEqual(result["status"], "complete")
+            self.assertEqual(result["status"], "pending_database_validation")
             self.assertTrue(result["processed_sensor_span"])
-            self.assertTrue(result["mapper_database_span"])
+            self.assertIsNone(result["mapper_database_span"])
             self.assertTrue(result["final_map_span"])
-            self.assertEqual(result["database_last_stamp_s"], 12.0)
+            self.assertIsNone(result["database_last_stamp_s"])
+            self.assertEqual(result["database_verification_stage"], "pending_post_mapper_shutdown")
             self.assertTrue(result["map_pose_correction_complete"])
             self.assertEqual(result["pose_source"], "rtabmap_optimized_graph")
             self.assertTrue(result["map_graph_matches_final_cloud"])
@@ -1107,8 +1124,9 @@ $global:LASTEXITCODE = 0
 
             clock_observer = SlamObserver.__new__(SlamObserver)
             clock_observer.callback_generation = 0; clock_observer.last_clock_s = None
-            clock_observer.first_clock_s = None; clock_observer.target_clock_s = None
-            clock_observer.duration_s = 1.0; clock_observer.clock_regressions = 0
+            clock_observer.first_clock_s = None; clock_observer.target_clock_s = 5.0
+            clock_observer.expected_first_clock_s = 4.0; clock_observer.clock_start_tolerance_s = 0.1
+            clock_observer.clock_start_covered = False; clock_observer.clock_regressions = 0
             def clock_message(seconds):
                 return type("Message", (), {"clock": type("Clock", (), {"sec": seconds, "nanosec": 0})()})()
             clock_observer._on_clock(clock_message(4))
@@ -1117,18 +1135,39 @@ $global:LASTEXITCODE = 0
             self.assertTrue(clock_observer.clock_target_reached)
             self.assertEqual(clock_observer.clock_regressions, 1)
 
+            missed_start = SlamObserver.__new__(SlamObserver)
+            missed_start.callback_generation = 0; missed_start.last_clock_s = None; missed_start.first_clock_s = None
+            missed_start.target_clock_s = 20.5; missed_start.expected_first_clock_s = 0.066666666
+            missed_start.clock_start_tolerance_s = 0.1; missed_start.clock_start_covered = False
+            missed_start.replay_span_s = 20.433333334
+            missed_start.clock_regressions = 0; missed_start.clock_target_reached = False
+            missed_start._on_clock(clock_message(5.4564382))
+            missed_start._on_clock(clock_message(20.5))
+            self.assertTrue(missed_start.clock_target_reached, "target is the absolute capture horizon")
+            self.assertFalse(missed_start.clock_start_covered, "missing the beginning must remain a strict failure")
+            missed_start.rclpy = type("Ros", (), {"ok": lambda self: True, "spin_once": lambda self, node, timeout_sec: None})()
+            missed_start.node = object(); missed_start.started_wall = 0.0; missed_start.startup_timeout_s = 30.0
+            missed_start.replay_complete_signal = signal; missed_start.replay_complete_signal_observed = False
+            missed_start.callback_generation = 0; missed_start.drain_quiet_polls = 0
+            missed_start.expected_sensor_last_stamp_s = 20.5; missed_start.last_odom_stamp_s = 20.5
+            missed_start.sensor_scan_period_s = 0.1
+            with patch("simulator.capture.slam_observer.time.monotonic", side_effect=[0.0, 1.1]):
+                with self.assertRaisesRegex(RuntimeError, "missed the beginning"):
+                    missed_start.spin_until_done()
+
             observer = SlamObserver.__new__(SlamObserver)
             class QuietRos:
                 def ok(self): return True
                 def spin_once(self, node, timeout_sec): pass
-            observer.rclpy = QuietRos(); observer.node = object(); observer.duration_s = 2.0
+            observer.rclpy = QuietRos(); observer.node = object()
             observer.started_wall = __import__("time").monotonic() - 5.0; observer.startup_timeout_s = 30.0
             observer.first_clock_s = 10.0; observer.last_clock_s = 11.5; observer.target_clock_s = 12.0
+            observer.expected_first_clock_s = 10.0; observer.clock_start_tolerance_s = 0.1; observer.clock_start_covered = True
+            observer.replay_span_s = 2.0
             observer.clock_regressions = 0; observer.clock_target_reached = False
             observer.replay_complete_signal = signal; observer.replay_complete_signal_observed = False
             observer.drain_complete = False; observer.callback_generation = 4; observer.drain_quiet_polls = 0
             observer.expected_sensor_last_stamp_s = 12.0; observer.sensor_scan_period_s = 0.1
-            observer._database_covers_input = lambda: True
             with self.assertRaisesRegex(RuntimeError, "before /clock reached target"):
                 observer.spin_until_done()
 
@@ -1195,12 +1234,15 @@ $global:LASTEXITCODE = 0
                 observer.sensor_scan_period_s = 0.1
                 observer.last_odom_stamp_s = 1.0
                 observer.first_clock_s = 0.0; observer.last_clock_s = 1.0; observer.target_clock_s = 1.0
+                observer.expected_first_clock_s = 0.0; observer.clock_start_tolerance_s = 0.1; observer.clock_start_covered = True
+                observer.replay_span_s = 1.0
                 observer.clock_target_reached = True; observer.clock_regressions = 0
                 observer.replay_complete_signal_observed = False; observer.drain_complete = False
                 observer.drain_quiet_polls = 0; observer.replay_drained = False
                 observer.publish_map_acknowledged = False; observer.map_messages_before_publish = 0
-                observer.final_map_span = False; observer.mapper_database_span = False
-                observer.database_node_count = 0; observer.database_last_stamp_s = None
+                observer.final_map_span = False; observer.mapper_database_span = None
+                observer.database_node_count = None; observer.database_last_stamp_s = None
+                observer.database_verification_stage = "pending_post_mapper_shutdown"
                 observer.map_pose_rows = []
                 observer.graph_pose_version = None; observer.optimized_graph_last_stamp_s = None
                 observer.optimized_pose_graph_complete = False; observer.map_graph_matches_final_cloud = False
