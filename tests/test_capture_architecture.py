@@ -1112,6 +1112,10 @@ $global:LASTEXITCODE = 0
                 def ok(self): return True
                 def spin_once(self, node, timeout_sec):
                     self.spin_count += 1
+                    # RTAB-Map keeps publishing map->odom after rosbag ends.
+                    # This output must remain recorded without blocking replay
+                    # input drain or final map publication quiescence.
+                    self.observer._on_tf(transform_message(12.0, 3.0))
                     future = self.observer.publish_map_client.future
                     if future is not None and not future.done():
                         message = type("Message", (), {
@@ -1138,7 +1142,9 @@ $global:LASTEXITCODE = 0
             observer.replay_span_s = 2.0
             observer.clock_regressions = 0; observer.clock_target_reached = True
             observer.replay_complete_signal = signal; observer.replay_complete_signal_observed = False
-            observer.drain_complete = False; observer.callback_generation = 0; observer.drain_quiet_polls = 0
+            observer.drain_complete = False; observer.callback_generation = 0
+            observer.replay_input_generation = 0; observer.map_publication_generation = 0
+            observer.drain_quiet_polls = 0
             observer.replay_drained = False; observer.publish_map_acknowledged = False
             observer.final_map_span = False; observer.mapper_database_span = None
             observer.database_node_count = None; observer.database_last_stamp_s = None
@@ -1190,6 +1196,8 @@ $global:LASTEXITCODE = 0
             self.assertTrue(observer.drain_complete)
             self.assertTrue(observer.replay_drained)
             self.assertTrue(observer.publish_map_acknowledged)
+            self.assertGreater(observer.callback_generation, observer.replay_input_generation)
+            self.assertGreater(observer.callback_generation, observer.map_publication_generation)
             self.assertIsNone(observer.mapper_database_span)
             self.assertTrue(observer.final_map_span)
             self.assertEqual(observer.map_messages_before_publish, 1)
@@ -1258,6 +1266,9 @@ $global:LASTEXITCODE = 0
             self.assertEqual(result["graph_pose_version"], result["pre_publish_graph_version"])
             self.assertTrue(result["dense_pose_version"])
             self.assertTrue(result["map_version"])
+            self.assertEqual(result["replay_drain_basis"], ["/clock", "/slam/odom"])
+            self.assertEqual(result["post_publish_drain_basis"], ["/slam/map_cloud", "/mapGraph", "/mapData"])
+            self.assertGreater(result["callback_generation"], result["replay_input_generation"])
             for filename in ("slam_odom_poses.csv", "slam_map_poses.csv", "slam_poses.csv"):
                 record = next(item for item in result["files"] if item["path"] == filename)
                 output_path = observer.output_dir / filename
@@ -1283,7 +1294,8 @@ $global:LASTEXITCODE = 0
                 observer._capture_final_optimized_graph()
 
             clock_observer = SlamObserver.__new__(SlamObserver)
-            clock_observer.callback_generation = 0; clock_observer.last_clock_s = None
+            clock_observer.callback_generation = 0; clock_observer.replay_input_generation = 0
+            clock_observer.last_clock_s = None
             clock_observer.first_clock_s = None; clock_observer.target_clock_s = 5.0
             clock_observer.expected_first_clock_s = 4.0; clock_observer.clock_start_tolerance_s = 0.1
             clock_observer.clock_start_covered = False; clock_observer.clock_regressions = 0
@@ -1296,7 +1308,8 @@ $global:LASTEXITCODE = 0
             self.assertEqual(clock_observer.clock_regressions, 1)
 
             missed_start = SlamObserver.__new__(SlamObserver)
-            missed_start.callback_generation = 0; missed_start.last_clock_s = None; missed_start.first_clock_s = None
+            missed_start.callback_generation = 0; missed_start.replay_input_generation = 0
+            missed_start.last_clock_s = None; missed_start.first_clock_s = None
             missed_start.target_clock_s = 20.5; missed_start.expected_first_clock_s = 0.066666666
             missed_start.clock_start_tolerance_s = 0.1; missed_start.clock_start_covered = False
             missed_start.replay_span_s = 20.433333334
@@ -1308,7 +1321,8 @@ $global:LASTEXITCODE = 0
             missed_start.rclpy = type("Ros", (), {"ok": lambda self: True, "spin_once": lambda self, node, timeout_sec: None})()
             missed_start.node = object(); missed_start.started_wall = 0.0; missed_start.startup_timeout_s = 30.0
             missed_start.replay_complete_signal = signal; missed_start.replay_complete_signal_observed = False
-            missed_start.callback_generation = 0; missed_start.drain_quiet_polls = 0
+            missed_start.callback_generation = 0; missed_start.replay_input_generation = 0
+            missed_start.drain_quiet_polls = 0
             missed_start.expected_sensor_last_stamp_s = 20.5; missed_start.last_odom_stamp_s = 20.5
             missed_start.sensor_scan_period_s = 0.1
             with patch("simulator.capture.slam_observer.time.monotonic", side_effect=[0.0, 1.1]):
@@ -1326,10 +1340,71 @@ $global:LASTEXITCODE = 0
             observer.replay_span_s = 2.0
             observer.clock_regressions = 0; observer.clock_target_reached = False
             observer.replay_complete_signal = signal; observer.replay_complete_signal_observed = False
-            observer.drain_complete = False; observer.callback_generation = 4; observer.drain_quiet_polls = 0
+            observer.drain_complete = False; observer.callback_generation = 4
+            observer.replay_input_generation = 4; observer.drain_quiet_polls = 0
             observer.expected_sensor_last_stamp_s = 12.0; observer.sensor_scan_period_s = 0.1
             with self.assertRaisesRegex(RuntimeError, "before /clock reached target"):
                 observer.spin_until_done()
+
+    def test_r7_replay_input_drain_ignores_continuous_map_to_odom_tf(self):
+        from simulator.capture.slam_observer import SlamObserver
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            signal = Path(directory) / "bag_replay.complete"
+            signal.touch()
+
+            def tf_message():
+                return types.SimpleNamespace(transforms=[types.SimpleNamespace(
+                    header=types.SimpleNamespace(frame_id="map", stamp=types.SimpleNamespace(sec=20, nanosec=500_000_000)),
+                    child_frame_id="odom",
+                    transform=types.SimpleNamespace(
+                        translation=types.SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                        rotation=types.SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0),
+                    ),
+                )])
+
+            observer = SlamObserver.__new__(SlamObserver)
+            observer.started_wall = -5.0
+            observer.startup_timeout_s = 180.0
+            observer.first_clock_s = 0.0320312
+            observer.last_clock_s = 20.5144542
+            observer.target_clock_s = 20.5
+            observer.expected_first_clock_s = 0.066666666
+            observer.clock_start_tolerance_s = 0.1
+            observer.clock_start_covered = True
+            observer.replay_span_s = 20.433333334
+            observer.clock_regressions = 0
+            observer.clock_target_reached = True
+            observer.replay_complete_signal = signal
+            observer.replay_complete_signal_observed = False
+            observer.callback_generation = 1808
+            observer.replay_input_generation = 1304
+            observer.map_publication_generation = 54
+            observer.drain_quiet_polls = 0
+            observer.replay_drained = False
+            observer.expected_sensor_last_stamp_s = 20.5
+            observer.sensor_scan_period_s = 0.1
+            observer.last_odom_stamp_s = 20.5
+            observer.map_to_odom_rows = [object()] * 1808
+            observer.final_map_requested = False
+            observer._publish_final_map = lambda: setattr(observer, "final_map_requested", True)
+
+            class ContinuousTfRos:
+                def ok(self): return True
+                def spin_once(self, node, timeout_sec): observer._on_tf(tf_message())
+
+            observer.rclpy = ContinuousTfRos()
+            observer.node = object()
+            with patch("simulator.capture.slam_observer.time.monotonic", side_effect=[0.0, 0.4, 0.8, 1.2]):
+                observer.spin_until_done()
+
+            self.assertTrue(observer.replay_complete_signal_observed)
+            self.assertTrue(observer.replay_drained)
+            self.assertTrue(observer.final_map_requested)
+            self.assertEqual(observer.replay_input_generation, 1304)
+            self.assertEqual(observer.callback_generation, 1811)
+            self.assertEqual(len(observer.map_to_odom_rows), 1811)
+            self.assertEqual(observer.drain_quiet_polls, 4)
 
     def test_map_to_odom_interpolation_composes_nonidentity_time_varying_transform(self):
         from simulator.capture.slam_observer import _correct_odom_pose, _interpolate_map_to_odom
@@ -1368,7 +1443,8 @@ $global:LASTEXITCODE = 0
         for bad_stamp, bad_x in ((float("nan"), 0.0), (1.0, float("inf"))):
             with self.subTest(stamp=bad_stamp, translation=bad_x), tempfile.TemporaryDirectory(dir=ROOT) as directory:
                 observer = SlamObserver.__new__(SlamObserver)
-                observer.callback_generation = 0
+                observer.callback_generation = 0; observer.replay_input_generation = 0
+                observer.map_publication_generation = 0
                 observer.odom_rows = []
                 observer.last_odom_stamp_s = None
                 observer.map_to_odom_rows = []

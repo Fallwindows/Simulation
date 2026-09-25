@@ -242,6 +242,15 @@ class SlamObserver:
         self.replay_complete_signal_observed = False
         self.drain_complete = False
         self.callback_generation = 0
+        # Replay completion is based only on callbacks whose progress is fed by
+        # the recorded input. RTAB-Map continues publishing map->odom TF after
+        # rosbag playback ends, so the aggregate callback counter cannot be a
+        # truthful replay-drain signal.
+        self.replay_input_generation = 0
+        # Final publication quiescence is similarly scoped to the map/cloud and
+        # graph triplet produced by PublishMap. Continuous TF remains recorded
+        # for diagnostics without preventing finalization.
+        self.map_publication_generation = 0
         self.drain_quiet_polls = 0
         self.expected_sensor_last_stamp_s: float | None = None
         self.sensor_scan_period_s = 0.0
@@ -299,6 +308,7 @@ class SlamObserver:
     def _on_clock(self, message) -> None:
         stamp_s = _stamp(message.clock)
         self.callback_generation += 1
+        self.replay_input_generation += 1
         if self.last_clock_s is not None and stamp_s < self.last_clock_s - 1e-9:
             self.clock_regressions += 1
         self.last_clock_s = stamp_s
@@ -310,6 +320,7 @@ class SlamObserver:
 
     def _on_odom(self, message) -> None:
         self.callback_generation += 1
+        self.replay_input_generation += 1
         stamp = _stamp(message.header.stamp)
         self.last_odom_stamp_s = stamp if self.last_odom_stamp_s is None else max(self.last_odom_stamp_s, stamp)
         q = (
@@ -351,6 +362,7 @@ class SlamObserver:
 
     def _on_map(self, message) -> None:
         self.callback_generation += 1
+        self.map_publication_generation += 1
         fields = {"x", "y", "z"}
         names = {field.name for field in message.fields}
         if not fields.issubset(names):
@@ -365,6 +377,7 @@ class SlamObserver:
 
     def _on_map_graph(self, message) -> None:
         self.callback_generation += 1
+        self.map_publication_generation += 1
         self.map_graph_messages += 1
         self.map_graph_message = message
         self.map_graph_stamp_s = _stamp(message.header.stamp)
@@ -372,6 +385,7 @@ class SlamObserver:
 
     def _on_map_data(self, message) -> None:
         self.callback_generation += 1
+        self.map_publication_generation += 1
         self.map_data_messages += 1
         self.map_data_message = message
         self.map_data_stamp_s = _stamp(message.header.stamp)
@@ -414,7 +428,7 @@ class SlamObserver:
 
         post_ack_deadline = time.monotonic() + self.close_timeout_s
         quiet_since: float | None = None
-        last_generation = self.callback_generation
+        last_generation = self.map_publication_generation
         while self.rclpy.ok():
             now = time.monotonic()
             self.final_map_span = (
@@ -433,9 +447,9 @@ class SlamObserver:
                 and self.final_map_graph_frame_id == "map"
                 and self.map_cloud_frame_id == "map"
             )
-            if self.callback_generation != last_generation:
+            if self.map_publication_generation != last_generation:
                 quiet_since = None
-                last_generation = self.callback_generation
+                last_generation = self.map_publication_generation
             elif self.publish_map_acknowledged and self.final_map_span and graph_triplet_ready:
                 if quiet_since is None:
                     quiet_since = now
@@ -578,7 +592,7 @@ class SlamObserver:
             raise RuntimeError("offline SLAM observer requires a replay-complete signal path")
         signal_seen_wall: float | None = None
         quiet_since: float | None = None
-        last_generation = self.callback_generation
+        last_generation = self.replay_input_generation
         wall_deadline = self.started_wall + max(60.0, self.replay_span_s * 20.0 + 30.0)
         while self.rclpy.ok():
             now = time.monotonic()
@@ -586,14 +600,14 @@ class SlamObserver:
                 if signal_seen_wall is None:
                     signal_seen_wall = now
                     self.replay_complete_signal_observed = True
-                if self.callback_generation == last_generation:
+                if self.replay_input_generation == last_generation:
                     if quiet_since is None:
                         quiet_since = now
                     self.drain_quiet_polls += 1
                 else:
                     quiet_since = None
                     self.drain_quiet_polls = 0
-                    last_generation = self.callback_generation
+                    last_generation = self.replay_input_generation
                 if now - signal_seen_wall >= 60.0:
                     raise RuntimeError("offline replay callbacks did not settle within the bounded wait")
                 if quiet_since is not None and now - quiet_since >= 1.0:
@@ -708,7 +722,7 @@ class SlamObserver:
             "optimized_pose_graph_complete": self.optimized_pose_graph_complete,
             "map_graph_matches_final_cloud": self.map_graph_matches_final_cloud,
             "pre_publish_graph_version": getattr(self, "pre_publish_graph_version", None),
-            "pre_publish_graph_version_source": "paired pre-request /mapData graph after replay callback drain and before post-shutdown database validation",
+            "pre_publish_graph_version_source": "paired pre-request /mapData graph after replay input drain and before post-shutdown database validation",
             "pose_source": "rtabmap_optimized_graph",
             "graph_pose_version": self.graph_pose_version,
             "dense_pose_version": getattr(self, "dense_pose_version", None),
@@ -733,6 +747,11 @@ class SlamObserver:
             "replay_complete_signal_observed": self.replay_complete_signal_observed,
             "drain_complete": self.drain_complete,
             "drain_quiet_polls": self.drain_quiet_polls,
+            "callback_generation": self.callback_generation,
+            "replay_input_generation": self.replay_input_generation,
+            "replay_drain_basis": ["/clock", "/slam/odom"],
+            "map_publication_generation": self.map_publication_generation,
+            "post_publish_drain_basis": ["/slam/map_cloud", "/mapGraph", "/mapData"],
             "replay_drained": self.replay_drained,
             "publish_map_acknowledged": self.publish_map_acknowledged,
             "map_messages_before_publish": self.map_messages_before_publish,
