@@ -25,10 +25,15 @@ def quaternion_wxyz_to_xyzw(q: Quaternion) -> Quaternion:
 def quaternion_normalize(q: Quaternion) -> Quaternion:
     if len(q) != 4 or not all(math.isfinite(v) for v in q):
         raise ValueError("quaternion must contain four finite values")
-    norm = math.sqrt(sum(v * v for v in q))
+    # hypot scales its inputs before squaring, avoiding overflow for otherwise
+    # valid finite quaternions such as (1e308, 0, 0, 0).
+    norm = math.hypot(*q)
     if norm <= 1e-12:
         raise ValueError("zero quaternion")
-    return tuple(v / norm for v in q)  # type: ignore[return-value]
+    result = tuple(v / norm for v in q)
+    if not all(math.isfinite(value) for value in result):
+        raise ValueError("normalized quaternion must be finite")
+    return result  # type: ignore[return-value]
 
 
 def interpolate_position(start: Vector3, end: Vector3, fraction: float) -> Vector3:
@@ -39,7 +44,13 @@ def interpolate_position(start: Vector3, end: Vector3, fraction: float) -> Vecto
         raise ValueError("interpolation fraction must be finite and in [0, 1]")
     if len(start) != 3 or len(end) != 3 or not all(math.isfinite(v) for v in (*start, *end)):
         raise ValueError("positions must contain three finite values")
-    return tuple(a + fraction * (b - a) for a, b in zip(start, end))  # type: ignore[return-value]
+    try:
+        result = tuple(math.fsum(((1.0 - fraction) * a, fraction * b)) for a, b in zip(start, end))
+    except OverflowError as exc:
+        raise ValueError("interpolated position must be finite") from exc
+    if not all(math.isfinite(value) for value in result):
+        raise ValueError("interpolated position must be finite")
+    return result  # type: ignore[return-value]
 
 
 def quaternion_slerp(start: Quaternion, end: Quaternion, fraction: float) -> Quaternion:

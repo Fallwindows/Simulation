@@ -298,7 +298,10 @@ def build_experiment_hashes(scenario_path: str | Path, repo_root: str | Path | N
     }
     motion_dependencies = {
         "trajectory_config": dataclasses.asdict(scenario.trajectory),
-        "trajectory_code": _python_semantic_hash(motion_source, {"StraightTrajectory", "WalkingTrajectory", "PoseSample"}),
+        # Hash the complete semantic module.  The public trajectory classes call
+        # module-level easing constants and helpers, so selecting class nodes
+        # alone would permit behavior changes without invalidating captures.
+        "trajectory_code": _python_semantic_hash(motion_source),
         "runtime_trajectory_use": _python_semantic_hash(runtime_source, trajectory_only=True),
     }
     geometry_payload = {

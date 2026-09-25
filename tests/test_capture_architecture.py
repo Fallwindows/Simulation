@@ -142,6 +142,53 @@ class CaptureArchitectureTests(unittest.TestCase):
         self.assertEqual(len(first["geometry_sha256"]), 64)
         self.assertEqual(len(first["appearance_sha256"]), 64)
 
+    def test_motion_helper_and_constant_changes_invalidate_capture_products(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / "config", root / "config")
+            shutil.copytree(ROOT / "assets/retail", root / "assets/retail")
+            for relative_path in (
+                "simulator/environment/aisle_builder.py",
+                "simulator/environment/isaac_builder.py",
+                "simulator/runtime/isaac_sim_runner.py",
+                "simulator/motion/trajectory.py",
+            ):
+                target = root / relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative_path, target)
+            manifest_stub = root / "simulator/capture/manifest.py"
+            motion_source = root / "simulator/motion/trajectory.py"
+            original_motion = motion_source.read_text(encoding="utf-8")
+            scenario = root / "config/scenarios/walking_baseline.yaml"
+
+            with patch.dict(build_experiment_hashes.__globals__, {"__file__": str(manifest_stub)}):
+                before = build_experiment_hashes(scenario, root)
+                helper_mutation = original_motion.replace("35.0 + u *", "35.1 + u *", 1)
+                self.assertNotEqual(original_motion, helper_mutation)
+                motion_source.write_text(helper_mutation, encoding="utf-8")
+                after_helper = build_experiment_hashes(scenario, root)
+                self.assertNotEqual(before["trajectory_sha256"], after_helper["trajectory_sha256"])
+                self.assertNotEqual(
+                    before["product_hashes"]["slam_map_sha256"],
+                    after_helper["product_hashes"]["slam_map_sha256"],
+                )
+                self.assertEqual(before["geometry_sha256"], after_helper["geometry_sha256"])
+                self.assertEqual(before["appearance_sha256"], after_helper["appearance_sha256"])
+
+                constant_mutation = original_motion.replace(
+                    "_DEFAULT_RAMP_DURATION_S = 2.5", "_DEFAULT_RAMP_DURATION_S = 2.6", 1
+                )
+                self.assertNotEqual(original_motion, constant_mutation)
+                motion_source.write_text(constant_mutation, encoding="utf-8")
+                after_constant = build_experiment_hashes(scenario, root)
+                self.assertNotEqual(before["trajectory_sha256"], after_constant["trajectory_sha256"])
+                self.assertNotEqual(
+                    before["product_hashes"]["slam_map_sha256"],
+                    after_constant["product_hashes"]["slam_map_sha256"],
+                )
+                self.assertEqual(before["geometry_sha256"], after_constant["geometry_sha256"])
+                self.assertEqual(before["appearance_sha256"], after_constant["appearance_sha256"])
+
     def test_invalidation_buckets_track_mesh_motion_and_artwork_products_selectively(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             root = Path(directory)

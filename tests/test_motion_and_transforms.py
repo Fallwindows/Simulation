@@ -15,6 +15,7 @@ from simulator.sensors.transforms import (
     interpolate_position,
     interpolate_transform,
     quaternion_from_rpy_deg,
+    quaternion_normalize,
     quaternion_slerp,
     quaternion_wxyz_to_xyzw,
     quaternion_xyzw_to_wxyz,
@@ -143,6 +144,13 @@ class MotionTests(unittest.TestCase):
             interpolate_position((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), math.nan)
         with self.assertRaisesRegex(ValueError, "finite"):
             quaternion_slerp((0.0, 0.0, 0.0, math.inf), (0.0, 0.0, 0.0, 1.0), 0.5)
+
+    def test_extreme_finite_quaternion_and_position_inputs_remain_finite(self):
+        normalized = quaternion_normalize((1e308, 0.0, 0.0, 0.0))
+        self.assertEqual(normalized, (1.0, 0.0, 0.0, 0.0))
+        midpoint = interpolate_position((1e308, -1e308, 1e308), (-1e308, 1e308, 1e308), 0.5)
+        self.assertEqual(midpoint, (0.0, 0.0, 1e308))
+        self.assertTrue(all(math.isfinite(value) for value in midpoint))
 
     def test_transform_applies_translation_and_rotation(self):
         transform = Transform("a", "b", (1.0, 2.0, 3.0), camera_optical_quaternion())
