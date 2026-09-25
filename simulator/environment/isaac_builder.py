@@ -10,6 +10,24 @@ from simulator.environment.aisle_builder import AisleLayout
 from simulator.environment.retail_catalog import load_retail_catalog
 
 
+# The frozen-pizza carton predates the corrected package-wrap convention. Its
+# +Y front panel is physically oriented correctly, but its U axis renders
+# horizontally reversed in Isaac. Reflect the referenced carton locally so its
+# exterior copy reads correctly without changing its measured bounds or aisle
+# placement. Keep this correction scene-side until the shared packaging
+# generator is regenerated after the separate hero-art revision lands.
+_REFLECT_X_FOR_READABLE_FRONT = frozenset({"frozen_pizza"})
+
+
+def _catalog_render_scale(asset_key: str, scale_xyz) -> tuple[float, float, float]:
+    """Return an idempotent render scale for legacy reversed-front assets."""
+
+    scale = tuple(float(value) for value in scale_xyz)
+    if asset_key in _REFLECT_X_FOR_READABLE_FRONT:
+        return (-abs(scale[0]), scale[1], scale[2])
+    return scale
+
+
 STRUCTURAL_MATERIALS = {
     "floor": {
         "color": (0.34, 0.315, 0.285),
@@ -384,12 +402,17 @@ class IsaacAisleBuilder:
         api = self._UsdGeom.XformCommonAPI(prim)
         api.SetTranslate(self._Gf.Vec3d(*position_m))
         api.SetRotate(self._Gf.Vec3f(*rotation_rpy_deg), self._UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        api.SetScale(self._Gf.Vec3f(*scale_xyz))
+        render_scale = _catalog_render_scale(record.asset_key, scale_xyz)
+        api.SetScale(self._Gf.Vec3f(*render_scale))
         prim.CreateAttribute("grocery:asset_key", self._Sdf.ValueTypeNames.String).Set(record.asset_key)
         prim.CreateAttribute("grocery:category", self._Sdf.ValueTypeNames.String).Set(record.category)
         prim.CreateAttribute("grocery:semantic_id", self._Sdf.ValueTypeNames.String).Set(
             semantic_id or f"scene/{record.asset_key}/{self._safe(path)}"
         )
+        if render_scale != tuple(float(value) for value in scale_xyz):
+            prim.CreateAttribute("grocery:text_orientation_correction", self._Sdf.ValueTypeNames.String).Set(
+                "reflect_local_x"
+            )
 
     def _build_asset(self, asset, catalog, root: str) -> None:
         record = catalog.by_key(asset.asset_key)
