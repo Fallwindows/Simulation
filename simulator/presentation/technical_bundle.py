@@ -60,6 +60,7 @@ CAMERA_TRACE_BASIS = (
     "shots 6-7 audit direct recorded camera_optical poses without applying a presentation guide; "
     "shots 8-12 apply a C3 presentation guide fit to the declared sampling interval; "
     "exact interpolation-knot dependencies are derived from the hash-bound trajectory; "
+    "timestamped camera optical transforms are derived from the bound sensor artifact; "
     "both remain independent of rendered scan cutoff"
 )
 CAMERA_TRACE_FIELDS = {
@@ -743,25 +744,18 @@ def validate_technical_delivery(
     simulation_window = (float(simulation.get("start_s", math.nan)), float(simulation.get("end_s", math.nan)))
     if not all(math.isfinite(value) for value in simulation_window) or simulation_window[0] > simulation_window[1]:
         raise ValueError("technical delivery simulation window is invalid")
-    from simulator.sensors.scan_projection import resolve_transform
-    from simulator.technical_lidar import EstimatedTrajectory, load_camera_head_transform_artifact
+    from simulator.technical_lidar import (
+        EstimatedTrajectory,
+        load_camera_optical_transform_evaluator,
+    )
     from simulator.technical_views import TechnicalCameraPath, load_inventory, load_plan, select_inventory
 
     trajectory_path = _verified_source_artifact(directory, catalog_source, "trajectory")
     inventory_path = _verified_source_artifact(directory, catalog_source, "inventory")
     transforms_path = _verified_source_artifact(directory, catalog_source, "sensor_transforms")
     transforms = _json(transforms_path)
-    _camera_head_trajectory, expected_camera_head_receipt = load_camera_head_transform_artifact(
+    camera_optical_transform, expected_camera_head_receipt = load_camera_optical_transform_evaluator(
         transforms_path, transforms
-    )
-    frames = transforms.get("frames")
-    transform_rows = transforms.get("transforms")
-    if not isinstance(frames, dict) or not isinstance(transform_rows, list):
-        raise ValueError("technical camera motion source transform graph is invalid")
-    rig_from_optical = resolve_transform(
-        transform_rows,
-        source_frame=str(frames.get("camera_optical", "")),
-        target_frame=str(frames.get("sensor_rig", "")),
     )
     _profiles, view_specs = load_plan(root / "config" / "technical_views.json")
     view_specs_by_id = {spec.id: spec for spec in view_specs}
@@ -769,7 +763,7 @@ def validate_technical_delivery(
     expected_camera_path = TechnicalCameraPath(
         view_specs,
         EstimatedTrajectory.from_csv(trajectory_path),
-        rig_from_optical,
+        camera_optical_transform,
         np.asarray(focus_inventory.position, dtype=np.float64),
     )
     expected_trace_rows = expected_camera_path.trace_rows(30)
@@ -800,6 +794,10 @@ def validate_technical_delivery(
         rgb_index_path,
         camera_frame_id=str(source["paired_capture_state"]["camera_frame_id"]),
     )
+    if camera_optical_transform.camera_head_trajectory is not None:
+        camera_optical_transform.camera_head_trajectory.validate_image_timestamps(
+            timestamp_ns / 1_000_000_000.0 for timestamp_ns in rgb_frame_timestamps_ns
+        )
     if manifest.get("input_snapshot_verification") != "post_render_sha256_match":
         raise ValueError("technical delivery lacks post-render input snapshot verification")
     presentation_classification = validate_presentation_classification(

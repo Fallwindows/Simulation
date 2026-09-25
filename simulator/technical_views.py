@@ -50,6 +50,7 @@ CAMERA_TRACE_BASIS = (
     "shots 6-7 audit direct recorded camera_optical poses without applying a presentation guide; "
     "shots 8-12 apply a C3 presentation guide fit to the declared sampling interval; "
     "exact interpolation-knot dependencies are derived from the hash-bound trajectory; "
+    "timestamped camera optical transforms are derived from the bound sensor artifact; "
     "both remain independent of rendered scan cutoff"
 )
 CAMERA_TRACE_POSITION_DECIMALS = 9
@@ -207,13 +208,34 @@ class _C3TimestampCurve:
         return float(np.polynomial.polynomial.polyval(x, self.coefficients[segment]))
 
 
+class _StaticCameraOpticalTransform:
+    """Compatibility adapter for historical fixed rig-to-optical matrices."""
+
+    def __init__(self, rig_from_optical: np.ndarray):
+        self.matrix = np.asarray(rig_from_optical, dtype=np.float64)
+        if self.matrix.shape != (4, 4) or not np.isfinite(self.matrix).all():
+            raise ValueError("technical camera optical transform is invalid")
+
+    def rig_from_optical(self, timestamp_s: float) -> np.ndarray:
+        if not math.isfinite(float(timestamp_s)):
+            raise ValueError("technical camera optical timestamp must be finite")
+        return self.matrix.copy()
+
+
+def _camera_optical_transform(value: object) -> object:
+    evaluator = getattr(value, "rig_from_optical", None)
+    if callable(evaluator):
+        return value
+    return _StaticCameraOpticalTransform(np.asarray(value, dtype=np.float64))
+
+
 class _EstimatedPoseGuide:
-    """Global smooth Bezier guide sampled only from the estimated trajectory."""
+    """Smooth guide sampled from estimated base poses and bound optical poses."""
 
     def __init__(
         self,
         trajectory: object,
-        rig_from_optical: np.ndarray,
+        camera_optical_transform: object,
         start_s: float,
         end_s: float,
         sample_count: int = 12,
@@ -226,6 +248,7 @@ class _EstimatedPoseGuide:
         forwards: list[np.ndarray] = []
         for timestamp_s in timestamps:
             map_from_rig = trajectory.map_from_sensor_rig(float(timestamp_s))
+            rig_from_optical = camera_optical_transform.rig_from_optical(float(timestamp_s))
             rotation = np.asarray(map_from_rig[:3, :3], dtype=np.float64)
             rig_position = np.asarray(map_from_rig[:3, 3], dtype=np.float64)
             optical_offset = np.asarray(rig_from_optical[:3, 3], dtype=np.float64)
@@ -269,24 +292,28 @@ class TechnicalCameraPath:
 
     Shots 6-7 report the direct recorded optical pose but do not apply it as a
     presentation camera. ``EstimatedTrajectory`` intentionally interpolates its
-    source samples piecewise. The map camera samples only that trajectory,
-    builds a smooth Bezier guide over the declared global sampling interval, and
-    evaluates it on a C3 timestamp schedule. It does not replace scan
-    projection or alter any measured point.
+    source samples piecewise. The map camera samples that trajectory together
+    with the timestamped rig-to-optical evaluator, builds a smooth Bezier guide
+    over the declared global sampling interval, and evaluates it on a C3
+    timestamp schedule. It does not replace scan projection or alter any
+    measured point.
     """
 
     def __init__(
         self,
         views: tuple[ViewSpec, ...],
         trajectory: object,
-        rig_from_optical: np.ndarray,
+        rig_from_optical: object,
         roi_focus_m: np.ndarray,
     ):
         self.views = views
         self.trajectory = trajectory
-        self.rig_from_optical = np.asarray(rig_from_optical, dtype=np.float64)
+        self.camera_optical_transform = _camera_optical_transform(rig_from_optical)
+        self._dynamic_camera_optical = (
+            getattr(self.camera_optical_transform, "camera_head_trajectory", None) is not None
+        )
         self.roi_focus_m = np.asarray(roi_focus_m, dtype=np.float64)
-        if self.rig_from_optical.shape != (4, 4) or self.roi_focus_m.shape != (3,):
+        if self.roi_focus_m.shape != (3,):
             raise ValueError("technical camera path inputs have invalid dimensions")
         self.offsets: dict[str, int] = {}
         offset = 0
@@ -335,7 +362,7 @@ class TechnicalCameraPath:
             self._camera_pose_dependency_windows_s[view.id] = actual_map_dependency
         self._pose_guide = _EstimatedPoseGuide(
             trajectory,
-            self.rig_from_optical,
+            self.camera_optical_transform,
             map_fit_window[0],
             map_fit_window[1],
         )
@@ -354,10 +381,11 @@ class TechnicalCameraPath:
 
     def _direct_recorded_camera_pose(self, timestamp_s: float, phase: float) -> CameraPose:
         map_from_rig = self.trajectory.map_from_sensor_rig(timestamp_s)
+        rig_from_optical = self.camera_optical_transform.rig_from_optical(timestamp_s)
         rotation = np.asarray(map_from_rig[:3, :3], dtype=np.float64)
         rig_position = np.asarray(map_from_rig[:3, 3], dtype=np.float64)
-        optical_offset = np.asarray(self.rig_from_optical[:3, 3], dtype=np.float64)
-        optical_axis = np.asarray(self.rig_from_optical[:3, 2], dtype=np.float64)
+        optical_offset = np.asarray(rig_from_optical[:3, 3], dtype=np.float64)
+        optical_axis = np.asarray(rig_from_optical[:3, 2], dtype=np.float64)
         eye = rig_position + np.sum(rotation * optical_offset[None, :], axis=1)
         forward = np.sum(rotation * optical_axis[None, :], axis=1)
         target = eye + 5.0 * forward / max(float(np.linalg.norm(forward)), 1e-9)
@@ -365,8 +393,12 @@ class TechnicalCameraPath:
 
     def _desired_map_pose(self, raw_phase: float, source_timestamp_s: float) -> CameraPose:
         motion = _smootherstep_c3(raw_phase)
-        rig_position, _optical_eye, _forward = self._pose_guide.evaluate(source_timestamp_s)
-        aisle_target = rig_position + np.asarray([0.0, 0.0, 0.85])
+        rig_position, optical_eye, optical_forward = self._pose_guide.evaluate(source_timestamp_s)
+        aisle_target = (
+            optical_eye + 5.0 * optical_forward
+            if self._dynamic_camera_optical
+            else rig_position + np.asarray([0.0, 0.0, 0.85])
+        )
         roi_weight = _smooth_window(raw_phase, 0.16, 0.30, 0.52, 0.68)
         target = (1.0 - 0.86 * roi_weight) * aisle_target + (0.86 * roi_weight) * self.roi_focus_m
         angle = math.radians(-96.0 + 24.0 * motion)
@@ -1261,8 +1293,9 @@ class TechnicalRenderer:
         if not roi_specs or not self._planned_rois.get("object_detail"):
             raise ValueError("technical camera motion requires one fixed LiDAR-supported ROI")
         roi_focus = np.asarray(self.camera_focus_inventory.position, dtype=np.float64)
-        rig_from_optical = source.rig_from_lidar @ np.linalg.inv(source.optical_from_lidar)
-        self.camera_path = TechnicalCameraPath(views, source.trajectory, rig_from_optical, roi_focus)
+        self.camera_path = TechnicalCameraPath(
+            views, source.trajectory, source.camera_optical_transform, roi_focus
+        )
         self._camera_trace_rows = tuple(self.camera_path.trace_rows(profile.fps))
         self._camera_trace_by_view = {
             spec.id: tuple(row for row in self._camera_trace_rows if row["view_id"] == spec.id)

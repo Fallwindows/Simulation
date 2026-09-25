@@ -16,7 +16,9 @@ from unittest.mock import patch
 import numpy as np
 
 from simulator.technical_views import (
+    InventoryRecord,
     TechnicalCameraPath,
+    TechnicalRenderer,
     _activation_ray_opacities,
     camera_motion_receipt,
     load_plan,
@@ -28,6 +30,7 @@ from simulator.technical_lidar import (
     SelectiveLidarSource,
     _transform_points,
     load_camera_head_transform_artifact,
+    load_camera_optical_transform_evaluator,
 )
 from simulator.sensors.scan_projection import CameraIntrinsics
 from simulator.presentation.technical_bundle import (
@@ -41,7 +44,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "config" / "technical_views.json"
 
 
-def _write_camera_head_fixture(directory: Path) -> tuple[Path, Path]:
+def _write_camera_head_fixture(
+    directory: Path, *, sample_hz: float = 2.0, duration_s: float = 1.0
+) -> tuple[Path, Path]:
     artifact = directory / "camera_head_transforms.json"
     optical = {
         "parent": "camera_link", "child": "camera_optical_frame",
@@ -52,7 +57,8 @@ def _write_camera_head_fixture(directory: Path) -> tuple[Path, Path]:
         "schema": "grocery.camera_head_transforms", "version": 1,
         "frames": {"parent": "sensor_rig", "child": "camera_link", "optical_child": "camera_optical_frame"},
         "direction": "parent_to_child", "translation_units": "m", "timestamp_units": "s",
-        "timestamp_domain": "Isaac simulation time (/clock)", "sample_hz": 2.0, "duration_s": 1.0,
+        "timestamp_domain": "Isaac simulation time (/clock)",
+        "sample_hz": sample_hz, "duration_s": duration_s,
         "interpolation": {
             "translation": "linear", "rotation": "shortest_arc_quaternion_slerp_xyzw",
             "range": "closed_0_to_duration_no_extrapolation",
@@ -63,12 +69,17 @@ def _write_camera_head_fixture(directory: Path) -> tuple[Path, Path]:
             "git_commit": "b" * 40, "git_tree": "c" * 40,
         },
         "static_child_transform": optical,
-        "samples": [
-            {"timestamp_s": 0.0, "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 0.0, 1.0]},
-            {"timestamp_s": 0.5, "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 0.3826834323650898, 0.9238795325112867]},
-            {"timestamp_s": 1.0, "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 2 ** -0.5, 2 ** -0.5]},
-        ],
+        "samples": [],
     }
+    sample_count = int(round(sample_hz * duration_s)) + 1
+    for index in range(sample_count):
+        timestamp_s = min(index / sample_hz, duration_s)
+        half_yaw = 0.25 * np.pi * timestamp_s / duration_s
+        artifact_payload["samples"].append({
+            "timestamp_s": timestamp_s,
+            "translation_m": [0.0, 0.0, 0.0],
+            "rotation_xyzw": [0.0, 0.0, float(np.sin(half_yaw)), float(np.cos(half_yaw))],
+        })
     artifact.write_text(json.dumps(artifact_payload, sort_keys=True) + "\n", encoding="utf-8")
     sensor_transforms = directory / "sensor_transforms.json"
     sensor_payload = {
@@ -473,6 +484,56 @@ class TechnicalMotionTests(unittest.TestCase):
             trajectory.rig_from_camera_link(float(timestamp))
         self.assertLess(time.perf_counter() - started, 2.0)
 
+    def test_m4_disjoint_graph_drives_technical_renderer_trace_and_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            transforms_path, _artifact_path = _write_camera_head_fixture(
+                Path(temporary), sample_hz=30.0, duration_s=20.5
+            )
+            camera_transform, receipt = load_camera_optical_transform_evaluator(transforms_path)
+        profiles, views = load_plan(PLAN)
+        focus = InventoryRecord(7, (5.2, 1.4, 1.25), 9)
+        roi = SimpleNamespace(detection=SimpleNamespace(track_id=focus.track_id))
+        estimated_trajectory = _SyntheticTrajectory()
+        estimated_trajectory.positions_m = np.stack([
+            estimated_trajectory.map_from_sensor_rig(float(timestamp))[:3, 3]
+            for timestamp in estimated_trajectory.timestamps_s
+        ])
+        source = SimpleNamespace(
+            trajectory=estimated_trajectory,
+            camera_optical_transform=camera_transform,
+            camera_head_transform_receipt=receipt,
+            camera_calibration_receipt={"frame_id": "camera_optical_frame"},
+            roi_observations=lambda *_args: (roi,),
+            scan_summary=lambda _scans: {"scan_count": 0},
+            roi_scan_summary=lambda _observations: {"scan_count": 0},
+            roi_summary=lambda _observations: {"observation_count": 1},
+        )
+        with patch("simulator.technical_views.ImageFont.truetype", return_value=object()):
+            renderer = TechnicalRenderer(profiles["delivery"], source, (focus,), views)
+        first = renderer.camera_trace_rows()[0]
+        timestamp_s = float(first["camera_guide_pose_timestamp_s"])
+        map_from_optical = (
+            source.trajectory.map_from_sensor_rig(timestamp_s)
+            @ camera_transform.rig_from_optical(timestamp_s)
+        )
+        expected_eye = map_from_optical[:3, 3]
+        expected_forward = map_from_optical[:3, 2]
+        expected_target = expected_eye + 5.0 * expected_forward / np.linalg.norm(expected_forward)
+        np.testing.assert_allclose(first["eye_m"], expected_eye, atol=1e-9)
+        np.testing.assert_allclose(first["target_m"], expected_target, atol=1e-9)
+        derivation = renderer.derivation(views[0])
+        self.assertEqual(derivation["camera_head_transform"], receipt)
+        _validate_camera_head_transform_receipt(
+            derivation["camera_head_transform"], receipt, views[0].id
+        )
+        self.assertEqual(len(renderer.camera_trace_rows()), 810)
+        static_path = TechnicalCameraPath(
+            views, estimated_trajectory, np.eye(4), np.asarray(focus.position)
+        )
+        static_map_row = static_path.trace_rows(profiles["delivery"].fps)[600]
+        dynamic_map_row = renderer.camera_trace_rows()[600]
+        self.assertNotEqual(dynamic_map_row["target_m"], static_map_row["target_m"])
+
     def test_camera_head_artifact_rejects_missing_stale_duplicate_and_nonmonotonic_data(self):
         def refresh_binding(transforms_path: Path, artifact_path: Path) -> None:
             payload = json.loads(transforms_path.read_text(encoding="utf-8"))
@@ -492,7 +553,8 @@ class TechnicalMotionTests(unittest.TestCase):
             # Each attack gets an independent, valid starting artifact.
             for attack in (
                 "missing", "stale", "missing_declaration", "duplicate_declaration",
-                "duplicate_static_edge", "unbound_manifest", "nonmonotonic",
+                "duplicate_static_edge", "alternate_static_path", "unbound_manifest",
+                "nonmonotonic", "bad_effective_source",
             ):
                 case = root / attack
                 case.mkdir()
@@ -522,10 +584,47 @@ class TechnicalMotionTests(unittest.TestCase):
                     })
                     transforms_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
                     expected = "disjoint dynamic and static graph edges"
+                elif attack == "alternate_static_path":
+                    payload = json.loads(transforms_path.read_text(encoding="utf-8"))
+                    payload["transforms"].extend([
+                        {
+                            "parent": "sensor_rig", "child": "camera_mount_aux",
+                            "translation_m": [0.0, 0.0, 0.0],
+                            "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+                        },
+                        {
+                            "parent": "camera_mount_aux", "child": "camera_link",
+                            "translation_m": [0.0, 0.0, 0.0],
+                            "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+                        },
+                    ])
+                    unrelated = transforms_path.with_name("unrelated_dynamic_transform.json")
+                    unrelated.write_text("{}\n", encoding="utf-8")
+                    unrelated_digest = hashlib.sha256(unrelated.read_bytes()).hexdigest()
+                    payload["dynamic_transform_artifacts"].append({
+                        "parent_frame": "sensor_rig", "child_frame": "aux_dynamic_frame",
+                        "path": unrelated.name, "sha256": unrelated_digest,
+                        "size_bytes": unrelated.stat().st_size, "schema_version": 1,
+                    })
+                    transforms_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+                    manifest_path = transforms_path.with_name("capture_manifest.json")
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest["files"].append({
+                        "path": unrelated.name, "sha256": unrelated_digest,
+                        "size_bytes": unrelated.stat().st_size,
+                    })
+                    manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8")
+                    expected = "disjoint dynamic and static graph edges"
                 elif attack == "unbound_manifest":
                     manifest_path = transforms_path.with_name("capture_manifest.json")
                     manifest_path.write_text('{"files":[]}\n', encoding="utf-8")
                     expected = "capture manifest does not bind"
+                elif attack == "bad_effective_source":
+                    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+                    payload["source"]["trajectory_effective_sha256"] = "not-a-digest"
+                    artifact_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+                    refresh_binding(transforms_path, artifact_path)
+                    expected = "source provenance"
                 else:
                     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
                     payload["samples"][1]["timestamp_s"] = 0.0

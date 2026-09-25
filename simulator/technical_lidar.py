@@ -281,6 +281,37 @@ def _canonical_relative_artifact_path(root: Path, value: object) -> Path:
     return resolved
 
 
+def _static_graph_has_path(
+    transform_rows: list[object], source_frame: str, target_frame: str
+) -> bool:
+    """Return whether the recorded static graph connects two frames."""
+
+    adjacency: dict[str, set[str]] = {}
+    seen_edges: set[tuple[str, str]] = set()
+    for row in transform_rows:
+        if not isinstance(row, dict):
+            raise ValueError("transform record must be a mapping")
+        parent = row.get("parent")
+        child = row.get("child")
+        if not isinstance(parent, str) or not parent or not isinstance(child, str) or not child:
+            raise ValueError("transform record has invalid parent or child")
+        if parent == child or (parent, child) in seen_edges:
+            raise ValueError("transform tree contains a self edge or duplicate edge")
+        seen_edges.add((parent, child))
+        adjacency.setdefault(parent, set()).add(child)
+        adjacency.setdefault(child, set()).add(parent)
+    pending = [source_frame]
+    visited = {source_frame}
+    for frame in pending:
+        if frame == target_frame:
+            return True
+        for neighbor in adjacency.get(frame, ()):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                pending.append(neighbor)
+    return False
+
+
 def load_camera_head_transform_artifact(
     sensor_transforms_path: str | Path,
     transforms_payload: dict[str, object] | None = None,
@@ -408,12 +439,6 @@ def load_camera_head_transform_artifact(
     ):
         raise ValueError("camera head transform frames do not match the recorded transform graph")
     static_child = artifact.get("static_child_transform")
-    matching_dynamic_rows = [
-        row for row in transform_rows
-        if isinstance(row, dict)
-        and row.get("parent") == "sensor_rig"
-        and row.get("child") == "camera_link"
-    ] if isinstance(transform_rows, list) else []
     matching_static_rows = [
         row for row in transform_rows
         if isinstance(row, dict)
@@ -428,7 +453,7 @@ def load_camera_head_transform_artifact(
             "translation_m": [0.0, 0.0, 0.0],
             "rotation_xyzw": [0.5, -0.5, 0.5, -0.5],
         }
-        or matching_dynamic_rows
+        or _static_graph_has_path(transform_rows, frames["parent"], frames["child"])
         or len(matching_static_rows) != 1
     ):
         raise ValueError("camera head transform requires disjoint dynamic and static graph edges")
@@ -509,6 +534,17 @@ def load_camera_head_transform_artifact(
         or not isinstance(source.get("git_tree"), str)
         or len(source["git_tree"]) != 40
         or any(character not in "0123456789abcdef" for character in source["git_tree"])
+        or (
+            source.get("trajectory_effective_sha256") is not None
+            and (
+                not isinstance(source["trajectory_effective_sha256"], str)
+                or len(source["trajectory_effective_sha256"]) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in source["trajectory_effective_sha256"]
+                )
+            )
+        )
     ):
         raise ValueError("camera head transform source provenance is invalid")
     receipt = {
@@ -531,6 +567,95 @@ def load_camera_head_transform_artifact(
     }
     trajectory.receipt = dict(receipt)
     return trajectory, receipt
+
+
+class CameraOpticalTransformEvaluator:
+    """Evaluate ``sensor_rig`` from ``camera_optical_frame`` at image time."""
+
+    def __init__(
+        self,
+        *,
+        camera_head_trajectory: CameraHeadTransformTrajectory | None,
+        rig_from_optical: np.ndarray | None,
+        camera_link_from_optical: np.ndarray | None,
+        receipt: dict[str, object],
+    ):
+        self.camera_head_trajectory = camera_head_trajectory
+        self._rig_from_optical = (
+            None if rig_from_optical is None else np.asarray(rig_from_optical, dtype=np.float64)
+        )
+        self._camera_link_from_optical = (
+            None
+            if camera_link_from_optical is None
+            else np.asarray(camera_link_from_optical, dtype=np.float64)
+        )
+        self.receipt = dict(receipt)
+        if camera_head_trajectory is None:
+            if self._rig_from_optical is None or self._rig_from_optical.shape != (4, 4):
+                raise ValueError("static camera optical transform is invalid")
+        elif (
+            self._rig_from_optical is not None
+            or self._camera_link_from_optical is None
+            or self._camera_link_from_optical.shape != (4, 4)
+        ):
+            raise ValueError("dynamic camera optical transform is invalid")
+
+    def rig_from_optical(self, timestamp_s: float) -> np.ndarray:
+        timestamp = float(timestamp_s)
+        if not math.isfinite(timestamp):
+            raise ValueError("camera optical transform timestamp must be finite")
+        if self.camera_head_trajectory is None:
+            assert self._rig_from_optical is not None
+            return self._rig_from_optical.copy()
+        assert self._camera_link_from_optical is not None
+        return (
+            self.camera_head_trajectory.rig_from_camera_link(timestamp)
+            @ self._camera_link_from_optical
+        )
+
+
+def load_camera_optical_transform_evaluator(
+    sensor_transforms_path: str | Path,
+    transforms_payload: dict[str, object] | None = None,
+) -> tuple[CameraOpticalTransformEvaluator, dict[str, object]]:
+    """Build the shared static-or-dynamic camera optical pose evaluator."""
+
+    transforms_path = Path(sensor_transforms_path).resolve()
+    transforms = transforms_payload
+    if transforms is None:
+        transforms = json.loads(transforms_path.read_text(encoding="utf-8"))
+    if not isinstance(transforms, dict):
+        raise ValueError("sensor transforms must contain a JSON mapping")
+    head_trajectory, receipt = load_camera_head_transform_artifact(transforms_path, transforms)
+    frames = transforms.get("frames")
+    transform_rows = transforms.get("transforms")
+    if not isinstance(frames, dict) or not isinstance(transform_rows, list):
+        raise ValueError("recorded sensor transform graph is missing")
+    if head_trajectory is None:
+        rig_from_optical = resolve_transform(
+            transform_rows,
+            source_frame=str(frames.get("camera_optical", "")),
+            target_frame=str(frames.get("sensor_rig", "")),
+        )
+        evaluator = CameraOpticalTransformEvaluator(
+            camera_head_trajectory=None,
+            rig_from_optical=rig_from_optical,
+            camera_link_from_optical=None,
+            receipt=receipt,
+        )
+    else:
+        camera_link_from_optical = resolve_transform(
+            transform_rows,
+            source_frame=str(frames.get("camera_optical", "")),
+            target_frame=str(frames.get("camera_link", "")),
+        )
+        evaluator = CameraOpticalTransformEvaluator(
+            camera_head_trajectory=head_trajectory,
+            rig_from_optical=None,
+            camera_link_from_optical=camera_link_from_optical,
+            receipt=receipt,
+        )
+    return evaluator, receipt
 
 
 class EstimatedTrajectory:
@@ -808,17 +933,13 @@ class SelectiveLidarSource:
         self.rig_from_lidar = resolve_transform(
             transform_records, source_frame=str(frames["lidar_link"]), target_frame=str(frames["sensor_rig"])
         )
-        self.camera_head_trajectory, self.camera_head_transform_receipt = load_camera_head_transform_artifact(
+        self.camera_optical_transform, self.camera_head_transform_receipt = load_camera_optical_transform_evaluator(
             self.sensor_transforms_path, transforms
         )
+        self.camera_head_trajectory = self.camera_optical_transform.camera_head_trajectory
         if self.camera_head_trajectory is not None:
             self.camera_head_trajectory.validate_image_timestamps(self.rgb_timestamps_s)
             self.optical_from_lidar = None
-            self.optical_from_camera_link = resolve_transform(
-                transform_records,
-                source_frame=str(frames["camera_link"]),
-                target_frame=str(frames["camera_optical"]),
-            )
         else:
             self.optical_from_lidar = resolve_transform(
                 transform_records,
@@ -972,7 +1093,12 @@ class SelectiveLidarSource:
     ) -> np.ndarray:
         map_from_scan_rig = self.trajectory.map_from_sensor_rig(scan_timestamp_s)
         map_from_image_rig = self.trajectory.map_from_sensor_rig(image_timestamp_s)
-        if self.camera_head_trajectory is None:
+        camera_optical_transform = getattr(self, "camera_optical_transform", None)
+        if camera_optical_transform is not None:
+            optical_from_image_rig = _invert_rigid(
+                camera_optical_transform.rig_from_optical(image_timestamp_s)
+            )
+        elif self.camera_head_trajectory is None:
             if self.optical_from_lidar is None:
                 raise ValueError("static camera transform graph is incomplete")
             rig_from_optical = self.rig_from_lidar @ _invert_rigid(self.optical_from_lidar)
