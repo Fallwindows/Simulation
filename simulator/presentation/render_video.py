@@ -214,6 +214,134 @@ def _seconds(frames: int, fps: int) -> str:
     return value or "0"
 
 
+def _smoothstep(value: float) -> float:
+    if value <= 0.0:
+        return 0.0
+    if value >= 1.0:
+        return 1.0
+    return value * value * (3.0 - 2.0 * value)
+
+
+def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment, ...]) -> list[dict[str, Any]]:
+    by_shot = {segment.shot.number: segment for segment in segments}
+    result = []
+    for transition in plan.transitions:
+        outgoing = by_shot[transition.from_shot]
+        incoming = by_shot[transition.to_shot]
+        outgoing_timestamp = outgoing.source_time_range_s[1] if outgoing.source_time_range_s else None
+        incoming_timestamp = incoming.source_time_range_s[0] if incoming.source_time_range_s else None
+        samples = []
+        for relative_frame in range(transition.duration_frames):
+            progress = 1.0 - relative_frame / transition.duration_frames
+            outgoing_weight = _smoothstep(progress)
+            film_frame = transition.start_frame + relative_frame
+            samples.append(
+                {
+                    "film_frame": film_frame,
+                    "nominal_shot": plan.shot_for_frame(film_frame).number,
+                    "descending_progress": round(progress, 12),
+                    "outgoing_weight": round(outgoing_weight, 12),
+                    "incoming_weight": round(1.0 - outgoing_weight, 12),
+                }
+            )
+        result.append(
+            {
+                "from_shot": transition.from_shot,
+                "to_shot": transition.to_shot,
+                "boundary_frame": transition.boundary_frame,
+                "start_frame": transition.start_frame,
+                "end_frame_exclusive": transition.end_frame_exclusive,
+                "duration_frames": transition.duration_frames,
+                "style": transition.style,
+                "easing": transition.easing,
+                "intent": transition.intent,
+                "frame_budget_delta": 0,
+                "classification": {
+                    "kind": "editorial_temporal_blend",
+                    "co_timed": False,
+                    "sensor_fusion": False,
+                    "geometry_fusion": False,
+                    "claim": "presentation-only transition between independently rendered source clips; not a sensor-fusion or co-timed measurement product",
+                },
+                "shot_assignment": {
+                    "exclusive": False,
+                    "shared_between_shots": [transition.from_shot, transition.to_shot],
+                    "policy": "every frame in this window is an editorial mixture even when its film index falls inside one nominal shot interval",
+                },
+                "held_sources": {
+                    "outgoing": {
+                        "shot": transition.from_shot,
+                        "view_id": outgoing.view_id,
+                        "source_role": outgoing.source_role,
+                        "source_video_sha256": outgoing.video_sha256,
+                        "source_receipt_sha256": outgoing.receipt_sha256,
+                        "source_frame": outgoing.source_start_frame + outgoing.shot.frame_count - 1,
+                        "source_time_basis": outgoing.source_time_basis,
+                        "source_frame_timestamp_s": outgoing_timestamp,
+                        "co_timed_with_other_source": False,
+                        "held_film_frames": {
+                            "start_frame": transition.boundary_frame,
+                            "end_frame_exclusive": transition.end_frame_exclusive,
+                        },
+                    },
+                    "incoming": {
+                        "shot": transition.to_shot,
+                        "view_id": incoming.view_id,
+                        "source_role": incoming.source_role,
+                        "source_video_sha256": incoming.video_sha256,
+                        "source_receipt_sha256": incoming.receipt_sha256,
+                        "source_frame": incoming.source_start_frame,
+                        "source_time_basis": incoming.source_time_basis,
+                        "source_frame_timestamp_s": incoming_timestamp,
+                        "co_timed_with_other_source": False,
+                        "held_film_frames": {
+                            "start_frame": transition.start_frame,
+                            "end_frame_exclusive": transition.boundary_frame,
+                        },
+                    },
+                },
+                "weight_law": {
+                    "ffmpeg_progress_direction": "P descends from 1 toward 0",
+                    "progress": "P = 1 - relative_frame / duration_frames",
+                    "smoothstep": "s(P) = P*P*(3-2*P)",
+                    "outgoing": "s(P)",
+                    "incoming": "1-s(P)",
+                    "entry_guard": {
+                        "film_frame": transition.start_frame - 1,
+                        "outgoing_weight": 1.0,
+                        "incoming_weight": 0.0,
+                    },
+                    "exit_guard": {
+                        "film_frame": transition.end_frame_exclusive,
+                        "outgoing_weight": 0.0,
+                        "incoming_weight": 1.0,
+                    },
+                    "per_frame": samples,
+                },
+            }
+        )
+    return result
+
+
+def _shot_transition_windows(plan: PresentationPlan, shot: Shot) -> list[dict[str, Any]]:
+    windows = []
+    for transition in plan.transitions:
+        if shot.number not in (transition.from_shot, transition.to_shot):
+            continue
+        other = transition.to_shot if shot.number == transition.from_shot else transition.from_shot
+        windows.append(
+            {
+                "boundary_frame": transition.boundary_frame,
+                "start_frame": transition.start_frame,
+                "end_frame_exclusive": transition.end_frame_exclusive,
+                "with_shot": other,
+                "source_side": "outgoing" if shot.number == transition.from_shot else "incoming",
+                "exclusive_assignment": False,
+            }
+        )
+    return windows
+
+
 def _validate_source(
     segment: PlannedSegment,
     profile_width: int,
@@ -343,7 +471,7 @@ def _build_filter(
             half = transition.half_duration_frames
             duration_s = _seconds(transition.duration_frames, plan.fps)
             offset_s = _seconds(logical_frames - half, plan.fps)
-            expression = "A*(1-(P*P*(3-2*P)))+B*(P*P*(3-2*P))"
+            expression = "A*(P*P*(3-2*P))+B*(1-(P*P*(3-2*P)))"
             filters.append(
                 f"[{current_label}][{next_label}]xfade=transition=custom:duration={duration_s}:offset={offset_s}:expr='{expression}',settb=1/{plan.fps}[{mixed_label}]"
             )
@@ -590,21 +718,7 @@ def _render_presentation_generation(
         "fps": plan.fps,
         "frame_count": plan.frame_count,
         "duration_seconds": plan.duration_seconds,
-        "transitions": [
-            {
-                "from_shot": item.from_shot,
-                "to_shot": item.to_shot,
-                "boundary_frame": item.boundary_frame,
-                "start_frame": item.start_frame,
-                "end_frame_exclusive": item.end_frame_exclusive,
-                "duration_frames": item.duration_frames,
-                "style": item.style,
-                "easing": item.easing,
-                "intent": item.intent,
-                "frame_budget_delta": 0,
-            }
-            for item in plan.transitions
-        ],
+        "transitions": _transition_manifest(plan, segments),
         "ground_truth_consumed": False,
         "provenance_validation": {
             "status": "validated",
@@ -651,6 +765,7 @@ def _render_presentation_generation(
                 "source_receipt_sha256": segment.receipt_sha256,
                 "presentation_transform": segment.presentation_transform,
                 "missing_genuine_roles": list(segment.missing_roles),
+                "editorial_shared_transition_frames": _shot_transition_windows(plan, segment.shot),
             }
             for segment in segments
         ],

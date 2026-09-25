@@ -153,6 +153,20 @@ frames 540, 660, 750, 840, 960, 1080, and 1200. Each window freezes only the
 edge frames needed to straddle its boundary, consumes no extra timeline frames,
 and preserves the exact 1,350-frame delivery budget. RGB shots 01-05 remain
 frame-contiguous from the original capture without added dissolves.
+FFmpeg's custom-xfade progress `P` descends from one toward zero, so the
+renderer weights the outgoing source with `smoothstep(P)` and the incoming
+source with `1-smoothstep(P)`. The generated moving-geometry fixture checks
+every adjacent output frame from one frame before each transition through the
+first frame after it, including both entry and exit edges.
+
+The delivery manifest classifies each transition as an editorial temporal
+blend between independently rendered clips. It explicitly records that the
+frames are neither co-timed measurements nor sensor, geometry, or map fusion.
+Each mixed frame is shared between both shots; its nominal timeline shot is
+retained only as an index. The manifest binds the exact outgoing and incoming
+videos and receipts, the cloned edge-frame numbers, their independent time
+bases and timestamps, the clone ranges, and the smoothstep weights for every
+mixed frame.
 
 ## Current new-goal limitations
 
@@ -162,10 +176,8 @@ finalized SLAM map, and `sensor_activation` draws explanatory rays to selected
 final-map points rather than timestamped current-scan returns. Every technical
 receipt and delivery manifest records this status as `unfinished`.
 
-The prior 1,350-frame audit also found hard source resets at frames 540, 660,
-750, 840, 960, 1080, and 1200. The largest adjacent visual change is the
-RGB-to-technical boundary at frames 539→540. This port replaces integer pose
-indexing with continuous interpolation for the retained sensor camera, but no
-test in this unit certifies whole-film motion or those shot transitions. Those
-items remain G02-P2 visual blockers pending current-scan view replacement and
-clip review.
+The transition regression proves the renderer's editorial continuity policy
+with structured generated inputs. It does not certify the content, geometry,
+motion quality, or selective-scan truth of production technical clips. Those
+properties still require review of the P2 current-scan outputs and the final
+assembled film.

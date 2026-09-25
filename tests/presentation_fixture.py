@@ -46,14 +46,33 @@ def _run(command: list[str]) -> None:
     subprocess.run(command, check=True, capture_output=True, text=True)
 
 
-def _video(ffmpeg: str, output: Path, frames: int, color: str, *, mirrored_rgb_fixture: bool = False) -> None:
+def _video(
+    ffmpeg: str,
+    output: Path,
+    frames: int,
+    color: str,
+    *,
+    mirrored_rgb_fixture: bool = False,
+    structured_motion_label: str | None = None,
+) -> None:
     filters = []
+    source = f"color=c={color}:s=1920x1080:r=30"
     if mirrored_rgb_fixture:
         filters = ["-vf", "drawbox=x=0:y=0:w=iw/2:h=ih:color=red:t=fill"]
+    if structured_motion_label is not None:
+        source = "testsrc2=s=1920x1080:r=30"
+        filters = [
+            "-vf",
+            (
+                f"drawbox=x=0:y=0:w=iw:h=112:color={color}:t=fill,"
+                f"drawtext=text='{structured_motion_label}  FRAME %{{n}}  TIME %{{pts\\:hms}}':"
+                "x=42:y=28:fontsize=44:fontcolor=white:box=1:boxcolor=black@0.65"
+            ),
+        ]
     _run(
         [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-            f"color=c={color}:s=1920x1080:r=30", *filters, "-frames:v", str(frames),
+            source, *filters, "-frames:v", str(frames),
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p", "-y", str(output),
         ]
     )
@@ -255,7 +274,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     outputs = []
     for view_id, role, frame_count, color in VIEWS:
         view_video = technical_dir / f"{view_id}_1080p.mp4"
-        _video(ffmpeg, view_video, frame_count, color)
+        _video(ffmpeg, view_video, frame_count, color, structured_motion_label=view_id)
         video_hash = sha256(view_video)
         probe = {"width": 1920, "height": 1080, "fps": 30.0, "frame_count": frame_count}
         receipt_path = _write_view_receipt(
@@ -278,7 +297,8 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         "trajectory_version": "fixture-trajectory-v1", "object_state_version": "fixture-object-v1", "source": source,
         "renderer": {"path": "simulator/technical_views.py", "sha256": renderer_hash},
         "plan": {"path": "config/technical_views.json", "sha256": plan_hash},
-        "storyboard_content_used": False, "storyboard_exclusion_basis": "generated test fixture uses only synthetic colors",
+        "storyboard_content_used": False,
+        "storyboard_exclusion_basis": "generated test fixture uses only synthetic moving geometry and timestamps",
         "selective_current_scan_goal": {
             "status": "unfinished", "current_implementation": "legacy finalized-map projection",
             "required_replacement": "feature-specific point selection from spatially aligned current scans",
@@ -293,6 +313,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     return {
         "capture_manifest": capture_manifest, "rgb_catalog": rgb_catalog, "rgb_bundle": rgb_bundle,
         "technical_catalog": technical_catalog, "technical_manifest": technical_manifest, "complete_inputs": complete,
+        "technical_dir": technical_dir,
         "crlf_renderer": crlf_renderer, "crlf_plan": crlf_plan,
     }
 
