@@ -315,15 +315,40 @@ class TechnicalCameraPath:
             ):
                 raise ValueError("technical camera guide timestamp windows must be contiguous")
         self._timestamp_curve = _C3TimestampCurve(knot_frames, knot_times)
+        dependency_window = getattr(trajectory, "interpolation_dependency_window_s", None)
+        if not callable(dependency_window):
+            raise ValueError("technical camera trajectory cannot disclose interpolation dependencies")
+        for view in views:
+            if view.camera_motion_role != "recorded_camera_optical":
+                continue
+            actual_dependency = dependency_window(*view.camera_guide_timestamp_window_s)
+            if not all(
+                math.isclose(actual, declared, abs_tol=1e-9)
+                for actual, declared in zip(actual_dependency, view.camera_pose_dependency_window_s)
+            ):
+                raise ValueError(
+                    f"technical view {view.id} camera pose dependency window does not match "
+                    f"trajectory interpolation support {actual_dependency}"
+                )
         map_dependency_windows = {view.camera_pose_dependency_window_s for view in self.map_views}
         if len(map_dependency_windows) != 1:
             raise ValueError("map camera views must disclose one shared smooth-fit dependency window")
-        map_dependency = next(iter(map_dependency_windows))
+        map_fit_window = (knot_times[0], knot_times[-1])
+        actual_map_dependency = dependency_window(*map_fit_window)
+        declared_map_dependency = next(iter(map_dependency_windows))
+        if not all(
+            math.isclose(actual, declared, abs_tol=1e-9)
+            for actual, declared in zip(actual_map_dependency, declared_map_dependency)
+        ):
+            raise ValueError(
+                "map camera pose dependency window does not match trajectory interpolation "
+                f"support {actual_map_dependency}"
+            )
         self._pose_guide = _EstimatedPoseGuide(
             trajectory,
             self.rig_from_optical,
-            map_dependency[0],
-            map_dependency[1],
+            map_fit_window[0],
+            map_fit_window[1],
         )
 
     def _direct_recorded_camera_pose(self, timestamp_s: float, phase: float) -> CameraPose:

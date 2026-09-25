@@ -230,6 +230,28 @@ class EstimatedTrajectory:
         matrix[:3, 3] = position
         return matrix
 
+    def interpolation_dependency_window_s(self, start_s: float, end_s: float) -> tuple[float, float]:
+        """Return the source-knot envelope needed to interpolate a time range.
+
+        The returned bounds describe trajectory rows, rather than only the
+        requested sample timestamps.  A nonaligned endpoint therefore expands
+        to the lower and upper knots that bracket it.
+        """
+
+        start = float(start_s)
+        end = float(end_s)
+        if (
+            not math.isfinite(start)
+            or not math.isfinite(end)
+            or start > end
+            or start < self.timestamps_s[0] - 1e-9
+            or end > self.timestamps_s[-1] + 1e-9
+        ):
+            raise ValueError("trajectory dependency query lies outside the estimated trajectory")
+        lower = max(0, int(np.searchsorted(self.timestamps_s, start, side="right")) - 1)
+        upper = min(len(self.timestamps_s) - 1, int(np.searchsorted(self.timestamps_s, end, side="right")))
+        return float(self.timestamps_s[lower]), float(self.timestamps_s[upper])
+
 
 def _transform_points(transform: np.ndarray, points: np.ndarray) -> np.ndarray:
     matrix = np.asarray(transform, dtype=np.float64)

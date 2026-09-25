@@ -13,14 +13,16 @@ differences, and every per-view derivation receipt.
 - Shots 6 and 7 do not apply a presentation camera. Their trace directly audits
   the recorded `camera_optical` pose at each causal sensor-replay cutoff. Shot 6
   is persistently labeled as an earlier recorded replay at t=2.0–5.9 s; its RGB
-  and LiDAR remain co-timed inside that replay. Changing trajectory samples
-  after 5.9 s cannot change the shot 6 audit.
+  and LiDAR remain co-timed inside that replay. Its interpolated poses depend on
+  the actual bracketing trajectory knots at 1.2–6.8 s; shot 7 likewise discloses
+  its 5.6–9.2 s knot support.
 - A monotone piecewise septic schedule shares velocity, acceleration, and jerk
   at every shot boundary. A global Bezier guide sampled only from the real
   piecewise estimated trajectory removes pose-knot derivative impulses.
 - Shot 8 joins the map presentation orbit with a C3 blend. The orbit remains one
-  continuous path through shot 12. Each map shot discloses the full 2.0–18.5 s
-  estimated-trajectory dependency used by the global smooth fit.
+  continuous path through shot 12. The global smooth fit samples estimated poses
+  at 2.0–18.5 s, whose actual bracketing knot support is 1.2–18.6 s; every map
+  shot discloses that full dependency.
 - The map path approaches the fixed primary LiDAR-supported ROI during the two
   object views, then returns to the estimated aisle trajectory. Its focus is the
   first deterministic selected row in the hash-bound estimated inventory and
@@ -41,8 +43,10 @@ flag, `camera_guide_pose_timestamp_s`, `rendered_data_cutoff_s`, motion phase,
 eye, target, and finite-difference velocity, acceleration, and jerk for both eye
 and target. Camera guide pose time is separate from the scan cutoff. Each view
 declares its sampled `camera_guide_timestamp_window_s` and its full
-`camera_pose_dependency_window_s`; these are intentionally wider for the global
-map fit.
+`camera_pose_dependency_window_s`. Construction recomputes the real
+`EstimatedTrajectory` interpolation support and rejects a declaration that does
+not match it. Dependency windows are therefore wider than sampled times wherever
+an endpoint lies between source knots.
 Positions use estimated map-frame metres and derivatives use the configured
 30 fps cadence. Position vectors retain nine decimal places; derivative vectors
 use a canonical seven-place rounding so the source-derived trace remains
@@ -54,11 +58,13 @@ restarts when the renderer revisits the previous co-timed frame. The cache is
 bounded to four decoded frames.
 
 The trace is designed for CPU review and does not require Isaac Sim or a GPU.
-`tests/test_technical_motion.py` checks velocity, acceleration, and jerk at every
-boundary on a deliberately kinked `EstimatedTrajectory`, the final hold, timing
-separation, replay disclosure, decoder restart/decode bounds, plan roles, and
-continuous activation-ray opacity. Presentation tests adversarially remove and
-rehash trace rows and forge per-view motion receipts.
+`tests/test_technical_motion.py` checks sparse nonaligned interpolation support,
+adversarial mutations inside and outside disclosed knot windows, velocity,
+acceleration, and jerk at every boundary on a deliberately kinked
+`EstimatedTrajectory`, the final hold, timing separation, replay disclosure,
+decoder restart/decode bounds, plan roles, and continuous activation-ray opacity.
+Presentation tests adversarially remove and rehash trace rows and forge per-view
+motion receipts.
 
 ## Diagnostic scope
 

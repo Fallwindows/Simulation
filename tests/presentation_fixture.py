@@ -203,7 +203,12 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     slam.mkdir(exist_ok=True)
     perception.mkdir(exist_ok=True)
     trajectory_path = slam / "slam_map_poses.csv"
-    trajectory_timestamps = np.linspace(0.2, 20.4, 65)
+    # Match the sparse, nonaligned knot layout whose interpolation dependency
+    # windows are declared by the technical-view plan.
+    trajectory_timestamps = np.asarray([
+        0.2, 1.2, 2.3, 3.5, 4.6, 5.6, 6.8, 8.0, 9.2,
+        10.2, 11.3, 12.5, 13.7, 14.9, 16.1, 17.3, 18.6, 20.4,
+    ])
     trajectory_path.write_text(
         "timestamp_s,x_m,y_m,z_m,qx,qy,qz,qw\n" + "".join(
             f"{timestamp:.9f},{0.38 * timestamp:.9f},{0.12 * np.sin(timestamp / 3.2):.9f},"

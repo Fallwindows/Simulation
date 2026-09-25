@@ -28,6 +28,16 @@ PLAN = ROOT / "config" / "technical_views.json"
 
 
 class _SyntheticTrajectory:
+    timestamps_s = np.asarray([
+        0.2, 1.2, 2.3, 3.5, 4.6, 5.6, 6.8, 8.0, 9.2,
+        10.2, 11.3, 12.5, 13.7, 14.9, 16.1, 17.3, 18.6,
+    ], dtype=np.float64)
+
+    def interpolation_dependency_window_s(self, start_s: float, end_s: float) -> tuple[float, float]:
+        lower = max(0, int(np.searchsorted(self.timestamps_s, start_s, side="right")) - 1)
+        upper = min(len(self.timestamps_s) - 1, int(np.searchsorted(self.timestamps_s, end_s, side="right")))
+        return float(self.timestamps_s[lower]), float(self.timestamps_s[upper])
+
     def map_from_sensor_rig(self, timestamp_s: float) -> np.ndarray:
         matrix = np.eye(4, dtype=np.float64)
         # Optical +Z points down the synthetic aisle (+X).  The position has
@@ -69,7 +79,7 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertEqual(self.views[0].subtitle, "RECORDED t=2.0–5.9s · CO-TIMED RGB + LIDAR")
         self.assertEqual(
             [view.camera_pose_dependency_window_s for view in self.views],
-            [(2.0, 5.9), (5.9, 8.8)] + [(2.0, 18.5)] * 5,
+            [(1.2, 6.8), (5.6, 9.2)] + [(1.2, 18.6)] * 5,
         )
 
     def test_camera_pose_time_and_rendered_data_cutoff_are_distinct_and_in_declared_windows(self):
@@ -93,25 +103,70 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertEqual(receipt["render_application"], "not_applied; trace audits recorded camera pose for the timestamped sensor replay")
         self.assertIn("no presentation camera applied", receipt["path"])
 
-    def test_recorded_replay_pose_has_no_future_trajectory_dependency(self):
-        timestamps = np.asarray([2.0, 5.9, 8.8, 12.0, 18.5])
-        base_positions = np.column_stack((timestamps, np.zeros_like(timestamps), np.ones_like(timestamps)))
-        changed_positions = base_positions.copy()
-        changed_positions[2:, 1] += 40.0
+    def test_sparse_nonaligned_knot_dependencies_are_exact_and_mutation_bound(self):
+        timestamps = np.asarray([
+            0.2, 1.2, 2.3, 3.5, 4.6, 5.6, 6.8, 8.0, 9.2,
+            10.2, 11.3, 12.5, 13.7, 14.9, 16.1, 17.3, 18.6, 19.7,
+        ])
+        base_positions = np.column_stack((timestamps, 0.03 * timestamps, np.ones_like(timestamps)))
+        outside_positions = base_positions.copy()
+        outside_positions[(timestamps < 1.2) | (timestamps > 18.6), 1] += 40.0
         quaternions = np.tile(np.asarray([0.0, 0.0, 0.0, 1.0]), (len(timestamps), 1))
+        base_trajectory = EstimatedTrajectory(timestamps, base_positions, quaternions)
+        outside_trajectory = EstimatedTrajectory(timestamps, outside_positions, quaternions)
+        self.assertEqual(base_trajectory.interpolation_dependency_window_s(2.0, 5.9), (1.2, 6.8))
+        self.assertEqual(base_trajectory.interpolation_dependency_window_s(5.9, 8.8), (5.6, 9.2))
+        self.assertEqual(base_trajectory.interpolation_dependency_window_s(2.0, 18.5), (1.2, 18.6))
         base = TechnicalCameraPath(
-            self.views, EstimatedTrajectory(timestamps, base_positions, quaternions),
+            self.views, base_trajectory,
             np.eye(4), np.asarray([5.2, 1.4, 1.25]),
         ).trace_rows(self.fps)
-        changed = TechnicalCameraPath(
-            self.views, EstimatedTrajectory(timestamps, changed_positions, quaternions),
+        outside_changed = TechnicalCameraPath(
+            self.views, outside_trajectory,
             np.eye(4), np.asarray([5.2, 1.4, 1.25]),
         ).trace_rows(self.fps)
-        self.assertEqual(
-            [row["eye_m"] for row in base[:120]],
-            [row["eye_m"] for row in changed[:120]],
+        self.assertEqual(len(base), 810)
+        self.assertEqual(base, outside_changed)
+
+        support_positions = base_positions.copy()
+        support_positions[timestamps == 6.8, 1] += 40.0
+        support_changed = TechnicalCameraPath(
+            self.views, EstimatedTrajectory(timestamps, support_positions, quaternions),
+            np.eye(4), np.asarray([5.2, 1.4, 1.25]),
+        ).trace_rows(self.fps)
+        changed_shot6 = [
+            index for index, (left, right) in enumerate(zip(base[:120], support_changed[:120]))
+            if left["eye_m"] != right["eye_m"]
+        ]
+        self.assertEqual(changed_shot6, list(range(111, 120)))
+
+        for support_timestamp in (1.2, 18.6):
+            map_support_positions = base_positions.copy()
+            map_support_positions[timestamps == support_timestamp, 1] += 40.0
+            map_support_changed = TechnicalCameraPath(
+                self.views, EstimatedTrajectory(timestamps, map_support_positions, quaternions),
+                np.eye(4), np.asarray([5.2, 1.4, 1.25]),
+            ).trace_rows(self.fps)
+            self.assertTrue(any(
+                left["eye_m"] != right["eye_m"]
+                for left, right in zip(base[210:], map_support_changed[210:])
+            ))
+
+    def test_constructor_rejects_dependency_declaration_that_omits_bracketing_knots(self):
+        timestamps = np.asarray([0.2, 1.2, 2.3, 5.6, 6.8, 9.2, 17.3, 18.6, 19.7])
+        positions = np.column_stack((timestamps, np.zeros_like(timestamps), np.ones_like(timestamps)))
+        quaternions = np.tile(np.asarray([0.0, 0.0, 0.0, 1.0]), (len(timestamps), 1))
+        invalid_views = (
+            replace(self.views[0], camera_pose_dependency_window_s=(2.0, 5.9)),
+            *self.views[1:],
         )
-        self.assertNotEqual(base[300]["eye_m"], changed[300]["eye_m"])
+        with self.assertRaisesRegex(ValueError, "does not match trajectory interpolation support"):
+            TechnicalCameraPath(
+                invalid_views,
+                EstimatedTrajectory(timestamps, positions, quaternions),
+                np.eye(4),
+                np.asarray([5.2, 1.4, 1.25]),
+            )
 
     def test_camera_steps_and_velocity_stay_continuous_at_every_boundary(self):
         eyes = np.asarray([row["eye_m"] for row in self.trace], dtype=np.float64)
@@ -193,7 +248,10 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertGreater(np.count_nonzero((samples > 0.0) & (samples < 1.0)), 100)
 
     def test_piecewise_estimated_trajectory_has_no_boundary_velocity_acceleration_or_jerk_spike(self):
-        timestamps = np.linspace(0.2, 20.4, 23)
+        timestamps = np.asarray([
+            0.2, 1.2, 2.3, 3.5, 4.6, 5.6, 6.8, 8.0, 9.2,
+            10.2, 11.3, 12.5, 13.7, 14.9, 16.1, 17.3, 18.6,
+        ])
         segment = np.arange(len(timestamps) - 1, dtype=np.float64)
         steps = np.column_stack((
             0.28 + 0.12 * np.sin(segment * 1.7),
