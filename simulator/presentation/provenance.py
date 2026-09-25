@@ -66,7 +66,7 @@ PRESENTATION_TRANSFORMS = {
 }
 
 DIAGNOSTIC_BASELINE_IDENTITY = {
-    "plan_path": "config/presentation/storyboard.yaml",
+    "plan_path": "config/presentation/diagnostic_storyboard_legacy.yaml",
     "plan_sha256_lf": "5a7e98db32134ba8f6507e60534a056bf9e5e35f3290d61eb9fa6b684479bc5f",
     "manifest_path": "config/presentation/diagnostic_baseline_inputs.json",
     "manifest_sha256_lf": "c18e9139feb34a59e9582aea331a83c2f1e0a8e1d77b2490dd3892eb21e8a9cf",

@@ -21,12 +21,18 @@ from simulator.presentation.provenance import (
     validate_presentation_transform,
 )
 from simulator.presentation.technical_bundle import validate_technical_delivery
-from simulator.presentation.timeline import EXPECTED_SHOT_BOUNDARIES, inspect_inputs, load_plan
+from simulator.presentation.timeline import (
+    EXPECTED_SHOT_BOUNDARIES,
+    SMOOTH_TRANSITION_BOUNDARIES,
+    inspect_inputs,
+    load_plan,
+)
 from tests.presentation_fixture import build_complete_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "config" / "presentation" / "storyboard.yaml"
+LEGACY_DIAGNOSTIC_PLAN = ROOT / "config" / "presentation" / "diagnostic_storyboard_legacy.yaml"
 BASELINE_INPUTS = ROOT / "config" / "presentation" / "diagnostic_baseline_inputs.json"
 BASELINE_VIDEO = ROOT / "demo" / "walking_aisle_final_hifi.mp4"
 FFMPEG = Path(r"C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Library\bin\ffmpeg.exe")
@@ -110,6 +116,50 @@ class PresentationTimelineTests(unittest.TestCase):
         self.assertEqual((plan.profiles["preview"].width, plan.profiles["preview"].height), (1280, 720))
         self.assertEqual(plan.profiles["delivery"].frame_count, 1350)
         self.assertEqual(plan.profiles["preview"].fps, 30)
+
+    def test_transition_windows_cover_every_technical_boundary_without_changing_frame_budget(self):
+        plan = load_plan(PLAN)
+        self.assertEqual([item.boundary_frame for item in plan.transitions], list(SMOOTH_TRANSITION_BOUNDARIES))
+        self.assertEqual([(item.from_shot, item.to_shot) for item in plan.transitions], [
+            (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11), (11, 12),
+        ])
+        self.assertEqual([item.duration_frames for item in plan.transitions], [18, 18, 18, 12, 12, 12, 12])
+        self.assertTrue(all(item.style == "smooth_crossfade" and item.easing == "smoothstep" for item in plan.transitions))
+        self.assertTrue(all(item.start_frame < item.boundary_frame < item.end_frame_exclusive for item in plan.transitions))
+        self.assertEqual(sum(shot.frame_count for shot in plan.shots), plan.frame_count)
+
+        segments = tuple(
+            PlannedSegment(shot, "missing_input_slate", None, None, 0, ("test-only",))
+            for shot in plan.shots
+        )
+        inputs, graph = _build_filter(plan, "preview", segments)
+        self.assertEqual(inputs, [])
+        self.assertEqual(graph.count("xfade=transition=custom"), 7)
+        self.assertEqual(graph.count("P*P*(3-2*P)"), 14)
+        self.assertIn("A*(P*P*(3-2*P))+B*(1-(P*P*(3-2*P)))", graph)
+        self.assertNotIn("A*(1-(P*P*(3-2*P)))+B*(P*P*(3-2*P))", graph)
+        self.assertIn("offset=17.7", graph)
+        self.assertIn("offset=21.7", graph)
+        self.assertIn("offset=24.7", graph)
+        self.assertIn("trim=start_frame=0:end_frame=1350", graph)
+
+    def test_invalid_transition_contracts_fail_closed(self):
+        source = json.loads(PLAN.read_text(encoding="utf-8"))
+        attacks = {
+            "all seven": lambda value: value["transition_policy"]["boundaries"].pop(),
+            "short positive even duration": lambda value: value["transition_policy"]["boundaries"][0].update(duration_frames=17),
+            "does not match its shot boundary": lambda value: value["transition_policy"]["boundaries"][0].update(from_shot=4, to_shot=5),
+            "approved style": lambda value: value["transition_policy"]["boundaries"][0].update(style="hard_cut"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            for expected, mutate in attacks.items():
+                with self.subTest(expected=expected):
+                    candidate = json.loads(json.dumps(source))
+                    mutate(candidate)
+                    path.write_text(json.dumps(candidate), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, expected):
+                        load_plan(path)
 
     def test_invalid_profile_and_boundary_are_rejected(self):
         source = json.loads(PLAN.read_text(encoding="utf-8"))
@@ -232,7 +282,7 @@ class PresentationTimelineTests(unittest.TestCase):
         rejected(lambda record: record.update(verdict_path="../escaped-verdict.md"), "invalid verdict path")
 
     def test_existing_rgb_baseline_is_diagnostic_and_never_complete(self):
-        plan = load_plan(PLAN)
+        plan = load_plan(LEGACY_DIAGNOSTIC_PLAN)
         report = inspect_inputs(plan, BASELINE_INPUTS)
         self.assertFalse(report.complete)
         self.assertEqual(report.ready_genuine_roles, frozenset())
@@ -244,6 +294,9 @@ class PresentationTimelineTests(unittest.TestCase):
         self.assertEqual(_sha256(BASELINE_VIDEO), DIAGNOSTIC_BASELINE_IDENTITY["video_sha256"])
         with self.assertRaises(ValueError):
             plan_segments(plan, report, "complete")
+
+        with self.assertRaisesRegex(ValueError, "canonical immutable presentation plan"):
+            inspect_inputs(load_plan(PLAN), BASELINE_INPUTS)
 
     def test_pinned_diagnostic_blob_predates_the_storyboard_manifest(self):
         subprocess.run(
@@ -321,9 +374,9 @@ class PresentationTimelineTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
-                inspect_inputs(load_plan(PLAN), manifest)
+                inspect_inputs(load_plan(LEGACY_DIAGNOSTIC_PLAN), manifest)
             with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
-                render_presentation(PLAN, manifest, root / "output", "preview", "diagnostic", "unreachable", "unreachable")
+                render_presentation(LEGACY_DIAGNOSTIC_PLAN, manifest, root / "output", "preview", "diagnostic", "unreachable", "unreachable")
 
     def test_arbitrary_placeholders_and_missing_hashes_cannot_be_complete(self):
         plan = load_plan(PLAN)
@@ -452,7 +505,7 @@ class PresentationTimelineTests(unittest.TestCase):
             self.assertTrue(any("view manifest producer source hash mismatch" in error for error in errors))
 
     def test_alternate_diagnostic_manifest_is_rejected_even_for_byte_identical_storyboard_content(self):
-        plan = load_plan(PLAN)
+        plan = load_plan(LEGACY_DIAGNOSTIC_PLAN)
         with tempfile.TemporaryDirectory() as directory:
             source_reference = _materialize_reference(Path(directory) / "01_enter_aisle_rgb.png")
             copied_reference = Path(directory) / "unrelated-looking-video.mp4"
@@ -487,12 +540,12 @@ class PresentationTimelineTests(unittest.TestCase):
     def test_diagnostic_mode_cannot_write_delivery_profile(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "restricted to the 1280x720 preview"):
-                render_presentation(PLAN, BASELINE_INPUTS, directory, "delivery", "diagnostic", "ffmpeg", "ffprobe")
+                render_presentation(LEGACY_DIAGNOSTIC_PLAN, BASELINE_INPUTS, directory, "delivery", "diagnostic", "ffmpeg", "ffprobe")
 
     def test_diagnostic_output_claim_is_limited_to_the_pinned_source_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = render_presentation(
-                PLAN,
+                LEGACY_DIAGNOSTIC_PLAN,
                 BASELINE_INPUTS,
                 directory,
                 "preview",
@@ -630,6 +683,28 @@ class CompletePresentationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "classification is forged"):
             self._report(forged_classification)
 
+    def test_transition_fixture_has_moving_geometry_and_visible_timestamp_progression(self):
+        from PIL import Image, ImageChops, ImageStat
+
+        source = self.fixture["technical_dir"] / "sensor_activation_1080p.mp4"
+        extracted = self.root / "structured_transition_fixture"
+        extracted.mkdir(exist_ok=True)
+        subprocess.run(
+            [
+                str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(source),
+                "-vf", "select='eq(n\\,0)+eq(n\\,30)',scale=640:360", "-fps_mode", "vfr",
+                "-y", str(extracted / "frame_%02d.png"),
+            ],
+            check=True,
+        )
+        frames = [Image.open(path).convert("RGB") for path in sorted(extracted.glob("frame_*.png"))]
+        self.assertEqual(len(frames), 2)
+        full_rms = max(ImageStat.Stat(ImageChops.difference(*frames)).rms)
+        timestamp_band = [frame.crop((0, 0, 640, 56)) for frame in frames]
+        timestamp_rms = max(ImageStat.Stat(ImageChops.difference(*timestamp_band)).rms)
+        self.assertGreater(full_rms, 10.0, "technical fixture must contain structured moving geometry")
+        self.assertGreater(timestamp_rms, 1.0, "technical fixture must visibly advance its frame/time overlay")
+
     def test_complete_preview_is_exact_and_applies_declared_rgb_hflip(self):
         output = self.root / "preview"
         mutated_inputs = self.fixture["complete_inputs"].with_name("label_mutated_complete_inputs.json")
@@ -654,6 +729,8 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertEqual((manifest["probe"]["width"], manifest["probe"]["height"]), (1280, 720))
         self.assertEqual((manifest["probe"]["frame_count"], manifest["probe"]["audio_stream_count"]), (1350, 0))
         self.assertEqual(len(manifest["representative_frames"]), 36)
+        self.assertEqual([item["boundary_frame"] for item in manifest["transitions"]], list(SMOOTH_TRANSITION_BOUNDARIES))
+        self.assertTrue(all(item["frame_budget_delta"] == 0 for item in manifest["transitions"]))
         self.assertTrue(all(item["presentation_transform"] == PRESENTATION_TRANSFORM_HFLIP for item in manifest["shots"][:5]))
         self.assertTrue(all(item["presentation_transform"] is None for item in manifest["shots"][5:]))
         from PIL import Image
@@ -663,6 +740,144 @@ class CompletePresentationTests(unittest.TestCase):
         right = frame.getpixel((1200, 360))
         self.assertGreater(left[2], left[0], "hflip must move the blue raw right half to presentation left")
         self.assertGreater(right[0], right[2], "hflip must move the red raw left half to presentation right")
+
+        plan = load_plan(PLAN)
+        segments = plan_segments(plan, report, "complete")
+        segments_by_shot = {segment.shot.number: segment for segment in segments}
+        shots_by_number = {item["number"]: item for item in manifest["shots"]}
+        for transition, declared in zip(plan.transitions, manifest["transitions"]):
+            outgoing = segments_by_shot[transition.from_shot]
+            incoming = segments_by_shot[transition.to_shot]
+            self.assertEqual(declared["classification"], {
+                "kind": "editorial_temporal_blend",
+                "co_timed": False,
+                "sensor_fusion": False,
+                "geometry_fusion": False,
+                "claim": "presentation-only transition between independently rendered source clips; not a sensor-fusion or co-timed measurement product",
+            })
+            self.assertFalse(declared["shot_assignment"]["exclusive"])
+            self.assertEqual(
+                declared["shot_assignment"]["shared_between_shots"],
+                [transition.from_shot, transition.to_shot],
+            )
+            held = declared["held_sources"]
+            self.assertEqual(held["outgoing"]["source_frame"], outgoing.source_start_frame + outgoing.shot.frame_count - 1)
+            self.assertEqual(held["incoming"]["source_frame"], incoming.source_start_frame)
+            self.assertAlmostEqual(
+                held["outgoing"]["source_clip_pts_s"],
+                (outgoing.source_start_frame + outgoing.shot.frame_count - 1) / plan.fps,
+            )
+            self.assertAlmostEqual(held["incoming"]["source_clip_pts_s"], incoming.source_start_frame / plan.fps)
+            self.assertEqual(
+                held["outgoing"]["source_data_time_extent"],
+                {
+                    "start_s": outgoing.source_time_range_s[0],
+                    "end_s": outgoing.source_time_range_s[1],
+                    "basis": outgoing.source_time_basis,
+                },
+            )
+            self.assertEqual(
+                held["incoming"]["source_data_time_extent"],
+                {
+                    "start_s": incoming.source_time_range_s[0],
+                    "end_s": incoming.source_time_range_s[1],
+                    "basis": incoming.source_time_basis,
+                },
+            )
+            for side, segment, endpoint in (
+                ("outgoing", outgoing, 1),
+                ("incoming", incoming, 0),
+            ):
+                source = held[side]
+                self.assertNotIn("source_frame_timestamp_s", source)
+                if segment.source_role == "rgb_capture":
+                    self.assertEqual(source["measurement_time_binding"]["status"], "validated")
+                    self.assertEqual(source["measurement_timestamp_s"], segment.source_time_range_s[endpoint])
+                    self.assertEqual(source["measurement_time_basis"], segment.source_time_basis)
+                else:
+                    self.assertEqual(source["measurement_time_binding"]["status"], "unavailable")
+                    self.assertIsNone(source["measurement_timestamp_s"])
+                    self.assertIsNone(source["measurement_time_basis"])
+                    self.assertNotEqual(
+                        source["measurement_timestamp_s"],
+                        segment.source_time_range_s[endpoint],
+                        "aggregate technical data extent must not be presented as a held-frame measurement timestamp",
+                    )
+            self.assertEqual(held["outgoing"]["held_film_frames"], {
+                "start_frame": transition.boundary_frame,
+                "end_frame_exclusive": transition.end_frame_exclusive,
+            })
+            self.assertEqual(held["incoming"]["held_film_frames"], {
+                "start_frame": transition.start_frame,
+                "end_frame_exclusive": transition.boundary_frame,
+            })
+            self.assertFalse(held["outgoing"]["co_timed_with_other_source"])
+            self.assertFalse(held["incoming"]["co_timed_with_other_source"])
+            self.assertEqual(held["outgoing"]["source_video_sha256"], outgoing.video_sha256)
+            self.assertEqual(held["incoming"]["source_receipt_sha256"], incoming.receipt_sha256)
+            if transition.boundary_frame == 660:
+                self.assertEqual(held["outgoing"]["source_frame"], 119)
+                self.assertAlmostEqual(held["outgoing"]["source_clip_pts_s"], 119 / 30)
+                self.assertEqual(held["incoming"]["source_frame"], 0)
+                self.assertEqual(held["incoming"]["source_clip_pts_s"], 0.0)
+                self.assertIsNone(held["outgoing"]["measurement_timestamp_s"])
+                self.assertIsNone(held["incoming"]["measurement_timestamp_s"])
+            law = declared["weight_law"]
+            self.assertEqual(law["ffmpeg_progress_direction"], "P descends from 1 toward 0")
+            samples = law["per_frame"]
+            self.assertEqual([sample["film_frame"] for sample in samples], list(range(transition.start_frame, transition.end_frame_exclusive)))
+            self.assertEqual(samples[0]["outgoing_weight"], 1.0)
+            self.assertEqual(samples[0]["incoming_weight"], 0.0)
+            self.assertTrue(all(abs(sample["outgoing_weight"] + sample["incoming_weight"] - 1.0) < 1e-10 for sample in samples))
+            for relative_frame, sample in enumerate(samples):
+                progress = 1.0 - relative_frame / transition.duration_frames
+                expected_outgoing = progress * progress * (3.0 - 2.0 * progress)
+                self.assertAlmostEqual(sample["descending_progress"], progress, places=11)
+                self.assertAlmostEqual(sample["outgoing_weight"], expected_outgoing, places=11)
+                self.assertEqual(sample["nominal_shot"], plan.shot_for_frame(sample["film_frame"]).number)
+            self.assertTrue(all(first["outgoing_weight"] >= second["outgoing_weight"] for first, second in zip(samples, samples[1:])))
+            self.assertTrue(all(first["incoming_weight"] <= second["incoming_weight"] for first, second in zip(samples, samples[1:])))
+            self.assertEqual(law["entry_guard"]["film_frame"], transition.start_frame - 1)
+            self.assertEqual(law["exit_guard"]["film_frame"], transition.end_frame_exclusive)
+            for shot_number in (transition.from_shot, transition.to_shot):
+                shared = shots_by_number[shot_number]["editorial_shared_transition_frames"]
+                self.assertTrue(any(
+                    item["start_frame"] == transition.start_frame
+                    and item["end_frame_exclusive"] == transition.end_frame_exclusive
+                    and item["exclusive_assignment"] is False
+                    for item in shared
+                ))
+
+        transition_dir = output / "transition_boundary_frames"
+        transition_dir.mkdir()
+        from PIL import ImageChops, ImageStat
+
+        for transition in plan.transitions:
+            prefix = transition_dir / f"boundary_{transition.boundary_frame}_frame_%02d.png"
+            subprocess.run(
+                [
+                    str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(output / manifest["video"]),
+                    "-vf",
+                    (
+                        f"select='between(n\\,{transition.start_frame - 1}\\,{transition.end_frame_exclusive})',"
+                        "scale=320:180"
+                    ),
+                    "-fps_mode", "vfr", "-y", str(prefix),
+                ],
+                check=True,
+            )
+            count = transition.duration_frames + 2
+            selected = sorted(transition_dir.glob(f"boundary_{transition.boundary_frame}_frame_*.png"))
+            self.assertEqual(len(selected), count)
+            window = [Image.open(path).convert("RGB") for path in selected]
+            adjacent_rms = [
+                max(ImageStat.Stat(ImageChops.difference(first, second)).rms)
+                for first, second in zip(window, window[1:])
+            ]
+            self.assertEqual(len(adjacent_rms), transition.duration_frames + 1)
+            self.assertLess(adjacent_rms[0], 48.0, f"transition at {transition.boundary_frame} jumps on entry")
+            self.assertLess(adjacent_rms[-1], 48.0, f"transition at {transition.boundary_frame} jumps on exit")
+            self.assertLess(max(adjacent_rms), 48.0, f"transition at {transition.boundary_frame} has an abrupt adjacent-frame jump")
 
     def test_reviewed_orientation_operations_drive_filters_and_reject_forgery(self):
         plan = load_plan(PLAN)

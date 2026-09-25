@@ -9,6 +9,7 @@ labelled fallbacks.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,10 @@ EXPECTED_SHOT_BOUNDARIES = (
     (1200, 1350),
 )
 
+SMOOTH_TRANSITION_BOUNDARIES = (540, 660, 750, 840, 960, 1080, 1200)
+LEGACY_DIAGNOSTIC_PLAN_RELATIVE = "config/presentation/diagnostic_storyboard_legacy.yaml"
+LEGACY_DIAGNOSTIC_PLAN_SHA256_LF = "5a7e98db32134ba8f6507e60534a056bf9e5e35f3290d61eb9fa6b684479bc5f"
+
 
 def _mapping(path: Path) -> dict[str, Any]:
     if not path.is_file():
@@ -55,6 +60,11 @@ def _positive_int(value: Any, name: str) -> int:
     if result <= 0 or result != value:
         raise ValueError(f"{name} must be a positive integer")
     return result
+
+
+def _lf_text_sha256(path: Path) -> str:
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -83,6 +93,29 @@ class DiagnosticFallback:
 
 
 @dataclass(frozen=True)
+class Transition:
+    from_shot: int
+    to_shot: int
+    boundary_frame: int
+    duration_frames: int
+    style: str
+    easing: str
+    intent: str
+
+    @property
+    def half_duration_frames(self) -> int:
+        return self.duration_frames // 2
+
+    @property
+    def start_frame(self) -> int:
+        return self.boundary_frame - self.half_duration_frames
+
+    @property
+    def end_frame_exclusive(self) -> int:
+        return self.boundary_frame + self.half_duration_frames
+
+
+@dataclass(frozen=True)
 class Shot:
     number: int
     slug: str
@@ -107,6 +140,7 @@ class PresentationPlan:
     profiles: dict[str, RenderProfile]
     role_contracts: dict[str, RoleContract]
     shots: tuple[Shot, ...]
+    transitions: tuple[Transition, ...]
 
     def shot_for_frame(self, frame_index: int) -> Shot:
         if frame_index < 0 or frame_index >= self.frame_count:
@@ -115,6 +149,9 @@ class PresentationPlan:
             if shot.start_frame <= frame_index < shot.end_frame_exclusive:
                 return shot
         raise RuntimeError(f"frame {frame_index} is not covered by the timeline")
+
+    def transition_for_boundary(self, frame_index: int) -> Transition | None:
+        return next((item for item in self.transitions if item.boundary_frame == frame_index), None)
 
 
 @dataclass(frozen=True)
@@ -278,7 +315,51 @@ def load_plan(path: str | Path) -> PresentationPlan:
         )
     if sum(shot.frame_count for shot in shots) != frame_count:
         raise ValueError("shot frame counts do not total the presentation frame_count")
-    return PresentationPlan(source, fps, duration, frame_count, profiles, contracts, tuple(shots))
+
+    transition_policy = data.get("transition_policy")
+    if transition_policy is None:
+        normalized_source = source.as_posix().lower()
+        if not normalized_source.endswith(LEGACY_DIAGNOSTIC_PLAN_RELATIVE.lower()) or _lf_text_sha256(source) != LEGACY_DIAGNOSTIC_PLAN_SHA256_LF:
+            raise ValueError("production transition_policy is required; only the exact frozen legacy diagnostic plan may omit it")
+        return PresentationPlan(source, fps, duration, frame_count, profiles, contracts, tuple(shots), ())
+    if not isinstance(transition_policy, dict):
+        raise ValueError("transition_policy must be a mapping")
+    if transition_policy.get("mode") != "symmetric_boundary_blend_v1":
+        raise ValueError("transition_policy mode must be symmetric_boundary_blend_v1")
+    if transition_policy.get("frame_budget") != "transition windows straddle shot boundaries and consume no additional delivery frames":
+        raise ValueError("transition_policy must preserve the exact delivery frame budget")
+    transition_data = transition_policy.get("boundaries")
+    if not isinstance(transition_data, list) or len(transition_data) != len(SMOOTH_TRANSITION_BOUNDARIES):
+        raise ValueError("transition_policy must declare all seven technical boundaries")
+    transitions: list[Transition] = []
+    for index, item in enumerate(transition_data):
+        if not isinstance(item, dict):
+            raise ValueError(f"transition {index} must be a mapping")
+        from_shot = _positive_int(item.get("from_shot"), f"transitions[{index}].from_shot")
+        to_shot = _positive_int(item.get("to_shot"), f"transitions[{index}].to_shot")
+        boundary_frame = int(item.get("boundary_frame", -1))
+        duration_frames = _positive_int(item.get("duration_frames"), f"transitions[{index}].duration_frames")
+        expected_boundary = SMOOTH_TRANSITION_BOUNDARIES[index]
+        if boundary_frame != expected_boundary:
+            raise ValueError(f"transition {index} must use boundary {expected_boundary}")
+        outgoing = shots[from_shot - 1] if 0 < from_shot <= len(shots) else None
+        incoming = shots[to_shot - 1] if 0 < to_shot <= len(shots) else None
+        if outgoing is None or incoming is None or to_shot != from_shot + 1:
+            raise ValueError(f"transition at frame {boundary_frame} must join adjacent shots")
+        if outgoing.end_frame_exclusive != boundary_frame or incoming.start_frame != boundary_frame:
+            raise ValueError(f"transition at frame {boundary_frame} does not match its shot boundary")
+        if duration_frames % 2 or duration_frames >= min(outgoing.frame_count, incoming.frame_count):
+            raise ValueError(f"transition at frame {boundary_frame} must have a short positive even duration")
+        style = str(item.get("style", ""))
+        easing = str(item.get("easing", ""))
+        intent = str(item.get("intent", "")).strip()
+        if style != "smooth_crossfade" or easing != "smoothstep" or not intent:
+            raise ValueError(f"transition at frame {boundary_frame} lacks the approved style, easing, or intent")
+        transitions.append(Transition(from_shot, to_shot, boundary_frame, duration_frames, style, easing, intent))
+    for previous, current in zip(transitions, transitions[1:]):
+        if previous.end_frame_exclusive > current.start_frame:
+            raise ValueError("transition windows must not overlap")
+    return PresentationPlan(source, fps, duration, frame_count, profiles, contracts, tuple(shots), tuple(transitions))
 
 
 def inspect_inputs(

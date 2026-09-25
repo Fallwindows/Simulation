@@ -89,7 +89,10 @@ status, claims, or the visible fixture watermark.
 
 The checked-in `diagnostic_baseline_inputs.json` intentionally supplies only
 `demo/walking_aisle_final_hifi.mp4`. Diagnostic mode accepts that exact
-repository path, SHA-256, Git blob, canonical manifest, and canonical plan.
+repository path, SHA-256, Git blob, canonical manifest, and the frozen
+pre-transition `diagnostic_storyboard_legacy.yaml` plan. The production
+`storyboard.yaml` carries the current transition policy and is rejected for
+this historical diagnostic identity.
 The baseline was introduced at commit `d5e825c8` before the storyboard
 manifest at `d315aa9c`; alternate manifests and videos are rejected even when
 they claim the same diagnostic producer. Its provenance is
@@ -105,7 +108,7 @@ Control, while Isaac Python can load the installed renderer dependencies:
 ```powershell
 C:\isaacsim\python.bat `
   -m simulator.presentation.render_video `
-  --plan config/presentation/storyboard.yaml `
+  --plan config/presentation/diagnostic_storyboard_legacy.yaml `
   --inputs config/presentation/diagnostic_baseline_inputs.json `
   --output-dir runs/presentation-preview `
   --profile preview --mode diagnostic `
@@ -145,6 +148,30 @@ Renderer code, technical plan, and source-catalog receipt hashes canonicalize
 text line endings to LF. Producer receipts therefore validate identically from
 Windows CRLF and LF checkouts.
 
+The production `storyboard.yaml` applies short symmetric smoothstep blends at
+frames 540, 660, 750, 840, 960, 1080, and 1200. Each window freezes only the
+edge frames needed to straddle its boundary, consumes no extra timeline frames,
+and preserves the exact 1,350-frame delivery budget. RGB shots 01-05 remain
+frame-contiguous from the original capture without added dissolves.
+FFmpeg's custom-xfade progress `P` descends from one toward zero, so the
+renderer weights the outgoing source with `smoothstep(P)` and the incoming
+source with `1-smoothstep(P)`. The generated moving-geometry fixture checks
+every adjacent output frame from one frame before each transition through the
+first frame after it, including both entry and exit edges.
+
+The delivery manifest classifies each transition as an editorial temporal
+blend between independently rendered clips. It explicitly records that the
+frames are neither co-timed measurements nor sensor, geometry, or map fusion.
+Each mixed frame is shared between both shots; its nominal timeline shot is
+retained only as an index. The manifest binds the exact outgoing and incoming
+videos and receipts, the cloned edge-frame numbers, their independent time
+bases and data extents, the clone ranges, and the smoothstep weights for every
+mixed frame. Source clip PTS is recorded independently from sensor time. RGB
+edge frames retain their validated frame-index-to-simulation-stamp binding.
+Technical receipts currently provide only aggregate source-data extents, so
+their held-frame measurement timestamps remain explicitly unavailable rather
+than reusing an extent endpoint.
+
 ## Current new-goal limitations
 
 The retained technical renderer remains operational but does not satisfy the
@@ -153,10 +180,8 @@ finalized SLAM map, and `sensor_activation` draws explanatory rays to selected
 final-map points rather than timestamped current-scan returns. Every technical
 receipt and delivery manifest records this status as `unfinished`.
 
-The prior 1,350-frame audit also found hard source resets at frames 540, 660,
-750, 840, 960, 1080, and 1200. The largest adjacent visual change is the
-RGB-to-technical boundary at frames 539→540. This port replaces integer pose
-indexing with continuous interpolation for the retained sensor camera, but no
-test in this unit certifies whole-film motion or those shot transitions. Those
-items remain G02-P2 visual blockers pending current-scan view replacement and
-clip review.
+The transition regression proves the renderer's editorial continuity policy
+with structured generated inputs. It does not certify the content, geometry,
+motion quality, or selective-scan truth of production technical clips. Those
+properties still require review of the P2 current-scan outputs and the final
+assembled film.
