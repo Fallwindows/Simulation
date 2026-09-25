@@ -165,8 +165,12 @@ frames are neither co-timed measurements nor sensor, geometry, or map fusion.
 Each mixed frame is shared between both shots; its nominal timeline shot is
 retained only as an index. The manifest binds the exact outgoing and incoming
 videos and receipts, the cloned edge-frame numbers, their independent time
-bases and timestamps, the clone ranges, and the smoothstep weights for every
-mixed frame.
+bases and data extents, the clone ranges, and the smoothstep weights for every
+mixed frame. Source clip PTS is recorded independently from sensor time. RGB
+edge frames retain their validated frame-index-to-simulation-stamp binding.
+Technical receipts currently provide only aggregate source-data extents, so
+their held-frame measurement timestamps remain explicitly unavailable rather
+than reusing an extent endpoint.
 
 ## Current new-goal limitations
 

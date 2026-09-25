@@ -222,14 +222,51 @@ def _smoothstep(value: float) -> float:
     return value * value * (3.0 - 2.0 * value)
 
 
+def _held_source_time(
+    segment: PlannedSegment,
+    source_frame: int,
+    range_endpoint: int,
+    fps: int,
+) -> dict[str, Any]:
+    data_extent = None
+    if segment.source_time_range_s is not None:
+        data_extent = {
+            "start_s": segment.source_time_range_s[0],
+            "end_s": segment.source_time_range_s[1],
+            "basis": segment.source_time_basis,
+        }
+    if segment.source_role == "rgb_capture" and segment.source_time_range_s is not None:
+        measurement_timestamp = segment.source_time_range_s[range_endpoint]
+        measurement_basis = segment.source_time_basis
+        binding = {
+            "status": "validated",
+            "mechanism": "contiguous RGB frame_index to simulation stamp mapping validated by the complete-bundle producer",
+        }
+    else:
+        measurement_timestamp = None
+        measurement_basis = None
+        binding = {
+            "status": "unavailable",
+            "reason": "producer supplies only an aggregate source-data extent, not a validated source-video-frame to measurement-time mapping",
+        }
+    return {
+        "source_clip_pts_s": round(source_frame / fps, 12),
+        "source_clip_time_basis": f"source video CFR PTS from stream start at {fps} fps",
+        "source_data_time_extent": data_extent,
+        "measurement_timestamp_s": measurement_timestamp,
+        "measurement_time_basis": measurement_basis,
+        "measurement_time_binding": binding,
+    }
+
+
 def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment, ...]) -> list[dict[str, Any]]:
     by_shot = {segment.shot.number: segment for segment in segments}
     result = []
     for transition in plan.transitions:
         outgoing = by_shot[transition.from_shot]
         incoming = by_shot[transition.to_shot]
-        outgoing_timestamp = outgoing.source_time_range_s[1] if outgoing.source_time_range_s else None
-        incoming_timestamp = incoming.source_time_range_s[0] if incoming.source_time_range_s else None
+        outgoing_frame = outgoing.source_start_frame + outgoing.shot.frame_count - 1
+        incoming_frame = incoming.source_start_frame
         samples = []
         for relative_frame in range(transition.duration_frames):
             progress = 1.0 - relative_frame / transition.duration_frames
@@ -275,9 +312,8 @@ def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment,
                         "source_role": outgoing.source_role,
                         "source_video_sha256": outgoing.video_sha256,
                         "source_receipt_sha256": outgoing.receipt_sha256,
-                        "source_frame": outgoing.source_start_frame + outgoing.shot.frame_count - 1,
-                        "source_time_basis": outgoing.source_time_basis,
-                        "source_frame_timestamp_s": outgoing_timestamp,
+                        "source_frame": outgoing_frame,
+                        **_held_source_time(outgoing, outgoing_frame, 1, plan.fps),
                         "co_timed_with_other_source": False,
                         "held_film_frames": {
                             "start_frame": transition.boundary_frame,
@@ -290,9 +326,8 @@ def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment,
                         "source_role": incoming.source_role,
                         "source_video_sha256": incoming.video_sha256,
                         "source_receipt_sha256": incoming.receipt_sha256,
-                        "source_frame": incoming.source_start_frame,
-                        "source_time_basis": incoming.source_time_basis,
-                        "source_frame_timestamp_s": incoming_timestamp,
+                        "source_frame": incoming_frame,
+                        **_held_source_time(incoming, incoming_frame, 0, plan.fps),
                         "co_timed_with_other_source": False,
                         "held_film_frames": {
                             "start_frame": transition.start_frame,

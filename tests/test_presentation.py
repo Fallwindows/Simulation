@@ -763,10 +763,46 @@ class CompletePresentationTests(unittest.TestCase):
             held = declared["held_sources"]
             self.assertEqual(held["outgoing"]["source_frame"], outgoing.source_start_frame + outgoing.shot.frame_count - 1)
             self.assertEqual(held["incoming"]["source_frame"], incoming.source_start_frame)
-            self.assertEqual(held["outgoing"]["source_time_basis"], outgoing.source_time_basis)
-            self.assertEqual(held["incoming"]["source_time_basis"], incoming.source_time_basis)
-            self.assertEqual(held["outgoing"]["source_frame_timestamp_s"], outgoing.source_time_range_s[1])
-            self.assertEqual(held["incoming"]["source_frame_timestamp_s"], incoming.source_time_range_s[0])
+            self.assertAlmostEqual(
+                held["outgoing"]["source_clip_pts_s"],
+                (outgoing.source_start_frame + outgoing.shot.frame_count - 1) / plan.fps,
+            )
+            self.assertAlmostEqual(held["incoming"]["source_clip_pts_s"], incoming.source_start_frame / plan.fps)
+            self.assertEqual(
+                held["outgoing"]["source_data_time_extent"],
+                {
+                    "start_s": outgoing.source_time_range_s[0],
+                    "end_s": outgoing.source_time_range_s[1],
+                    "basis": outgoing.source_time_basis,
+                },
+            )
+            self.assertEqual(
+                held["incoming"]["source_data_time_extent"],
+                {
+                    "start_s": incoming.source_time_range_s[0],
+                    "end_s": incoming.source_time_range_s[1],
+                    "basis": incoming.source_time_basis,
+                },
+            )
+            for side, segment, endpoint in (
+                ("outgoing", outgoing, 1),
+                ("incoming", incoming, 0),
+            ):
+                source = held[side]
+                self.assertNotIn("source_frame_timestamp_s", source)
+                if segment.source_role == "rgb_capture":
+                    self.assertEqual(source["measurement_time_binding"]["status"], "validated")
+                    self.assertEqual(source["measurement_timestamp_s"], segment.source_time_range_s[endpoint])
+                    self.assertEqual(source["measurement_time_basis"], segment.source_time_basis)
+                else:
+                    self.assertEqual(source["measurement_time_binding"]["status"], "unavailable")
+                    self.assertIsNone(source["measurement_timestamp_s"])
+                    self.assertIsNone(source["measurement_time_basis"])
+                    self.assertNotEqual(
+                        source["measurement_timestamp_s"],
+                        segment.source_time_range_s[endpoint],
+                        "aggregate technical data extent must not be presented as a held-frame measurement timestamp",
+                    )
             self.assertEqual(held["outgoing"]["held_film_frames"], {
                 "start_frame": transition.boundary_frame,
                 "end_frame_exclusive": transition.end_frame_exclusive,
@@ -779,6 +815,13 @@ class CompletePresentationTests(unittest.TestCase):
             self.assertFalse(held["incoming"]["co_timed_with_other_source"])
             self.assertEqual(held["outgoing"]["source_video_sha256"], outgoing.video_sha256)
             self.assertEqual(held["incoming"]["source_receipt_sha256"], incoming.receipt_sha256)
+            if transition.boundary_frame == 660:
+                self.assertEqual(held["outgoing"]["source_frame"], 119)
+                self.assertAlmostEqual(held["outgoing"]["source_clip_pts_s"], 119 / 30)
+                self.assertEqual(held["incoming"]["source_frame"], 0)
+                self.assertEqual(held["incoming"]["source_clip_pts_s"], 0.0)
+                self.assertIsNone(held["outgoing"]["measurement_timestamp_s"])
+                self.assertIsNone(held["incoming"]["measurement_timestamp_s"])
             law = declared["weight_law"]
             self.assertEqual(law["ffmpeg_progress_direction"], "P descends from 1 toward 0")
             samples = law["per_frame"]
