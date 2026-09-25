@@ -1,0 +1,90 @@
+{
+  "fixture_dimensions_m": [
+    0.26,
+    0.018,
+    0.065
+  ],
+  "generator_version": 1,
+  "labels": {
+    "cereal_berry": {
+      "display_name": "BERRY CLOUD",
+      "texture": "price_cereal_berry.png",
+      "texture_sha256": "dc84e6b1834d43ceb2ef135195dba09ae37099e7893ba6accc5e1e0eeabe2958",
+      "unit_price": "$5.19",
+      "usd": "price_cereal_berry.usda",
+      "usd_sha256": "3eefde6c08449f1bbe167e328359ac010e435322f2a63cfbb6a1082b80c464fc"
+    },
+    "cereal_grain": {
+      "display_name": "GRAIN DAY",
+      "texture": "price_cereal_grain.png",
+      "texture_sha256": "43f8128b7b9737b1d30ede01c17009c4bb9e4f3765a2866d6205ad333b2ddcae",
+      "unit_price": "$3.99",
+      "usd": "price_cereal_grain.usda",
+      "usd_sha256": "7be2fabbd9bb6a6dca7e474b519e7561da886eff348322fbcb74297aa3782af2"
+    },
+    "cereal_harvest": {
+      "display_name": "HARVEST LOOP",
+      "texture": "price_cereal_harvest.png",
+      "texture_sha256": "6372bf6bde805ddcc7dd85984bd5b9162a85c6b7a818d950a477fe9147dd9344",
+      "unit_price": "$4.79",
+      "usd": "price_cereal_harvest.usda",
+      "usd_sha256": "264701486cd9270917eea7de6d58c41764c01db938c81d3fca99146fbbd6f714"
+    },
+    "cereal_sunrise": {
+      "display_name": "SUNRISE OATS",
+      "texture": "price_cereal_sunrise.png",
+      "texture_sha256": "80ed07b5e1490c3f5962e9a5eeefc49a9675b76e740af0f9e9d2ed45f075c034",
+      "unit_price": "$4.29",
+      "usd": "price_cereal_sunrise.usda",
+      "usd_sha256": "75a271a11548d89441d0b791b051a583c23c2590042d6c353208e21b74d773af"
+    },
+    "coffee_bag": {
+      "display_name": "HOUSE COFFEE",
+      "texture": "price_coffee_bag.png",
+      "texture_sha256": "c6e8fd94496d1f52772d5a15f3ad5607f4a0804def4dd285f57b6bc045971943",
+      "unit_price": "$8.49",
+      "usd": "price_coffee_bag.usda",
+      "usd_sha256": "8055d116b4cd1ede134cc6cdac1986541199a756dc64556d5c5c39e78b42830e"
+    },
+    "coffee_canister": {
+      "display_name": "ROAST COFFEE",
+      "texture": "price_coffee_canister.png",
+      "texture_sha256": "4c732543e220ecf05d6270816f70deb14504bcc5b14b84e6742e76ee7ab4bfad",
+      "unit_price": "$7.99",
+      "usd": "price_coffee_canister.usda",
+      "usd_sha256": "bb437e4c091eab5c25d18ebe04145353f51b74a8a6ef6eec4ffe15a7cfa81aa2"
+    },
+    "snack_wafer": {
+      "display_name": "WAFER WAVE",
+      "texture": "price_snack_wafer.png",
+      "texture_sha256": "4f6192070ac3496ca52d78eef68be1f057909a1d917a65d43301596c872e10b1",
+      "unit_price": "$3.29",
+      "usd": "price_snack_wafer.usda",
+      "usd_sha256": "2a977ee7c541298d9557df1d329aaae404b04177dd6998fd49535da4ed50d4fb"
+    },
+    "tea_box": {
+      "display_name": "GARDEN TEA",
+      "texture": "price_tea_box.png",
+      "texture_sha256": "8409454bdd719e6d606e7bc1ad2bbd9f60c1b3cd8a0c317cb878303c0b212974",
+      "unit_price": "$4.59",
+      "usd": "price_tea_box.usda",
+      "usd_sha256": "c37a832cda2bae0dc7230f3a59173d20df25ce41d11207b0bc129a25e2ce022e"
+    }
+  },
+  "schema": "grocery.scene_price_displays",
+  "source_template": "assets/retail/usd/price_display.usda",
+  "source_template_sha256": "e4e572a4224915d0b51fe6470861e3deb7ba20caae000ac27a3c2afd48e781db",
+  "texture_size_px": [
+    768,
+    256
+  ],
+  "toolchain": {
+    "fonts": {
+      "C:\\Windows\\Fonts\\segoeui.ttf": "8134dbcd09e7b123c9a7f229d49cffbcb01352cc72ea5e1076b65d0dca9f73cd",
+      "C:\\Windows\\Fonts\\segoeuib.ttf": "aeb9e4a6ec5cc59f4d72df8189032d7dbb28f45161cf1552174818b5465dac4e"
+    },
+    "pillow": "12.3.0",
+    "zlib": "1.3.2"
+  },
+  "version": 1
+}

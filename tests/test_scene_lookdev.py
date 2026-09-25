@@ -13,9 +13,11 @@ from simulator.environment.aisle_builder import build_aisle_layout
 from simulator.environment.retail_catalog import load_retail_catalog
 from simulator.config.loader import load_scenario
 from simulator.runtime.isaac_sim_runner import (
+    HERO_PRICE_LABELS,
     _paced_wall_period_s,
     lidar_runtime_spec,
     runtime_dense_stock_references,
+    scene_price_display_path,
     store_shell_spec,
 )
 from simulator.runtime.representative_capture import (
@@ -59,6 +61,8 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertIn("floor_inlay", kinds)
 
     def test_legacy_front_reflection_is_allowlisted_bounded_and_idempotent(self):
+        self.assertEqual(_catalog_render_scale("cereal_sunrise", (1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
+        self.assertEqual(_catalog_render_scale("cereal_sunrise", (-1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
         self.assertEqual(_catalog_render_scale("frozen_pizza", (1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
         self.assertEqual(_catalog_render_scale("frozen_pizza", (-1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
         self.assertEqual(_catalog_render_scale("sports_drink", (1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
@@ -68,9 +72,9 @@ class SceneLookdevTests(unittest.TestCase):
         corrected_assets = [
             asset
             for asset in build_aisle_layout(scenario.environment).assets
-            if asset.asset_key in {"frozen_pizza", "sports_drink"}
+            if asset.asset_key in {"cereal_sunrise", "frozen_pizza", "sports_drink"}
         ]
-        for asset_key in ("frozen_pizza", "sports_drink"):
+        for asset_key in ("cereal_sunrise", "frozen_pizza", "sports_drink"):
             instances = [asset for asset in corrected_assets if asset.asset_key == asset_key]
             self.assertTrue(any("/r0/" in asset.semantic_id for asset in instances))
             self.assertTrue(any("/r1/" in asset.semantic_id for asset in instances))
@@ -83,6 +87,7 @@ class SceneLookdevTests(unittest.TestCase):
         spec = store_shell_spec(self.environment)
         boxes = spec["boxes"]
         references = spec["asset_references"]
+        price_displays = spec["price_displays"]
         kinds = {box["kind"] for box in boxes}
         names = {reference["name"] for reference in references}
         keys = {reference["asset_key"] for reference in references}
@@ -95,8 +100,8 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertEqual(len([name for name in names if name.startswith("hero_stock_")]), 18)
         self.assertEqual(len([name for name in names if name.startswith("hero_focus_stock_")]), 4)
         self.assertEqual(len([name for name in names if name.startswith("late_focus_stock_")]), 4)
-        self.assertEqual(len([name for name in names if name.startswith("hero_focus_price_")]), 4)
-        self.assertEqual(len([name for name in names if name.startswith("late_focus_price_")]), 4)
+        self.assertEqual(len([price for price in price_displays if price["name"].startswith("hero_focus_price_")]), 4)
+        self.assertEqual(len([price for price in price_displays if price["name"].startswith("late_focus_price_")]), 4)
         self.assertEqual(len([name for name in names if name.startswith("store_use_basket_")]), 2)
         self.assertIn("promo_market_sign", keys)
         self.assertIn("price_display", keys)
@@ -125,18 +130,59 @@ class SceneLookdevTests(unittest.TestCase):
         )
         box_names = {box["name"] for box in boxes}
         self.assertTrue({"hero_focus_price_rail", "late_focus_price_rail"} <= box_names)
+        self.assertEqual(len(HERO_PRICE_LABELS), 8)
+        self.assertEqual(len({label["unit_price"] for label in HERO_PRICE_LABELS.values()}), 8)
         for prefix in ("hero_focus", "late_focus"):
-            stock_y = sorted(
-                reference["position_xy_m"][1]
+            stock = sorted(
+                (
+                    reference["position_xy_m"][1],
+                    reference["asset_key"],
+                )
                 for reference in references
                 if reference["name"].startswith(f"{prefix}_stock_")
             )
-            price_y = sorted(
-                reference["position_xy_m"][1]
-                for reference in references
-                if reference["name"].startswith(f"{prefix}_price_")
+            prices = sorted(
+                (
+                    price["position_xy_m"][1],
+                    price["sku_key"],
+                    price["display_name"],
+                    price["unit_price"],
+                    price["asset_path"],
+                )
+                for price in price_displays
+                if price["name"].startswith(f"{prefix}_price_")
             )
-            self.assertEqual(stock_y, price_y)
+            self.assertEqual([(y, key) for y, key in stock], [(y, key) for y, key, *_ in prices])
+            for _, sku_key, display_name, unit_price, asset_path in prices:
+                self.assertEqual(display_name, HERO_PRICE_LABELS[sku_key]["display_name"])
+                self.assertEqual(unit_price, HERO_PRICE_LABELS[sku_key]["unit_price"])
+                self.assertEqual(asset_path, scene_price_display_path(sku_key))
+
+    def test_scene_price_displays_are_exact_deterministic_and_sku_bound(self):
+        import json
+
+        from tools.generate_scene_price_displays import OUTPUT_ROOT, _build_outputs
+
+        outputs, generated_manifest, manifest_bytes = _build_outputs()
+        committed_manifest_bytes = (OUTPUT_ROOT / "manifest.json").read_bytes()
+        self.assertEqual(committed_manifest_bytes, manifest_bytes)
+        committed_manifest = json.loads(committed_manifest_bytes.decode("utf-8"))
+        self.assertEqual(committed_manifest, generated_manifest)
+        self.assertEqual(set(committed_manifest["labels"]), set(HERO_PRICE_LABELS))
+        self.assertEqual(len(outputs), 16)
+        for sku_key, label in HERO_PRICE_LABELS.items():
+            metadata = committed_manifest["labels"][sku_key]
+            self.assertEqual(metadata["display_name"], label["display_name"])
+            self.assertEqual(metadata["unit_price"], label["unit_price"])
+            for role in ("texture", "usd"):
+                filename = metadata[role]
+                committed = (OUTPUT_ROOT / filename).read_bytes()
+                self.assertEqual(committed, outputs[filename])
+                self.assertEqual(hashlib.sha256(committed).hexdigest(), metadata[f"{role}_sha256"])
+            usd_source = (OUTPUT_ROOT / metadata["usd"]).read_text(encoding="utf-8")
+            self.assertIn(f'string grocery:sku_key = "{sku_key}"', usd_source)
+            self.assertIn(f'string grocery:display_name = "{label["display_name"]}"', usd_source)
+            self.assertIn(f'string grocery:unit_price = "{label["unit_price"]}"', usd_source)
 
     def test_hero_focus_and_store_baskets_have_positive_3d_clearance(self):
         scenario = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
@@ -277,6 +323,36 @@ class SceneLookdevTests(unittest.TestCase):
                     f"{reference['name']} leaves insufficient clearance from the M1 center path",
                 )
 
+        focus_stock_by_key = {
+            reference["asset_key"]: reference_obb(reference)
+            for reference in spec["asset_references"]
+            if reference["name"].startswith(("hero_focus_stock_", "late_focus_stock_"))
+        }
+        for price in spec["price_displays"]:
+            scale = price["scale_xyz"]
+            support_z = price["support_z_m"]
+            candidate = obb(
+                price["name"],
+                price["position_xy_m"],
+                0.26 * abs(scale[0]),
+                0.018 * abs(scale[1]),
+                price["rotation_rpy_deg"][2],
+                support_z,
+                support_z + 0.065 * abs(scale[2]),
+            )
+            collisions = [box[0] for box in box_obbs if intersects(candidate, box)]
+            self.assertEqual(collisions, [], f"{price['name']} penetrates structural boxes {collisions}")
+            aisleward_edge_y = max(point[1] for point in candidate[2])
+            self.assertLessEqual(
+                aisleward_edge_y,
+                -0.42,
+                f"{price['name']} leaves insufficient clearance from the M1 center path",
+            )
+            self.assertFalse(
+                intersects(candidate, focus_stock_by_key[price["sku_key"]]),
+                f"{price['name']} penetrates its associated {price['sku_key']} product",
+            )
+
         dense = runtime_dense_stock_references(layout, scenario.environment)
         for reference in dense:
             candidate = reference_obb(reference)
@@ -407,6 +483,8 @@ class SceneLookdevTests(unittest.TestCase):
         runner_source = (Path(__file__).resolve().parents[1] / "simulator/runtime/isaac_sim_runner.py").read_text(encoding="utf-8")
         self.assertIn('"scene_material_manifest"', runner_source)
         self.assertIn('"assets" / "scene" / "materials" / "manifest.json"', runner_source)
+        self.assertIn('"scene_price_display_manifest"', runner_source)
+        self.assertIn('SCENE_PRICE_DISPLAY_ROOT / "manifest.json"', runner_source)
 
     def test_capture_frame_selection_is_sorted_unique_and_bounded(self):
         self.assertEqual(parse_capture_frames("12, 0, 6", 13), (0, 6, 12))
