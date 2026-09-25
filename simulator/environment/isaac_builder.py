@@ -16,7 +16,7 @@ from simulator.environment.retail_catalog import load_retail_catalog
 # exterior copy reads correctly without changing measured bounds or aisle
 # placement. Keep this explicit allowlist scene-side until the shared packaging
 # generator is regenerated after the separate hero-art revision lands.
-_REFLECT_X_FOR_READABLE_FRONT = frozenset({"frozen_pizza", "sports_drink"})
+_REFLECT_X_FOR_READABLE_FRONT = frozenset({"cereal_sunrise", "frozen_pizza", "sports_drink"})
 
 
 def _catalog_render_scale(asset_key: str, scale_xyz) -> tuple[float, float, float]:

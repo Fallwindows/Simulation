@@ -27,6 +27,27 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+SCENE_PRICE_DISPLAY_ROOT = REPO_ROOT / "assets" / "scene" / "price_displays"
+HERO_PRICE_LABELS = {
+    "cereal_sunrise": {"display_name": "SUNRISE OATS", "unit_price": "$4.29"},
+    "cereal_harvest": {"display_name": "HARVEST LOOP", "unit_price": "$4.79"},
+    "cereal_grain": {"display_name": "GRAIN DAY", "unit_price": "$3.99"},
+    "cereal_berry": {"display_name": "BERRY CLOUD", "unit_price": "$5.19"},
+    "coffee_bag": {"display_name": "HOUSE COFFEE", "unit_price": "$8.49"},
+    "tea_box": {"display_name": "GARDEN TEA", "unit_price": "$4.59"},
+    "coffee_canister": {"display_name": "ROAST COFFEE", "unit_price": "$7.99"},
+    "snack_wafer": {"display_name": "WAFER WAVE", "unit_price": "$3.29"},
+}
+
+
+def scene_price_display_path(sku_key: str) -> Path:
+    """Return the committed per-SKU price-display asset path."""
+
+    if sku_key not in HERO_PRICE_LABELS:
+        raise KeyError(f"No scene price display is declared for SKU {sku_key!r}")
+    return SCENE_PRICE_DISPLAY_ROOT / f"price_{sku_key}.usda"
+
+
 def _ensure_bundled_ros_environment() -> dict[str, object]:
     """Validate and normalize Isaac's bundled ROS environment before startup.
 
@@ -149,6 +170,7 @@ def _capture_provenance(args: argparse.Namespace, scenario) -> dict[str, object]
             config_inputs.append({"role": role, "path": str(input_path), "sha256": _sha256_path(input_path)})
     asset_manifest = Path(scenario.environment.asset_manifest_path).resolve()
     scene_material_manifest = (REPO_ROOT / "assets" / "scene" / "materials" / "manifest.json").resolve()
+    scene_price_display_manifest = (SCENE_PRICE_DISPLAY_ROOT / "manifest.json").resolve()
     return {
         "git_commit": git("rev-parse", "HEAD"),
         "git_tree": git("rev-parse", "HEAD^{tree}"),
@@ -158,6 +180,10 @@ def _capture_provenance(args: argparse.Namespace, scenario) -> dict[str, object]
         "scene_material_manifest": {
             "path": str(scene_material_manifest),
             "sha256": _sha256_path(scene_material_manifest),
+        },
+        "scene_price_display_manifest": {
+            "path": str(scene_price_display_manifest),
+            "sha256": _sha256_path(scene_price_display_manifest),
         },
         "renderer": args.renderer,
         "headless": bool(args.headless),
@@ -473,6 +499,7 @@ def store_shell_spec(environment) -> dict[str, object]:
     # glass, with physical shelves, handles, and cool internal illumination.
     end_case_x = shell_end_x - 0.22
     asset_references: list[dict[str, object]] = []
+    price_displays: list[dict[str, object]] = []
     case_stock = (
         ("milk_gallon", "milk_carton", "yogurt_cup", "sports_drink", "juice_citrus"),
         ("juice_citrus", "juice_berry", "juice_green", "juice_apple", "water_sky", "sports_drink"),
@@ -741,11 +768,15 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "scale_xyz": (-scale, scale, scale),
             }
         )
-    for price_index, price_y in enumerate((-0.610, -0.815, -1.020, -1.225)):
-        asset_references.append(
+    for price_index, (sku_key, _, price_y, _, _, _) in enumerate(focus_specs):
+        label = HERO_PRICE_LABELS[sku_key]
+        price_displays.append(
             {
                 "name": f"hero_focus_price_{price_index}",
-                "asset_key": "price_display",
+                "sku_key": sku_key,
+                "display_name": label["display_name"],
+                "unit_price": label["unit_price"],
+                "asset_path": scene_price_display_path(sku_key),
                 "position_xy_m": (11.915, price_y),
                 "support_z_m": 1.115,
                 "rotation_rpy_deg": (0.0, 0.0, 90.0),
@@ -794,11 +825,15 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "scale_xyz": (-scale, scale, scale),
             }
         )
-    for price_index, price_y in enumerate((-0.610, -0.815, -1.020, -1.225)):
-        asset_references.append(
+    for price_index, (sku_key, _, price_y, _, _, _) in enumerate(late_focus_specs):
+        label = HERO_PRICE_LABELS[sku_key]
+        price_displays.append(
             {
                 "name": f"late_focus_price_{price_index}",
-                "asset_key": "price_display",
+                "sku_key": sku_key,
+                "display_name": label["display_name"],
+                "unit_price": label["unit_price"],
+                "asset_path": scene_price_display_path(sku_key),
                 "position_xy_m": (21.065, price_y),
                 "support_z_m": 1.115,
                 "rotation_rpy_deg": (0.0, 0.0, 90.0),
@@ -843,6 +878,7 @@ def store_shell_spec(environment) -> dict[str, object]:
         "boxes": tuple(boxes),
         "lights": tuple(lights),
         "asset_references": tuple(asset_references),
+        "price_displays": tuple(price_displays),
         # A restrained cool dome represents secondary bounce from the finished
         # store shell and prevents black shelf cavities under the area lights.
         "ambient_intensity": float(environment.lighting_lux) * 1.2,
@@ -1003,6 +1039,43 @@ def runtime_dense_stock_references(layout, environment) -> tuple[dict[str, objec
     return tuple(collision_free)
 
 
+def _build_scene_price_display(stage, price_spec: dict[str, object]) -> None:
+    """Reference one deterministic per-SKU electronic shelf label."""
+
+    from pxr import Gf, Sdf, UsdGeom
+
+    asset_path = Path(price_spec["asset_path"]).resolve()
+    if not asset_path.is_file():
+        raise FileNotFoundError(
+            f"Missing generated scene price display for {price_spec['sku_key']}: {asset_path}"
+        )
+    prim = stage.DefinePrim(
+        f"/World/GroceryAisle/store_context/{price_spec['name']}",
+        "Xform",
+    )
+    if not prim.GetReferences().AddReference(str(asset_path).replace("\\", "/")):
+        raise RuntimeError(f"Failed to reference scene price display {asset_path}")
+    prim.SetInstanceable(True)
+    x, y = price_spec["position_xy_m"]
+    scale_x, scale_y, scale_z = price_spec["scale_xyz"]
+    # The generated display preserves the catalog fixture's measured envelope.
+    z = float(price_spec["support_z_m"]) + 0.065 * abs(float(scale_z)) / 2.0
+    api = UsdGeom.XformCommonAPI(prim)
+    api.SetTranslate(Gf.Vec3d(float(x), float(y), z))
+    api.SetRotate(
+        Gf.Vec3f(*price_spec["rotation_rpy_deg"]),
+        UsdGeom.XformCommonAPI.RotationOrderXYZ,
+    )
+    api.SetScale(Gf.Vec3f(float(scale_x), float(scale_y), float(scale_z)))
+    prim.CreateAttribute("grocery:asset_key", Sdf.ValueTypeNames.String).Set("price_display")
+    prim.CreateAttribute("grocery:sku_key", Sdf.ValueTypeNames.String).Set(price_spec["sku_key"])
+    prim.CreateAttribute("grocery:display_name", Sdf.ValueTypeNames.String).Set(price_spec["display_name"])
+    prim.CreateAttribute("grocery:unit_price", Sdf.ValueTypeNames.String).Set(price_spec["unit_price"])
+    prim.CreateAttribute("grocery:semantic_id", Sdf.ValueTypeNames.String).Set(
+        f"scene_context/{price_spec['name']}/price_display/{price_spec['sku_key']}"
+    )
+
+
 def _build_store_shell(stage, environment, builder, layout=None) -> int:
     from pxr import Gf, UsdGeom, UsdLux
 
@@ -1048,10 +1121,18 @@ def _build_store_shell(stage, environment, builder, layout=None) -> int:
             asset_spec["scale_xyz"],
             f"scene_context/{asset_spec['name']}/{record.asset_key}",
         )
+    for price_spec in spec["price_displays"]:
+        _build_scene_price_display(stage, price_spec)
     ambient = UsdLux.DomeLight.Define(stage, "/World/GroceryAisle/lighting/ambient_bounce")
     ambient.GetIntensityAttr().Set(spec["ambient_intensity"])
     ambient.GetColorAttr().Set(Gf.Vec3f(0.92, 0.95, 1.0))
-    return len(spec["boxes"]) + len(spec["lights"]) + len(asset_references) + 1
+    return (
+        len(spec["boxes"])
+        + len(spec["lights"])
+        + len(asset_references)
+        + len(spec["price_displays"])
+        + 1
+    )
 
 
 def _build_world(stage, scenario):
