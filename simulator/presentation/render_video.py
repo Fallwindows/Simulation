@@ -209,6 +209,11 @@ def _timestamp(frame: int, fps: int) -> str:
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
+def _seconds(frames: int, fps: int) -> str:
+    value = f"{frames / fps:.9f}".rstrip("0").rstrip(".")
+    return value or "0"
+
+
 def _validate_source(
     segment: PlannedSegment,
     profile_width: int,
@@ -249,11 +254,17 @@ def _build_filter(
     inputs: list[str] = []
     filters: list[str] = []
     input_index = 0
-    labels: list[str] = []
-    for segment in segments:
+    active_transitions = {}
+    for index in range(1, len(segments)):
+        previous, current = segments[index - 1], segments[index]
+        transition = plan.transition_for_boundary(current.shot.start_frame)
+        if transition is not None and (previous.shot.number, current.shot.number) == (transition.from_shot, transition.to_shot):
+            active_transitions[index] = transition
+    incoming_pad = {index: item.half_duration_frames for index, item in active_transitions.items()}
+    outgoing_pad = {index - 1: item.half_duration_frames for index, item in active_transitions.items()}
+    for index, segment in enumerate(segments):
         shot = segment.shot
         output_label = f"v{shot.number:02d}"
-        labels.append(f"[{output_label}]")
         title = f"SHOT {shot.number:02d}  |  {_timestamp(shot.start_frame, plan.fps)}-{_timestamp(shot.end_frame_exclusive, plan.fps)}  |  {shot.title}"
         if segment.video_path is not None:
             inputs.extend(["-i", str(segment.video_path)])
@@ -273,6 +284,8 @@ def _build_filter(
                     f"scale={profile.width}:{profile.height}:force_original_aspect_ratio=decrease",
                     f"pad={profile.width}:{profile.height}:(ow-iw)/2:(oh-ih)/2:color=black",
                     "setsar=1",
+                    f"settb=1/{plan.fps}",
+                    "format=yuv420p",
                 ]
             )
             if segment.kind == "diagnostic_baseline":
@@ -284,6 +297,10 @@ def _build_filter(
                         _drawtext(title, "22", "h-36", 20),
                     ]
                 )
+            start_pad = incoming_pad.get(index, 0)
+            stop_pad = outgoing_pad.get(index, 0)
+            if start_pad or stop_pad:
+                chain.append(f"tpad=start_mode=clone:start={start_pad}:stop_mode=clone:stop={stop_pad}")
             filters.append(",".join(chain) + f"[{output_label}]")
             input_index += 1
             continue
@@ -302,11 +319,37 @@ def _build_filter(
                     _drawtext("No LiDAR, map, or reconstruction imagery is synthesized for this interval.", "64", "375", 23, "0xb7c4d6"),
                     _drawtext("DIAGNOSTIC TIMELINE ONLY - INCOMPLETE", "64", "h-86", 22, "0xffc857"),
                     "format=yuv420p",
+                    f"settb=1/{plan.fps}",
                 ]
+            )
+            + (
+                f",tpad=start_mode=clone:start={incoming_pad.get(index, 0)}:stop_mode=clone:stop={outgoing_pad.get(index, 0)}"
+                if incoming_pad.get(index, 0) or outgoing_pad.get(index, 0)
+                else ""
             )
             + f"[{output_label}]"
         )
-    final_chain = "".join(labels) + f"concat=n={len(segments)}:v=1:a=0,format=yuv420p"
+    if not segments:
+        raise ValueError("presentation filter requires at least one segment")
+    current_label = f"v{segments[0].shot.number:02d}"
+    logical_frames = segments[0].shot.frame_count
+    for index, segment in enumerate(segments[1:], 1):
+        next_label = f"v{segment.shot.number:02d}"
+        mixed_label = f"mix{index:02d}"
+        transition = active_transitions.get(index)
+        if transition is None:
+            filters.append(f"[{current_label}][{next_label}]concat=n=2:v=1:a=0,settb=1/{plan.fps}[{mixed_label}]")
+        else:
+            half = transition.half_duration_frames
+            duration_s = _seconds(transition.duration_frames, plan.fps)
+            offset_s = _seconds(logical_frames - half, plan.fps)
+            expression = "A*(1-(P*P*(3-2*P)))+B*(P*P*(3-2*P))"
+            filters.append(
+                f"[{current_label}][{next_label}]xfade=transition=custom:duration={duration_s}:offset={offset_s}:expr='{expression}',settb=1/{plan.fps}[{mixed_label}]"
+            )
+        current_label = mixed_label
+        logical_frames += segment.shot.frame_count
+    final_chain = f"[{current_label}]trim=start_frame=0:end_frame={logical_frames},setpts=PTS-STARTPTS,format=yuv420p"
     if test_fixture_label:
         final_chain += ",drawbox=x=0:y=0:w=iw:h=44:color=0x7d1538@0.92:t=fill," + _drawtext(
             "GENERATED TEST FIXTURE - NOT PRODUCTION CAPTURE", "18", "10", 20, "white"
@@ -547,6 +590,21 @@ def _render_presentation_generation(
         "fps": plan.fps,
         "frame_count": plan.frame_count,
         "duration_seconds": plan.duration_seconds,
+        "transitions": [
+            {
+                "from_shot": item.from_shot,
+                "to_shot": item.to_shot,
+                "boundary_frame": item.boundary_frame,
+                "start_frame": item.start_frame,
+                "end_frame_exclusive": item.end_frame_exclusive,
+                "duration_frames": item.duration_frames,
+                "style": item.style,
+                "easing": item.easing,
+                "intent": item.intent,
+                "frame_budget_delta": 0,
+            }
+            for item in plan.transitions
+        ],
         "ground_truth_consumed": False,
         "provenance_validation": {
             "status": "validated",
@@ -678,7 +736,7 @@ def render_presentation(
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser()
-    parser.add_argument("--plan", default=str(root / "config" / "presentation" / "storyboard.yaml"))
+    parser.add_argument("--plan")
     parser.add_argument("--inputs", default=str(root / "config" / "presentation" / "diagnostic_baseline_inputs.json"))
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--profile", choices=("preview", "delivery"), default="preview")
@@ -686,7 +744,11 @@ def main() -> None:
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
     args = parser.parse_args()
-    result = render_presentation(args.plan, args.inputs, args.output_dir, args.profile, args.mode, args.ffmpeg, args.ffprobe)
+    plan = args.plan or str(
+        root / "config" / "presentation"
+        / ("diagnostic_storyboard_legacy.yaml" if args.mode == "diagnostic" else "storyboard.yaml")
+    )
+    result = render_presentation(plan, args.inputs, args.output_dir, args.profile, args.mode, args.ffmpeg, args.ffprobe)
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

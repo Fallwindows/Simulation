@@ -89,7 +89,10 @@ status, claims, or the visible fixture watermark.
 
 The checked-in `diagnostic_baseline_inputs.json` intentionally supplies only
 `demo/walking_aisle_final_hifi.mp4`. Diagnostic mode accepts that exact
-repository path, SHA-256, Git blob, canonical manifest, and canonical plan.
+repository path, SHA-256, Git blob, canonical manifest, and the frozen
+pre-transition `diagnostic_storyboard_legacy.yaml` plan. The production
+`storyboard.yaml` carries the current transition policy and is rejected for
+this historical diagnostic identity.
 The baseline was introduced at commit `d5e825c8` before the storyboard
 manifest at `d315aa9c`; alternate manifests and videos are rejected even when
 they claim the same diagnostic producer. Its provenance is
@@ -105,7 +108,7 @@ Control, while Isaac Python can load the installed renderer dependencies:
 ```powershell
 C:\isaacsim\python.bat `
   -m simulator.presentation.render_video `
-  --plan config/presentation/storyboard.yaml `
+  --plan config/presentation/diagnostic_storyboard_legacy.yaml `
   --inputs config/presentation/diagnostic_baseline_inputs.json `
   --output-dir runs/presentation-preview `
   --profile preview --mode diagnostic `
@@ -144,6 +147,12 @@ C:\isaacsim\python.bat -m simulator.technical_views `
 Renderer code, technical plan, and source-catalog receipt hashes canonicalize
 text line endings to LF. Producer receipts therefore validate identically from
 Windows CRLF and LF checkouts.
+
+The production `storyboard.yaml` applies short symmetric smoothstep blends at
+frames 540, 660, 750, 840, 960, 1080, and 1200. Each window freezes only the
+edge frames needed to straddle its boundary, consumes no extra timeline frames,
+and preserves the exact 1,350-frame delivery budget. RGB shots 01-05 remain
+frame-contiguous from the original capture without added dissolves.
 
 ## Current new-goal limitations
 

@@ -21,12 +21,18 @@ from simulator.presentation.provenance import (
     validate_presentation_transform,
 )
 from simulator.presentation.technical_bundle import validate_technical_delivery
-from simulator.presentation.timeline import EXPECTED_SHOT_BOUNDARIES, inspect_inputs, load_plan
+from simulator.presentation.timeline import (
+    EXPECTED_SHOT_BOUNDARIES,
+    SMOOTH_TRANSITION_BOUNDARIES,
+    inspect_inputs,
+    load_plan,
+)
 from tests.presentation_fixture import build_complete_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "config" / "presentation" / "storyboard.yaml"
+LEGACY_DIAGNOSTIC_PLAN = ROOT / "config" / "presentation" / "diagnostic_storyboard_legacy.yaml"
 BASELINE_INPUTS = ROOT / "config" / "presentation" / "diagnostic_baseline_inputs.json"
 BASELINE_VIDEO = ROOT / "demo" / "walking_aisle_final_hifi.mp4"
 FFMPEG = Path(r"C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Library\bin\ffmpeg.exe")
@@ -110,6 +116,48 @@ class PresentationTimelineTests(unittest.TestCase):
         self.assertEqual((plan.profiles["preview"].width, plan.profiles["preview"].height), (1280, 720))
         self.assertEqual(plan.profiles["delivery"].frame_count, 1350)
         self.assertEqual(plan.profiles["preview"].fps, 30)
+
+    def test_transition_windows_cover_every_technical_boundary_without_changing_frame_budget(self):
+        plan = load_plan(PLAN)
+        self.assertEqual([item.boundary_frame for item in plan.transitions], list(SMOOTH_TRANSITION_BOUNDARIES))
+        self.assertEqual([(item.from_shot, item.to_shot) for item in plan.transitions], [
+            (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11), (11, 12),
+        ])
+        self.assertEqual([item.duration_frames for item in plan.transitions], [18, 18, 18, 12, 12, 12, 12])
+        self.assertTrue(all(item.style == "smooth_crossfade" and item.easing == "smoothstep" for item in plan.transitions))
+        self.assertTrue(all(item.start_frame < item.boundary_frame < item.end_frame_exclusive for item in plan.transitions))
+        self.assertEqual(sum(shot.frame_count for shot in plan.shots), plan.frame_count)
+
+        segments = tuple(
+            PlannedSegment(shot, "missing_input_slate", None, None, 0, ("test-only",))
+            for shot in plan.shots
+        )
+        inputs, graph = _build_filter(plan, "preview", segments)
+        self.assertEqual(inputs, [])
+        self.assertEqual(graph.count("xfade=transition=custom"), 7)
+        self.assertEqual(graph.count("P*P*(3-2*P)"), 14)
+        self.assertIn("offset=17.7", graph)
+        self.assertIn("offset=21.7", graph)
+        self.assertIn("offset=24.7", graph)
+        self.assertIn("trim=start_frame=0:end_frame=1350", graph)
+
+    def test_invalid_transition_contracts_fail_closed(self):
+        source = json.loads(PLAN.read_text(encoding="utf-8"))
+        attacks = {
+            "all seven": lambda value: value["transition_policy"]["boundaries"].pop(),
+            "short positive even duration": lambda value: value["transition_policy"]["boundaries"][0].update(duration_frames=17),
+            "does not match its shot boundary": lambda value: value["transition_policy"]["boundaries"][0].update(from_shot=4, to_shot=5),
+            "approved style": lambda value: value["transition_policy"]["boundaries"][0].update(style="hard_cut"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            for expected, mutate in attacks.items():
+                with self.subTest(expected=expected):
+                    candidate = json.loads(json.dumps(source))
+                    mutate(candidate)
+                    path.write_text(json.dumps(candidate), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, expected):
+                        load_plan(path)
 
     def test_invalid_profile_and_boundary_are_rejected(self):
         source = json.loads(PLAN.read_text(encoding="utf-8"))
@@ -232,7 +280,7 @@ class PresentationTimelineTests(unittest.TestCase):
         rejected(lambda record: record.update(verdict_path="../escaped-verdict.md"), "invalid verdict path")
 
     def test_existing_rgb_baseline_is_diagnostic_and_never_complete(self):
-        plan = load_plan(PLAN)
+        plan = load_plan(LEGACY_DIAGNOSTIC_PLAN)
         report = inspect_inputs(plan, BASELINE_INPUTS)
         self.assertFalse(report.complete)
         self.assertEqual(report.ready_genuine_roles, frozenset())
@@ -244,6 +292,9 @@ class PresentationTimelineTests(unittest.TestCase):
         self.assertEqual(_sha256(BASELINE_VIDEO), DIAGNOSTIC_BASELINE_IDENTITY["video_sha256"])
         with self.assertRaises(ValueError):
             plan_segments(plan, report, "complete")
+
+        with self.assertRaisesRegex(ValueError, "canonical immutable presentation plan"):
+            inspect_inputs(load_plan(PLAN), BASELINE_INPUTS)
 
     def test_pinned_diagnostic_blob_predates_the_storyboard_manifest(self):
         subprocess.run(
@@ -321,9 +372,9 @@ class PresentationTimelineTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
-                inspect_inputs(load_plan(PLAN), manifest)
+                inspect_inputs(load_plan(LEGACY_DIAGNOSTIC_PLAN), manifest)
             with self.assertRaisesRegex(ValueError, "canonical immutable input manifest"):
-                render_presentation(PLAN, manifest, root / "output", "preview", "diagnostic", "unreachable", "unreachable")
+                render_presentation(LEGACY_DIAGNOSTIC_PLAN, manifest, root / "output", "preview", "diagnostic", "unreachable", "unreachable")
 
     def test_arbitrary_placeholders_and_missing_hashes_cannot_be_complete(self):
         plan = load_plan(PLAN)
@@ -452,7 +503,7 @@ class PresentationTimelineTests(unittest.TestCase):
             self.assertTrue(any("view manifest producer source hash mismatch" in error for error in errors))
 
     def test_alternate_diagnostic_manifest_is_rejected_even_for_byte_identical_storyboard_content(self):
-        plan = load_plan(PLAN)
+        plan = load_plan(LEGACY_DIAGNOSTIC_PLAN)
         with tempfile.TemporaryDirectory() as directory:
             source_reference = _materialize_reference(Path(directory) / "01_enter_aisle_rgb.png")
             copied_reference = Path(directory) / "unrelated-looking-video.mp4"
@@ -487,12 +538,12 @@ class PresentationTimelineTests(unittest.TestCase):
     def test_diagnostic_mode_cannot_write_delivery_profile(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "restricted to the 1280x720 preview"):
-                render_presentation(PLAN, BASELINE_INPUTS, directory, "delivery", "diagnostic", "ffmpeg", "ffprobe")
+                render_presentation(LEGACY_DIAGNOSTIC_PLAN, BASELINE_INPUTS, directory, "delivery", "diagnostic", "ffmpeg", "ffprobe")
 
     def test_diagnostic_output_claim_is_limited_to_the_pinned_source_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = render_presentation(
-                PLAN,
+                LEGACY_DIAGNOSTIC_PLAN,
                 BASELINE_INPUTS,
                 directory,
                 "preview",
@@ -654,6 +705,8 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertEqual((manifest["probe"]["width"], manifest["probe"]["height"]), (1280, 720))
         self.assertEqual((manifest["probe"]["frame_count"], manifest["probe"]["audio_stream_count"]), (1350, 0))
         self.assertEqual(len(manifest["representative_frames"]), 36)
+        self.assertEqual([item["boundary_frame"] for item in manifest["transitions"]], list(SMOOTH_TRANSITION_BOUNDARIES))
+        self.assertTrue(all(item["frame_budget_delta"] == 0 for item in manifest["transitions"]))
         self.assertTrue(all(item["presentation_transform"] == PRESENTATION_TRANSFORM_HFLIP for item in manifest["shots"][:5]))
         self.assertTrue(all(item["presentation_transform"] is None for item in manifest["shots"][5:]))
         from PIL import Image
@@ -663,6 +716,29 @@ class CompletePresentationTests(unittest.TestCase):
         right = frame.getpixel((1200, 360))
         self.assertGreater(left[2], left[0], "hflip must move the blue raw right half to presentation left")
         self.assertGreater(right[0], right[2], "hflip must move the red raw left half to presentation right")
+
+        transition_dir = output / "transition_boundary_frames"
+        transition_dir.mkdir()
+        selected_frames = [frame for boundary in SMOOTH_TRANSITION_BOUNDARIES for frame in (boundary - 1, boundary, boundary + 1)]
+        expression = "+".join(f"eq(n\\,{frame})" for frame in selected_frames)
+        subprocess.run(
+            [
+                str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(output / manifest["video"]),
+                "-vf", f"select='{expression}'", "-fps_mode", "vfr", "-y", str(transition_dir / "frame_%02d.png"),
+            ],
+            check=True,
+        )
+        from PIL import ImageChops, ImageStat
+
+        selected = sorted(transition_dir.glob("frame_*.png"))
+        self.assertEqual(len(selected), len(selected_frames))
+        for index, boundary in enumerate(SMOOTH_TRANSITION_BOUNDARIES):
+            trio = [Image.open(path).convert("RGB") for path in selected[index * 3:index * 3 + 3]]
+            adjacent_rms = [
+                max(ImageStat.Stat(ImageChops.difference(first, second)).rms)
+                for first, second in zip(trio, trio[1:])
+            ]
+            self.assertLess(max(adjacent_rms), 48.0, f"frame {boundary} retains an abrupt generated-fixture cut")
 
     def test_reviewed_orientation_operations_drive_filters_and_reject_forgery(self):
         plan = load_plan(PLAN)
