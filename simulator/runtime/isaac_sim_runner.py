@@ -392,7 +392,7 @@ def store_shell_spec(environment) -> dict[str, object]:
     # Continuous under-shelf LED runs lift the vertical merchandise plane
     # without raising the already-bright floor or flattening ceiling contrast.
     strip_index = 0
-    for strip_y, strip_rotation in ((-1.34, -72.0), (1.34, 72.0)):
+    for strip_y, strip_rotation in ((-1.43, -72.0), (1.43, 72.0)):
         for strip_z in (0.58, 1.03, 1.48, 1.93):
             for strip_x in (5.75, 17.75):
                 name = f"shelf_strip_{strip_index:02d}"
@@ -400,7 +400,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                     {
                         "name": name,
                         "center_m": (strip_x, strip_y, strip_z),
-                        "size_m": (11.35, 0.022, 0.016),
+                        "size_m": (11.35, 0.016, 0.012),
                         "kind": "shelf_light",
                     }
                 )
@@ -410,7 +410,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                         "position_m": (strip_x, strip_y, strip_z - 0.012),
                         "width_m": 11.30,
                         "height_m": 0.025,
-                        "intensity": float(environment.lighting_lux) * 2.25,
+                        "intensity": float(environment.lighting_lux) * 3.0,
                         "color": (1.0, 0.91, 0.80),
                         "rotation_rpy_deg": (strip_rotation, 0.0, 0.0),
                     }
@@ -422,9 +422,9 @@ def store_shell_spec(environment) -> dict[str, object]:
     end_case_x = shell_end_x - 0.22
     asset_references: list[dict[str, object]] = []
     case_stock = (
-        ("milk_gallon", "milk_carton", "yogurt_cup", "egg_carton", "butter_pack", "cheese_wedge"),
+        ("milk_gallon", "milk_carton", "yogurt_cup", "sports_drink", "juice_citrus"),
         ("juice_citrus", "juice_berry", "juice_green", "juice_apple", "water_sky", "sports_drink"),
-        ("frozen_pizza", "icecream_tub", "soda_orbit", "soda_cherry", "soda_lime", "water_clear"),
+        ("icecream_tub", "soda_orbit", "soda_cherry", "soda_lime", "water_clear", "sports_drink"),
     )
     for case_index, case_y in enumerate((-1.35, 0.0, 1.35)):
         boxes.append(
@@ -468,6 +468,14 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "kind": "case_handle",
             }
         )
+        boxes.append(
+            {
+                "name": f"end_case_toe_kick_{case_index}",
+                "center_m": (shell_end_x - 0.49, case_y, 0.14),
+                "size_m": (0.24, 1.08, 0.17),
+                "kind": "case_frame",
+            }
+        )
         for shelf_index, shelf_z in enumerate((0.34, 0.80, 1.26, 1.72)):
             boxes.append(
                 {
@@ -477,7 +485,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                     "kind": "case_frame",
                 }
             )
-            for column, offset_y in enumerate((-0.405, -0.135, 0.135, 0.405)):
+            for column, offset_y in enumerate((-0.43, -0.215, 0.0, 0.215, 0.43)):
                 key = case_stock[case_index][(shelf_index + column) % len(case_stock[case_index])]
                 asset_references.append(
                     {
@@ -488,7 +496,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                         "position_xy_m": (shell_end_x - 0.46, case_y + offset_y),
                         "support_z_m": shelf_z + 0.018,
                         "rotation_rpy_deg": (0.0, 0.0, 90.0),
-                        "scale_xyz": (1.0, 1.0, 1.0),
+                        "scale_xyz": (1.16, 1.10, 1.16),
                     }
                 )
         lights.append(
@@ -497,7 +505,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "position_m": (shell_end_x - 0.34, case_y, 1.34),
                 "width_m": 1.58,
                 "height_m": 1.02,
-                "intensity": float(environment.lighting_lux) * 4.2,
+                "intensity": float(environment.lighting_lux) * 6.5,
                 "color": (0.88, 0.95, 1.0),
                 "rotation_rpy_deg": (0.0, 90.0, 0.0),
             }
@@ -509,13 +517,13 @@ def store_shell_spec(environment) -> dict[str, object]:
         [
             {
                 "name": "hero_display_back",
-                "center_m": (11.65, -1.355, 0.98),
-                "size_m": (2.10, 0.055, 1.72),
+                "center_m": (13.60, -1.355, 0.73),
+                "size_m": (2.10, 0.045, 1.18),
                 "kind": "display_wood",
             },
             {
                 "name": "hero_display_base",
-                "center_m": (11.65, -1.18, 0.12),
+                "center_m": (13.60, -1.18, 0.12),
                 "size_m": (2.10, 0.34, 0.18),
                 "kind": "display_wood",
             },
@@ -525,18 +533,19 @@ def store_shell_spec(environment) -> dict[str, object]:
         "cereal_sunrise", "juice_citrus", "chips_bag", "coffee_canister",
         "cereal_harvest", "sports_drink", "pasta_box", "can_tomato",
         "juice_berry", "sparkling_wine", "snack_wafer", "jam_jar",
+        "tea_box", "rice_bag", "coffee_bag", "bread_loaf", "peanut_jar", "olive_oil",
     )
     hero_asset_index = 0
     for shelf_index, shelf_z in enumerate((0.42, 0.84, 1.26)):
         boxes.append(
             {
                 "name": f"hero_display_shelf_{shelf_index}",
-                "center_m": (11.65, -1.18, shelf_z),
+                "center_m": (13.60, -1.18, shelf_z),
                 "size_m": (2.10, 0.34, 0.045),
                 "kind": "shelf",
             }
         )
-        for column, product_x in enumerate((10.92, 11.40, 11.88, 12.36)):
+        for column, product_x in enumerate((12.75, 13.09, 13.43, 13.77, 14.11, 14.45)):
             key = hero_keys[hero_asset_index]
             hero_asset_index += 1
             asset_references.append(
@@ -554,7 +563,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 {
                     "name": f"hero_price_{shelf_index}",
                     "asset_key": "price_display",
-                    "position_xy_m": (11.64, -0.995),
+                    "position_xy_m": (13.60, -0.995),
                     "support_z_m": shelf_z + 0.032,
                     "rotation_rpy_deg": (0.0, 0.0, 0.0),
                     "scale_xyz": (1.0, 1.0, 1.0),
@@ -562,7 +571,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 {
                     "name": f"hero_divider_{shelf_index}",
                     "asset_key": "shelf_divider",
-                    "position_xy_m": (11.64, -1.17),
+                    "position_xy_m": (13.60, -1.17),
                     "support_z_m": shelf_z + 0.024,
                     "rotation_rpy_deg": (0.0, 0.0, 0.0),
                     "scale_xyz": (1.0, 1.0, 1.0),
@@ -574,8 +583,8 @@ def store_shell_spec(environment) -> dict[str, object]:
             {
                 "name": "hero_market_sign",
                 "asset_key": "promo_market_sign",
-                "position_xy_m": (11.65, -1.15),
-                "support_z_m": 1.66,
+                "position_xy_m": (13.60, -1.15),
+                "support_z_m": 1.42,
                 # The R5 panel's authored UV orientation reads horizontally
                 # reversed from its +Y front.  A deterministic X reflection
                 # preserves the physical pose while making the category text

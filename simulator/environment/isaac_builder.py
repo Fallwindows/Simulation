@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import Path
 
 from simulator.environment.aisle_builder import AisleLayout
 from simulator.environment.retail_catalog import load_retail_catalog
@@ -17,37 +18,37 @@ STRUCTURAL_MATERIALS = {
         "round_edges_m": 0.006,
     },
     "shelf": {
-        "color": (0.36, 0.375, 0.39),
+        "color": (0.42, 0.435, 0.45),
         "roughness": 0.52,
         "metallic": 0.08,
         "round_edges_m": 0.008,
     },
     "shelf_warm": {
-        "color": (0.39, 0.385, 0.37),
+        "color": (0.44, 0.43, 0.405),
         "roughness": 0.56,
         "metallic": 0.06,
         "round_edges_m": 0.008,
     },
     "shelf_cool": {
-        "color": (0.325, 0.35, 0.37),
+        "color": (0.39, 0.415, 0.435),
         "roughness": 0.48,
         "metallic": 0.09,
         "round_edges_m": 0.008,
     },
     "upright": {
-        "color": (0.285, 0.30, 0.315),
+        "color": (0.34, 0.355, 0.37),
         "roughness": 0.50,
         "metallic": 0.10,
         "round_edges_m": 0.006,
     },
     "upright_warm": {
-        "color": (0.31, 0.305, 0.29),
+        "color": (0.36, 0.35, 0.33),
         "roughness": 0.54,
         "metallic": 0.08,
         "round_edges_m": 0.006,
     },
     "price_rail": {
-        "color": (0.34, 0.355, 0.37),
+        "color": (0.30, 0.315, 0.33),
         "roughness": 0.46,
         "metallic": 0.07,
         "round_edges_m": 0.004,
@@ -121,12 +122,12 @@ STRUCTURAL_MATERIALS = {
         "round_edges_m": 0.002,
     },
     "shelf_light": {
-        "color": (0.94, 0.89, 0.78),
-        "roughness": 0.34,
-        "metallic": 0.0,
+        "color": (0.28, 0.29, 0.29),
+        "roughness": 0.44,
+        "metallic": 0.18,
         "round_edges_m": 0.002,
-        "emission": (1.0, 0.91, 0.76),
-        "emission_intensity": 520.0,
+        "emission": (1.0, 0.90, 0.74),
+        "emission_intensity": 55.0,
     },
     "sign_green": {
         "color": (0.045, 0.22, 0.15),
@@ -141,7 +142,7 @@ STRUCTURAL_MATERIALS = {
         "round_edges_m": 0.004,
     },
     "case_interior": {
-        "color": (0.19, 0.22, 0.23),
+        "color": (0.235, 0.265, 0.28),
         "roughness": 0.48,
         "metallic": 0.08,
         "round_edges_m": 0.005,
@@ -153,11 +154,11 @@ STRUCTURAL_MATERIALS = {
         "round_edges_m": 0.004,
     },
     "case_glass": {
-        "color": (0.30, 0.40, 0.42),
-        "roughness": 0.10,
-        "metallic": 0.02,
+        "color": (0.42, 0.52, 0.54),
+        "roughness": 0.075,
+        "metallic": 0.04,
         "round_edges_m": 0.001,
-        "opacity": 0.18,
+        "opacity": 0.24,
     },
     "case_handle": {
         "color": (0.58, 0.60, 0.60),
@@ -209,6 +210,13 @@ _STRUCTURAL_VARIANTS = {
     "upright": ("upright", "upright_warm"),
 }
 
+_SCENE_MATERIAL_ROOT = Path(__file__).resolve().parents[2] / "assets" / "scene" / "materials"
+_MICROTEXTURED_KINDS = {
+    "floor", "floor_tile_warm", "floor_tile_cool",
+    "shelf", "shelf_warm", "shelf_cool", "upright", "upright_warm",
+    "ceiling", "ceiling_tile_warm", "ceiling_tile_cool", "display_wood",
+}
+
 
 class IsaacRuntimeUnavailable(RuntimeError):
     pass
@@ -250,6 +258,15 @@ class IsaacAisleBuilder:
         material.set_input_values("metallic_constant", [values["metallic"]])
         material.set_input_values("round_edges_radius", [values["round_edges_m"]])
         material.set_input_values("round_edges_roundness", [0.35])
+        if kind in _MICROTEXTURED_KINDS:
+            normal_path = str((_SCENE_MATERIAL_ROOT / "micro_normal.png").resolve()).replace("\\", "/")
+            roughness_path = str((_SCENE_MATERIAL_ROOT / "micro_roughness.png").resolve()).replace("\\", "/")
+            material.set_input_values("normalmap_texture", [normal_path])
+            material.set_input_values("bump_factor", [0.12 if kind.startswith("shelf") or kind.startswith("upright") else 0.075])
+            material.set_input_values("reflectionroughness_texture", [roughness_path])
+            material.set_input_values("reflection_roughness_texture_influence", [0.22])
+            material.set_input_values("project_uvw", [True])
+            material.set_input_values("texture_scale", [(14.0, 14.0)])
         if "emission" in values:
             material.set_input_values("enable_emission", [True])
             material.set_input_values("emissive_color", values["emission"])
@@ -289,7 +306,7 @@ class IsaacAisleBuilder:
         self.build_static_box(
             f"{root}/structure/shelf_detail/{safe_name}_rail",
             (x, front_y, z + 0.042),
-            (width, 0.026, 0.052),
+            (width, 0.016, 0.030),
             "price_rail",
             root,
         )
@@ -299,7 +316,7 @@ class IsaacAisleBuilder:
         self.build_static_box(
             f"{root}/structure/shelf_detail/{safe_name}_tag",
             (x + offset * width, front_y + front_sign * 0.021, z + 0.045),
-            (0.18, 0.008, 0.056),
+            (0.16, 0.006, 0.044),
             "price_tag",
             root,
         )

@@ -1,4 +1,5 @@
 import unittest
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,6 +41,7 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertTrue(all(abs(light["rotation_rpy_deg"][0]) == 32.0 for light in panel_lights))
         self.assertEqual(len(shelf_lights), 16)
         self.assertTrue(all(light["position_m"][2] < self.environment.shelf_height_m for light in shelf_lights))
+        self.assertTrue(all(abs(light["position_m"][1]) >= 1.42 for light in shelf_lights))
         self.assertGreater(spec["ambient_intensity"], 0.9 * self.environment.lighting_lux)
         self.assertIn("floor_inlay", kinds)
 
@@ -55,17 +57,19 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertNotIn("end_product_blue", kinds)
         self.assertIn("case_glass", kinds)
         self.assertIn("display_wood", kinds)
-        self.assertEqual(len([name for name in names if name.startswith("end_case_stock_")]), 48)
-        self.assertEqual(len([name for name in names if name.startswith("hero_stock_")]), 12)
+        self.assertEqual(len([name for name in names if name.startswith("end_case_stock_")]), 60)
+        self.assertEqual(len([name for name in names if name.startswith("hero_stock_")]), 18)
         self.assertIn("promo_market_sign", keys)
         self.assertIn("price_display", keys)
         self.assertIn("shelf_divider", keys)
-        self.assertTrue({"milk_gallon", "juice_citrus", "frozen_pizza"} <= keys)
+        self.assertTrue({"milk_gallon", "juice_citrus", "icecream_tub"} <= keys)
         hero_references = [reference for reference in references if reference["name"].startswith("hero_")]
         self.assertTrue(all(reference["position_xy_m"][1] <= -0.995 for reference in hero_references))
         signs = [reference for reference in references if reference["asset_key"] == "promo_market_sign"]
         self.assertEqual(len(signs), 2)
         self.assertTrue(all(reference["scale_xyz"][0] < 0.0 for reference in signs))
+        hero_stock = [reference for reference in references if reference["name"].startswith("hero_stock_")]
+        self.assertGreaterEqual(min(reference["position_xy_m"][0] for reference in hero_stock), 12.7)
 
     def test_structural_variation_is_bounded_and_shelves_are_not_near_black(self):
         self.assertIn("floor_tile_warm", STRUCTURAL_MATERIALS)
@@ -76,6 +80,13 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertGreater(min(STRUCTURAL_MATERIALS["shelf"]["color"]), 0.30)
         self.assertLess(STRUCTURAL_MATERIALS["shelf"]["metallic"], 0.15)
         self.assertLess(STRUCTURAL_MATERIALS["case_glass"]["opacity"], 0.25)
+        material_root = Path(__file__).resolve().parents[1] / "assets/scene/materials"
+        expected_hashes = {
+            "micro_normal.png": "3925c3836dede755963e2700ecb519b5685f1a4283d0891f9cbe4d4b79379f74",
+            "micro_roughness.png": "614f0f969e2f0026fcdf6062b0c812e1936177a27d92cc8137d48f5205a9f416",
+        }
+        for filename, expected in expected_hashes.items():
+            self.assertEqual(hashlib.sha256((material_root / filename).read_bytes()).hexdigest(), expected)
 
     def test_structural_materials_distinguish_floor_metal_and_paper(self):
         floor = STRUCTURAL_MATERIALS["floor"]
