@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .provenance import sha256_path, source_text_sha256, validate_presentation_transform
+from .provenance import (
+    RGB_TIMESTAMP_PERIOD_S,
+    RGB_TIMESTAMP_TOLERANCE_S,
+    sha256_path,
+    source_text_sha256,
+    validate_presentation_transform,
+)
 from .technical_bundle import ValidatedTechnicalDelivery, validate_technical_delivery
 
 
@@ -30,6 +36,8 @@ class CompleteShotSource:
     receipt_path: Path
     receipt_sha256: str
     presentation_transform: dict[str, object] | None
+    transition_boundary_frame: int | None
+    transition_source_samples: tuple[tuple[int, float], ...]
 
 
 @dataclass(frozen=True)
@@ -71,7 +79,9 @@ def _rgb_sources(
     plan: Any,
     rgb_bundle_path: Path,
     rgb_capture_catalog: Path | None,
+    ffprobe: str,
 ) -> tuple[str, str, list[CompleteShotSource], dict[str, Any]]:
+    from .render_video import probe_video
     from .timeline import inspect_inputs
 
     report = inspect_inputs(plan, rgb_bundle_path, rgb_capture_catalog=rgb_capture_catalog)
@@ -82,9 +92,34 @@ def _rgb_sources(
     receipt = _json(receipt_path)
     presentation_transform = validate_presentation_transform(receipt.get("presentation_transform"))
     capture_manifest = _json(role.artifacts["capture_manifest"])
+    for artifact_name in ("view_video", "frame_index"):
+        if not role.artifacts[artifact_name].is_file():
+            raise ValueError(f"RGB {artifact_name} is missing after hash-bound role validation")
+        if sha256_path(role.artifacts[artifact_name]) != role.artifact_sha256[artifact_name]:
+            raise ValueError(f"RGB {artifact_name} changed after hash-bound role validation")
     rows = []
     with role.artifacts["frame_index"].open(encoding="utf-8") as handle:
         rows = [json.loads(line) for line in handle if line.strip()]
+    boundary = plan.transition_for_boundary(540)
+    if boundary is None or boundary.outgoing_sampling.mode != "contiguous_postroll":
+        raise ValueError("production plan does not declare the required frame-540 RGB post-roll")
+    required_end = int(boundary.outgoing_sampling.source_frame_end_exclusive or -1)
+    if required_end != 549 or len(rows) < required_end:
+        raise ValueError("RGB frame index must cover contiguous observed source frames 0-548")
+    observed_indices = [int(row.get("frame_index", -1)) for row in rows[:required_end]]
+    observed_stamps = [float(row.get("stamp_s", "nan")) for row in rows[:required_end]]
+    if observed_indices != list(range(required_end)):
+        raise ValueError("RGB frame index must cover contiguous observed source frames 0-548")
+    if any(not (first < second) for first, second in zip(observed_stamps, observed_stamps[1:])):
+        raise ValueError("RGB observed stamps through source frame 548 must be strictly increasing")
+    if any(
+        abs((second - first) - RGB_TIMESTAMP_PERIOD_S) > RGB_TIMESTAMP_TOLERANCE_S
+        for first, second in zip(observed_stamps, observed_stamps[1:])
+    ):
+        raise ValueError("RGB observed stamps through source frame 548 must be contiguous at 30 fps")
+    video_probe = probe_video(role.artifacts["view_video"], ffprobe)
+    if video_probe["frame_count"] < required_end:
+        raise ValueError("RGB video must contain source frames 0-548 for the moving post-roll")
     shots = []
     for shot in plan.shots[:5]:
         source_start = shot.start_frame
@@ -94,6 +129,21 @@ def _rgb_sources(
         selected = rows[source_start:source_end]
         if [int(row["frame_index"]) for row in selected] != list(range(source_start, source_end)):
             raise ValueError(f"RGB source-frame mapping is not contiguous for shot {shot.number:02d}")
+        transition_boundary_frame = None
+        transition_source_samples: tuple[tuple[int, float], ...] = ()
+        source_last_stamp = float(selected[-1]["stamp_s"])
+        outgoing_transition = plan.transition_for_boundary(shot.end_frame_exclusive)
+        if outgoing_transition is not None and outgoing_transition.outgoing_sampling.mode == "contiguous_postroll":
+            transition_boundary_frame = outgoing_transition.boundary_frame
+            transition_start = source_end - outgoing_transition.half_duration_frames
+            transition_end = int(outgoing_transition.outgoing_sampling.source_frame_end_exclusive or -1)
+            transition_rows = rows[transition_start:transition_end]
+            if [int(row["frame_index"]) for row in transition_rows] != list(range(transition_start, transition_end)):
+                raise ValueError("RGB transition source mapping must be contiguous through post-roll frame 548")
+            transition_source_samples = tuple(
+                (int(row["frame_index"]), float(row["stamp_s"])) for row in transition_rows
+            )
+            source_last_stamp = transition_source_samples[-1][1]
         shots.append(
             CompleteShotSource(
                 shot.number,
@@ -101,13 +151,15 @@ def _rgb_sources(
                 role.artifact_sha256["view_video"],
                 source_start,
                 shot.frame_count,
-                (float(selected[0]["stamp_s"]), float(selected[-1]["stamp_s"])),
+                (float(selected[0]["stamp_s"]), source_last_stamp),
                 "rgb_frames.jsonl:stamp_s",
                 "rgb_capture",
                 "rgb",
                 receipt_path,
                 role.artifact_sha256["view_manifest"],
                 presentation_transform,
+                transition_boundary_frame,
+                transition_source_samples,
             )
         )
     return (
@@ -118,6 +170,22 @@ def _rgb_sources(
             "bundle_sha256": sha256_path(rgb_bundle_path),
             "capture_manifest_sha256": role.artifact_sha256["capture_manifest"],
             "view_receipt_sha256": role.artifact_sha256["view_manifest"],
+            "view_video_sha256": role.artifact_sha256["view_video"],
+            "frame_index_sha256": role.artifact_sha256["frame_index"],
+            "required_source_frame_end_exclusive": required_end,
+            "postroll": {
+                "boundary_frame": boundary.boundary_frame,
+                "source_frame_start": boundary.outgoing_sampling.source_frame_start,
+                "source_frame_end_exclusive": boundary.outgoing_sampling.source_frame_end_exclusive,
+                "source_time_basis": "rgb_frames.jsonl:stamp_s",
+                "samples": [
+                    {"source_frame": index, "measurement_timestamp_s": observed_stamps[index]}
+                    for index in range(
+                        int(boundary.outgoing_sampling.source_frame_start or -1),
+                        required_end,
+                    )
+                ],
+            },
             "source_time_range_s": receipt["source_time_range_s"],
             "presentation_transform": receipt["presentation_transform"],
             "acceptance": receipt["capture_acceptance"],
@@ -141,12 +209,24 @@ def _technical_sources(delivery: ValidatedTechnicalDelivery) -> list[CompleteSho
             source.receipt_path,
             source.receipt_sha256,
             None,
+            None,
+            (),
         )
         for source in delivery.shots
     ]
 
 
 def _shot_value(source: CompleteShotSource, manifest_path: Path) -> dict[str, Any]:
+    transition_source = None
+    if source.transition_boundary_frame is not None:
+        transition_source = {
+            "boundary_frame": source.transition_boundary_frame,
+            "source_time_basis": source.source_time_basis,
+            "samples": [
+                {"source_frame": frame, "measurement_timestamp_s": stamp}
+                for frame, stamp in source.transition_source_samples
+            ],
+        }
     return {
         "number": source.shot_number,
         "source_kind": source.source_kind,
@@ -158,6 +238,7 @@ def _shot_value(source: CompleteShotSource, manifest_path: Path) -> dict[str, An
         "source_time_range_s": list(source.source_time_range_s),
         "source_time_basis": source.source_time_basis,
         "presentation_transform": source.presentation_transform,
+        "transition_source": transition_source,
     }
 
 
@@ -171,7 +252,7 @@ def _validate_sources(
     technical_source_catalog: Path | None,
 ) -> tuple[str, str, dict[str, str], tuple[CompleteShotSource, ...], dict[str, Any]]:
     capture_id, capture_sha256, rgb_shots, rgb_binding = _rgb_sources(
-        plan, rgb_bundle_path, rgb_capture_catalog
+        plan, rgb_bundle_path, rgb_capture_catalog, ffprobe
     )
     technical = validate_technical_delivery(
         technical_manifest_path,
@@ -229,7 +310,7 @@ def emit_complete_bundle(
         Path(technical_source_catalog).resolve() if technical_source_catalog else None,
     )
     value = {
-        "schema_version": 3,
+        "schema_version": 4,
         "status": "complete",
         "label": f"validated complete presentation inputs for capture {capture_id}",
         "producer_id": PRODUCER_ID,
@@ -274,7 +355,7 @@ def validate_complete_bundle(
         "ground_truth_consumed", "capture_id", "capture_sha256", "rgb_bundle",
         "technical_delivery", "presentation_classification", "source_bindings", "shots",
     }
-    if set(data) != expected_keys or data.get("schema_version") != 3 or data.get("status") != "complete":
+    if set(data) != expected_keys or data.get("schema_version") != 4 or data.get("status") != "complete":
         raise ValueError("complete presentation input manifest schema is invalid")
     if data.get("producer_id") != PRODUCER_ID or data.get("producer_source_sha256") != source_text_sha256(Path(__file__).resolve()):
         raise ValueError("complete presentation input producer identity is invalid")

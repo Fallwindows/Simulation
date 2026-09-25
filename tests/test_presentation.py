@@ -609,7 +609,7 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertEqual([item.source_start_frame for item in segments[:5]], [0, 90, 180, 300, 420])
         self.assertEqual([item.source_start_frame for item in segments[5:]], [0] * 7)
         self.assertEqual([item.shot.frame_count for item in segments[5:]], [120, 90, 90, 120, 120, 120, 150])
-        self.assertAlmostEqual(segments[4].source_time_range_s[1], 539 / 30.0)
+        self.assertAlmostEqual(segments[4].source_time_range_s[1], 548 / 30.0)
         self.assertEqual(len({item.video_sha256 for item in segments[5:]}), 7)
 
     def test_real_renderer_receipts_round_trip_across_windows_crlf_checkout(self):
@@ -914,6 +914,11 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertTrue(all(item["frame_budget_delta"] == 0 for item in manifest["transitions"]))
         self.assertTrue(all(item["presentation_transform"] == PRESENTATION_TRANSFORM_HFLIP for item in manifest["shots"][:5]))
         self.assertTrue(all(item["presentation_transform"] is None for item in manifest["shots"][5:]))
+        self.assertEqual(manifest["shots"][4]["source_end_frame_exclusive"], 549)
+        self.assertEqual(
+            [item["source_end_frame_exclusive"] for item in manifest["shots"][:4]],
+            [90, 180, 300, 420],
+        )
         from PIL import Image
 
         frame = Image.open(output / manifest["representative_frames"][0]["path"])
@@ -942,21 +947,30 @@ class CompletePresentationTests(unittest.TestCase):
                 [transition.from_shot, transition.to_shot],
             )
             held = declared["held_sources"]
-            self.assertEqual(held["outgoing"]["source_frame"], outgoing.source_start_frame + outgoing.shot.frame_count - 1)
+            if transition.boundary_frame == 540:
+                self.assertEqual(held["outgoing"]["sampling_mode"], "contiguous_postroll")
+                self.assertEqual(
+                    (held["outgoing"]["source_frame_start"], held["outgoing"]["source_frame_end_exclusive"]),
+                    (531, 549),
+                )
+                self.assertIsNone(held["outgoing"]["held_film_frames"])
+            else:
+                self.assertEqual(held["outgoing"]["source_frame"], outgoing.source_start_frame + outgoing.shot.frame_count - 1)
+                self.assertAlmostEqual(
+                    held["outgoing"]["source_clip_pts_s"],
+                    (outgoing.source_start_frame + outgoing.shot.frame_count - 1) / plan.fps,
+                )
             self.assertEqual(held["incoming"]["source_frame"], incoming.source_start_frame)
-            self.assertAlmostEqual(
-                held["outgoing"]["source_clip_pts_s"],
-                (outgoing.source_start_frame + outgoing.shot.frame_count - 1) / plan.fps,
-            )
             self.assertAlmostEqual(held["incoming"]["source_clip_pts_s"], incoming.source_start_frame / plan.fps)
-            self.assertEqual(
-                held["outgoing"]["source_data_time_extent"],
-                {
-                    "start_s": outgoing.source_time_range_s[0],
-                    "end_s": outgoing.source_time_range_s[1],
-                    "basis": outgoing.source_time_basis,
-                },
-            )
+            if transition.boundary_frame != 540:
+                self.assertEqual(
+                    held["outgoing"]["source_data_time_extent"],
+                    {
+                        "start_s": outgoing.source_time_range_s[0],
+                        "end_s": outgoing.source_time_range_s[1],
+                        "basis": outgoing.source_time_basis,
+                    },
+                )
             self.assertEqual(
                 held["incoming"]["source_data_time_extent"],
                 {
@@ -970,6 +984,8 @@ class CompletePresentationTests(unittest.TestCase):
                 ("incoming", incoming, 0),
             ):
                 source = held[side]
+                if transition.boundary_frame == 540 and side == "outgoing":
+                    continue
                 self.assertNotIn("source_frame_timestamp_s", source)
                 if segment.source_role == "rgb_capture":
                     self.assertEqual(source["measurement_time_binding"]["status"], "validated")
@@ -984,10 +1000,11 @@ class CompletePresentationTests(unittest.TestCase):
                         segment.source_time_range_s[endpoint],
                         "aggregate technical data extent must not be presented as a held-frame measurement timestamp",
                     )
-            self.assertEqual(held["outgoing"]["held_film_frames"], {
-                "start_frame": transition.boundary_frame,
-                "end_frame_exclusive": transition.end_frame_exclusive,
-            })
+            if transition.boundary_frame != 540:
+                self.assertEqual(held["outgoing"]["held_film_frames"], {
+                    "start_frame": transition.boundary_frame,
+                    "end_frame_exclusive": transition.end_frame_exclusive,
+                })
             self.assertEqual(held["incoming"]["held_film_frames"], {
                 "start_frame": transition.start_frame,
                 "end_frame_exclusive": transition.boundary_frame,
