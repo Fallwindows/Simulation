@@ -486,10 +486,11 @@ def _shot_transition_windows(plan: PresentationPlan, shot: Shot) -> list[dict[st
 
 def _disclosure_layout(width: int, height: int) -> dict[str, int]:
     font_size = max(18, round(height * 0.028))
-    box_x = round(width * 0.025)
-    box_width = min(width - 2 * box_x, round(width * 0.62))
+    box_x = round(width * 0.52)
+    right_margin = round(width * 0.03)
+    box_width = min(round(width * 0.45), width - box_x - right_margin)
     box_height = max(48, round(height * 0.067))
-    box_y = height - round(height * 0.028) - box_height
+    box_y = round(height * 0.46)
     return {
         "box_x": box_x,
         "box_y": box_y,
@@ -558,9 +559,16 @@ def _editorial_disclosure_manifest(plan: PresentationPlan, width: int, height: i
             },
             "rendering": {
                 "stage": "post_transition_final_composite",
+                "placement_region": "right_center_reserved",
+                "maximum_width_fraction": 0.45,
                 "persistent_for_every_frame": True,
                 "first_blend_frame": plan.transitions[0].start_frame,
                 "incoming_weight_at_first_frame": 0.0,
+                "production_overlay_clearance": {
+                    "top_left_title": "geometrically disjoint",
+                    "footer": "geometrically disjoint",
+                    "right_callouts": "below the three-callout reservation",
+                },
                 "layout": layout,
             },
         }

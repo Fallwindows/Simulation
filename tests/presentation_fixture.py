@@ -69,9 +69,25 @@ def _video(
         filters = [
             "-vf",
             (
-                f"drawbox=x=0:y=0:w=iw:h=112:color={color}:t=fill,"
-                f"drawtext=text='{structured_motion_label}  FRAME %{{n}}  TIME %{{pts\\:hms}}':"
-                "x=42:y=28:fontsize=44:fontcolor=white:box=1:boxcolor=black@0.65"
+                "drawbox=x=63:y=63:w=912:h=180:color=0x050d18@0.84:t=fill,"
+                "drawbox=x=63:y=63:w=912:h=180:color=0x33d3f1@0.62:t=2,"
+                "drawtext=text='SIMULATED CAPTURE · SELECTIVE REAL LIDAR':"
+                "x=96:y=84:fontsize=22:fontcolor=0x60def1,"
+                f"drawtext=text='{structured_motion_label.upper()}':"
+                "x=96:y=126:fontsize=44:fontcolor=0xeef7fa,"
+                f"drawtext=text='PRODUCTION OVERLAY TOPOLOGY FIXTURE · FRAME %{{n}}':"
+                "x=96:y=204:fontsize=27:fontcolor=0xa0b9c7,"
+                "drawbox=x=1395:y=126:w=462:h=101:color=0x050e19@0.70:t=fill,"
+                "drawbox=x=1395:y=126:w=462:h=101:color=0x3ed9ef@0.62:t=2,"
+                "drawbox=x=1395:y=255:w=462:h=101:color=0x050e19@0.70:t=fill,"
+                "drawbox=x=1395:y=255:w=462:h=101:color=0x3ed9ef@0.62:t=2,"
+                "drawbox=x=1395:y=384:w=462:h=101:color=0x050e19@0.70:t=fill,"
+                "drawbox=x=1395:y=384:w=462:h=101:color=0x3ed9ef@0.62:t=2,"
+                "drawtext=text='CALLOUT RESERVATION 1':x=1416:y=148:fontsize=22:fontcolor=0x66e9f6,"
+                "drawtext=text='CALLOUT RESERVATION 2':x=1416:y=277:fontsize=22:fontcolor=0x66e9f6,"
+                "drawtext=text='CALLOUT RESERVATION 3':x=1416:y=406:fontsize=22:fontcolor=0x66e9f6,"
+                "drawtext=text='CAMERA OPTICAL FRAME · 3 SELECTED RETURNS · RIGID HEADER-STAMP SCANS · NO DESKEW · source t=%{pts\\:hms}':"
+                "x=63:y=986:fontsize=22:fontcolor=0x7da2b2"
             ),
         ]
     _run(

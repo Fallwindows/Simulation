@@ -8,7 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from simulator.presentation.complete_bundle import emit_complete_bundle
-from simulator.presentation.render_video import PlannedSegment, _build_filter, plan_segments, render_presentation
+from simulator.presentation.render_video import (
+    PlannedSegment,
+    _build_filter,
+    _disclosure_layout,
+    plan_segments,
+    render_presentation,
+)
 from simulator.presentation.provenance import (
     DIAGNOSTIC_BASELINE_IDENTITY,
     PRESENTATION_TRANSFORM_HFLIP,
@@ -159,6 +165,50 @@ class PresentationTimelineTests(unittest.TestCase):
             ),
             (540, 549),
         )
+
+        def overlaps(first, second):
+            return (
+                max(first[0], second[0]) < min(first[2], second[2])
+                and max(first[1], second[1]) < min(first[3], second[3])
+            )
+
+        expected_layouts = {
+            (1280, 720): {
+                "box_x": 666, "box_y": 331, "box_width": 576, "box_height": 48,
+                "text_x": 682, "text_y": 345, "font_size": 20,
+            },
+            (1920, 1080): {
+                "box_x": 998, "box_y": 497, "box_width": 864, "box_height": 72,
+                "text_x": 1022, "text_y": 518, "font_size": 30,
+            },
+        }
+        for (width, height), expected in expected_layouts.items():
+            with self.subTest(profile=(width, height)):
+                layout = _disclosure_layout(width, height)
+                self.assertEqual(layout, expected)
+                self.assertLessEqual(layout["box_width"], round(width * 0.45))
+                badge = (
+                    layout["box_x"], layout["box_y"],
+                    layout["box_x"] + layout["box_width"],
+                    layout["box_y"] + layout["box_height"],
+                )
+                scale = height / 720.0
+                pad = int(42 * scale)
+                production_regions = {
+                    "top_left_title": (pad, pad, min(width - pad, int(650 * scale)), int(162 * scale)),
+                    "footer": (pad, height - pad - int(21 * scale), width - pad, height - pad),
+                    **{
+                        f"right_callout_{index + 1}": (
+                            width - int(350 * scale),
+                            int((84 + index * 86) * scale),
+                            width - pad,
+                            int((151 + index * 86) * scale),
+                        )
+                        for index in range(3)
+                    },
+                }
+                for name, region in production_regions.items():
+                    self.assertFalse(overlaps(badge, region), f"replay disclosure overlaps {name} at {width}x{height}")
 
     def test_invalid_transition_contracts_fail_closed(self):
         source = json.loads(PLAN.read_text(encoding="utf-8"))
@@ -618,6 +668,61 @@ class CompletePresentationTests(unittest.TestCase):
             ffprobe=str(FFPROBE),
         )
 
+    def _assert_replay_disclosure_frames(self, output: Path, manifest: dict, dimensions: tuple[int, int]) -> None:
+        from PIL import Image
+
+        frame_numbers = (530, 531, 540, 600, 659, 660)
+        evidence = output / f"replay_disclosure_{dimensions[0]}x{dimensions[1]}"
+        evidence.mkdir()
+        prefix = evidence / "frame_%02d.png"
+        selection = "+".join(f"eq(n\\,{frame})" for frame in frame_numbers)
+        subprocess.run(
+            [
+                str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(output / manifest["video"]),
+                "-vf", f"select='{selection}'", "-fps_mode", "vfr", "-y", str(prefix),
+            ],
+            check=True,
+        )
+        paths = sorted(evidence.glob("frame_*.png"))
+        self.assertEqual(len(paths), len(frame_numbers))
+        frames = {
+            frame_number: Image.open(path).convert("RGB")
+            for frame_number, path in zip(frame_numbers, paths)
+        }
+        self.assertTrue(all(frame.size == dimensions for frame in frames.values()))
+        layout = manifest["editorial_disclosures"][0]["rendering"]["layout"]
+
+        def cyan_rule_fraction(frame):
+            y = layout["box_y"]
+            pixels = [
+                frame.getpixel((x, y))
+                for x in range(layout["box_x"], layout["box_x"] + layout["box_width"])
+            ]
+            return sum(red < 170 and green > 145 and blue > 175 for red, green, blue in pixels) / len(pixels)
+
+        def plaque_legibility(frame):
+            pixels = [
+                frame.getpixel((x, y))
+                for y in range(layout["box_y"] + 3, layout["box_y"] + layout["box_height"] - 3)
+                for x in range(layout["box_x"] + 3, layout["box_x"] + layout["box_width"] - 3)
+            ]
+            dark_fraction = sum(max(pixel) < 95 for pixel in pixels) / len(pixels)
+            pale_text_pixels = sum(
+                red > 140 and green > 160 and blue > 170
+                for red, green, blue in pixels
+            )
+            return dark_fraction, pale_text_pixels
+
+        for frame_number in (531, 540, 600, 659):
+            with self.subTest(dimensions=dimensions, frame=frame_number):
+                self.assertGreater(cyan_rule_fraction(frames[frame_number]), 0.70)
+                dark_fraction, pale_text_pixels = plaque_legibility(frames[frame_number])
+                self.assertGreater(dark_fraction, 0.55)
+                self.assertGreater(pale_text_pixels, 100)
+        for frame_number in (530, 660):
+            with self.subTest(dimensions=dimensions, frame=frame_number):
+                self.assertLess(cyan_rule_fraction(frames[frame_number]), 0.35)
+
     def _mutated_technical_receipt(self, name: str, output_index: int, mutate):
         manifest_path = self.fixture["technical_manifest"]
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -975,16 +1080,23 @@ class CompletePresentationTests(unittest.TestCase):
             },
             "rendering": {
                 "stage": "post_transition_final_composite",
+                "placement_region": "right_center_reserved",
+                "maximum_width_fraction": 0.45,
                 "persistent_for_every_frame": True,
                 "first_blend_frame": 531,
                 "incoming_weight_at_first_frame": 0.0,
+                "production_overlay_clearance": {
+                    "top_left_title": "geometrically disjoint",
+                    "footer": "geometrically disjoint",
+                    "right_callouts": "below the three-callout reservation",
+                },
                 "layout": {
-                    "box_x": 32,
-                    "box_y": 652,
-                    "box_width": 794,
+                    "box_x": 666,
+                    "box_y": 331,
+                    "box_width": 576,
                     "box_height": 48,
-                    "text_x": 48,
-                    "text_y": 666,
+                    "text_x": 682,
+                    "text_y": 345,
                     "font_size": 20,
                 },
             },
@@ -1151,35 +1263,7 @@ class CompletePresentationTests(unittest.TestCase):
             self.assertLess(adjacent_rms[-1], 48.0, f"transition at {transition.boundary_frame} jumps on exit")
             self.assertLess(max(adjacent_rms), 48.0, f"transition at {transition.boundary_frame} has an abrupt adjacent-frame jump")
 
-        disclosure_prefix = transition_dir / "disclosure_boundary_frame_%02d.png"
-        subprocess.run(
-            [
-                str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(output / manifest["video"]),
-                "-vf", "select='eq(n\\,530)+eq(n\\,531)+eq(n\\,659)+eq(n\\,660)'",
-                "-fps_mode", "vfr", "-y", str(disclosure_prefix),
-            ],
-            check=True,
-        )
-        disclosure_paths = sorted(transition_dir.glob("disclosure_boundary_frame_*.png"))
-        self.assertEqual(len(disclosure_paths), 4)
-        rendered_disclosure_frames = {
-            frame_number: Image.open(path).convert("RGB")
-            for frame_number, path in zip((530, 531, 659, 660), disclosure_paths)
-        }
-        layout = manifest["editorial_disclosures"][0]["rendering"]["layout"]
-
-        def cyan_rule_fraction(frame):
-            y = layout["box_y"]
-            pixels = [
-                frame.getpixel((x, y))
-                for x in range(layout["box_x"], layout["box_x"] + layout["box_width"])
-            ]
-            return sum(red < 170 and green > 145 and blue > 175 for red, green, blue in pixels) / len(pixels)
-
-        self.assertLess(cyan_rule_fraction(rendered_disclosure_frames[530]), 0.35)
-        self.assertGreater(cyan_rule_fraction(rendered_disclosure_frames[531]), 0.70)
-        self.assertGreater(cyan_rule_fraction(rendered_disclosure_frames[659]), 0.70)
-        self.assertLess(cyan_rule_fraction(rendered_disclosure_frames[660]), 0.35)
+        self._assert_replay_disclosure_frames(output, manifest, (1280, 720))
 
     def test_reviewed_orientation_operations_drive_filters_and_reject_forgery(self):
         plan = load_plan(PLAN)
@@ -1323,6 +1407,16 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertEqual(outputs["review_mp4"]["probe"]["audio_stream_count"], 1)
         self.assertEqual((outputs["review_mp4"]["probe"]["width"], outputs["review_mp4"]["probe"]["height"]), (1280, 720))
         self.assertTrue(all(item["probe"]["frame_count"] == 1350 for name, item in outputs.items() if "probe" in item))
+        self.assertEqual(manifest["editorial_disclosures"][0]["rendering"]["layout"], {
+            "box_x": 998,
+            "box_y": 497,
+            "box_width": 864,
+            "box_height": 72,
+            "text_x": 1022,
+            "text_y": 518,
+            "font_size": 30,
+        })
+        self._assert_replay_disclosure_frames(output, manifest, (1920, 1080))
 
 
 if __name__ == "__main__":
