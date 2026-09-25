@@ -254,6 +254,25 @@ HERO_ART_DIRECTIONS: dict[str, tuple[str, str, str, str]] = {
     "coffee_bag": ("NIGHT OWL", "SUMATRA DARK ROAST", "WHOLE BEAN • ROAST 04", "coffee"),
 }
 
+HERO_FOOD_SOURCES: dict[str, tuple[str, str]] = {
+    "cereal_sunrise": (
+        "oat_berry_bowl_v1.png",
+        "05092075da2683fdb96bc5ade5e8173813ff52a5837cf72f180100dd982b2139",
+    ),
+    "cereal_harvest": (
+        "toasted_loops_bowl_v1.png",
+        "43e5d2f9abae2f9389c5f4af596fb82263df19a0e81c65ba1e64c38aefefe70f",
+    ),
+    "juice_citrus": (
+        "citrus_still_life_v1.png",
+        "ba636324e9fff4e56cc35738206fcb72f8f54e5d0ec76827ebafaf03cf1df86b",
+    ),
+    "coffee_bag": (
+        "roasted_coffee_scoop_v1.png",
+        "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56",
+    ),
+}
+
 BOTTLE_LEFT_STRIP_FRACTION = 0.16
 BOTTLE_LAYOUT_FIVE_TEXT_INSET_FRACTION = 0.20
 
@@ -449,6 +468,35 @@ def _draw_food_illustration(
         draw.arc((x0 + int(width * .40), y0 + int(height * .04), x1 - int(width * .18), y0 + int(height * .36)), 190, 335, fill=(235, 226, 207), width=max(2, width // 55))
 
 
+def _paste_hero_food_source(image, spec: AssetSpec, box: tuple[int, int, int, int]) -> bool:
+    """Composite one pinned original RGBA food cutout; return false for vector-only art."""
+    source_record = HERO_FOOD_SOURCES.get(spec.asset_key)
+    if source_record is None:
+        return False
+    filename, expected_hash = source_record
+    source_path = Path(__file__).resolve().parents[2] / "assets" / "retail" / "source_food" / filename
+    if not source_path.is_file():
+        raise RuntimeError(f"required hero food source missing: {source_path}")
+    actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if actual_hash != expected_hash:
+        raise RuntimeError(
+            f"hero food source hash mismatch: {source_path} ({actual_hash}; expected {expected_hash})"
+        )
+    with Image.open(source_path) as opened:
+        source = opened.convert("RGBA")
+    alpha_bounds = source.getchannel("A").getbbox()
+    if alpha_bounds is None:
+        raise RuntimeError(f"hero food source has no visible alpha content: {source_path}")
+    source = source.crop(alpha_bounds)
+    x0, y0, x1, y1 = box
+    target_width, target_height = x1 - x0, y1 - y0
+    source.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+    paste_x = x0 + (target_width - source.width) // 2
+    paste_y = y0 + (target_height - source.height) // 2
+    image.paste(source, (paste_x, paste_y), source)
+    return True
+
+
 def _write_hero_wrap_texture(path: Path, spec: AssetSpec, height: int = 768) -> None:
     """Write a four-panel retail wrap for packages closest to the RGB camera."""
     if Image is None:
@@ -524,7 +572,8 @@ def _write_hero_wrap_texture(path: Path, spec: AssetSpec, height: int = 768) -> 
     draw.text(((fx0 + fx1) // 2, fy0 + int(height * .205)), spec.product_name, font=_font(max(25, int(front_width * (.115 if len(spec.product_name) < 13 else .092))), True), fill=ink, anchor="mm")
     draw.text(((fx0 + fx1) // 2, fy0 + int(height * .275)), variety, font=_font(max(14, int(front_width * .048)), True), fill=_blend(ink, accent, .18), anchor="mm")
     art_box = (fx0 + int(front_width * .08), fy0 + int(height * .30), fx1 - int(front_width * .08), fy0 + int(height * .76))
-    _draw_food_illustration(draw, illustration, art_box, ink, accent, seed)
+    if not _paste_hero_food_source(image, spec, art_box):
+        _draw_food_illustration(draw, illustration, art_box, ink, accent, seed)
     draw.rectangle((fx0, fy0 + int(height * .78), fx1, fy1), fill=accent)
     draw.text(((fx0 + fx1) // 2, fy0 + int(height * .835)), secondary, font=_font(max(13, int(front_width * .047)), True), fill=ink, anchor="mm")
     draw.text(((fx0 + fx1) // 2, fy0 + int(height * .895)), "ORIGINAL FICTIONAL PACKAGING • DEMO", font=_font(max(11, int(front_width * .034))), fill=ink, anchor="mm")
@@ -1019,9 +1068,12 @@ def _hero_side_and_back_print_panels(spec: AssetSpec, material: str) -> list[str
     x_offset = width / 2.0 + .001
     y_offset = depth / 2.0 + .001
 
-    def uv(bounds: tuple[float, float, float, float]) -> str:
+    def uv(bounds: tuple[float, float, float, float], reverse_u: bool = False) -> str:
+        low_u, high_u = bounds[0], bounds[2]
+        if reverse_u:
+            low_u, high_u = high_u, low_u
         return "[(%.6f, %.6f), (%.6f, %.6f), (%.6f, %.6f), (%.6f, %.6f)]" % (
-            bounds[0], bounds[1], bounds[2], bounds[1], bounds[2], bounds[3], bounds[0], bounds[3],
+            low_u, bounds[1], high_u, bounds[1], high_u, bounds[3], low_u, bounds[3],
         )
 
     return [
@@ -1030,7 +1082,7 @@ def _hero_side_and_back_print_panels(spec: AssetSpec, material: str) -> list[str
         ) {{
             point3f[] points = [(-{x_offset:.5f}, -{half_side_depth:.5f}, -{half_h:.5f}), (-{x_offset:.5f}, {half_side_depth:.5f}, -{half_h:.5f}), (-{x_offset:.5f}, {half_side_depth:.5f}, {half_h:.5f}), (-{x_offset:.5f}, -{half_side_depth:.5f}, {half_h:.5f})]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            int[] faceVertexIndices = [0, 3, 2, 1]
             normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
             texCoord2f[] primvars:st = {uv(regions["left"])} (interpolation = "vertex")
             rel material:binding = </Asset/Looks/{material}>
@@ -1040,7 +1092,7 @@ def _hero_side_and_back_print_panels(spec: AssetSpec, material: str) -> list[str
         ) {{
             point3f[] points = [({x_offset:.5f}, {half_side_depth:.5f}, -{half_h:.5f}), ({x_offset:.5f}, -{half_side_depth:.5f}, -{half_h:.5f}), ({x_offset:.5f}, -{half_side_depth:.5f}, {half_h:.5f}), ({x_offset:.5f}, {half_side_depth:.5f}, {half_h:.5f})]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            int[] faceVertexIndices = [0, 3, 2, 1]
             normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
             texCoord2f[] primvars:st = {uv(regions["right"])} (interpolation = "vertex")
             rel material:binding = </Asset/Looks/{material}>
@@ -1050,9 +1102,9 @@ def _hero_side_and_back_print_panels(spec: AssetSpec, material: str) -> list[str
         ) {{
             point3f[] points = [(-{width * .44:.5f}, -{y_offset:.5f}, -{half_h:.5f}), ({width * .44:.5f}, -{y_offset:.5f}, -{half_h:.5f}), ({width * .44:.5f}, -{y_offset:.5f}, {half_h:.5f}), (-{width * .44:.5f}, -{y_offset:.5f}, {half_h:.5f})]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 3, 2, 1]
+            int[] faceVertexIndices = [0, 1, 2, 3]
             normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
-            texCoord2f[] primvars:st = {uv(regions["back"])} (interpolation = "vertex")
+            texCoord2f[] primvars:st = {uv(regions["back"], reverse_u=True)} (interpolation = "vertex")
             rel material:binding = </Asset/Looks/{material}>
         }}''',
     ]
@@ -1962,6 +2014,12 @@ def generate_library(root: Path | None = None) -> Path:
                 "normal_texture_sha256": _sha256(normal_texture_path),
                 "roughness_texture_path": f"textures/{roughness_texture_name}",
                 "roughness_texture_sha256": _sha256(roughness_texture_path),
+            })
+        if spec.asset_key in HERO_FOOD_SOURCES:
+            source_name, source_hash = HERO_FOOD_SOURCES[spec.asset_key]
+            entry.update({
+                "source_food_path": f"source_food/{source_name}",
+                "source_food_sha256": source_hash,
             })
         entries.append(entry)
     manifest = {

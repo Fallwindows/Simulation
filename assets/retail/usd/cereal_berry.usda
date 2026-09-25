@@ -59,7 +59,7 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(-0.06600, -0.04400, -0.13020), (-0.06600, 0.04400, -0.13020), (-0.06600, 0.04400, 0.13020), (-0.06600, -0.04400, 0.13020)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            int[] faceVertexIndices = [0, 3, 2, 1]
             normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
             texCoord2f[] primvars:st = [(0.000000, 0.040000), (0.217391, 0.040000), (0.217391, 0.960000), (0.000000, 0.960000)] (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Front>
@@ -69,7 +69,7 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(0.06600, 0.04400, -0.13020), (0.06600, -0.04400, -0.13020), (0.06600, -0.04400, 0.13020), (0.06600, 0.04400, 0.13020)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            int[] faceVertexIndices = [0, 3, 2, 1]
             normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
             texCoord2f[] primvars:st = [(0.500000, 0.040000), (0.717391, 0.040000), (0.717391, 0.960000), (0.500000, 0.960000)] (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Front>
@@ -79,9 +79,9 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(-0.05720, -0.05100, -0.13020), (0.05720, -0.05100, -0.13020), (0.05720, -0.05100, 0.13020), (-0.05720, -0.05100, 0.13020)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 3, 2, 1]
+            int[] faceVertexIndices = [0, 1, 2, 3]
             normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
-            texCoord2f[] primvars:st = [(0.717391, 0.040000), (1.000000, 0.040000), (1.000000, 0.960000), (0.717391, 0.960000)] (interpolation = "vertex")
+            texCoord2f[] primvars:st = [(1.000000, 0.040000), (0.717391, 0.040000), (0.717391, 0.960000), (1.000000, 0.960000)] (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Front>
         }
     }

@@ -50,14 +50,16 @@
         "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "397f9489c3f0fe647ffea7868b16ec35a99f5a817ab8b2212e0de772acd3f511",
-      "texture_sha256": "c6d04dfff81d91cad16da19c2a65b26794f51717c95b6b48d7d24cc4a3f927d5",
-      "geometry_scope_sha256": "1be1d7c08fedcb82a6dc411503a2418fe217a882564f73fc458cd93a4e59f865",
+      "usd_sha256": "aba4991938a6599b1613c807c50dd2a388ec5670a347a98673e4fd9835677036",
+      "texture_sha256": "affd4945591f3c4a88da564360d25ce3a8780decb728094afcfea62ff507bc56",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
       "appearance_scope_sha256": "5d459ad3b4523c9c715234849e7db0d2c1d5875b3ef366ba080d4c19667d0a82",
       "normal_texture_path": "textures/cereal_sunrise_normal.png",
       "normal_texture_sha256": "a4223d2c9be28134c062031ddaa65bd3d611b64b678bb4574dede319c38ffc99",
       "roughness_texture_path": "textures/cereal_sunrise_roughness.png",
-      "roughness_texture_sha256": "cee7cfc572c4b4004e5e02a1c4a7de3016787d1f19cc5eb8421be9ef6f1f55c5"
+      "roughness_texture_sha256": "cee7cfc572c4b4004e5e02a1c4a7de3016787d1f19cc5eb8421be9ef6f1f55c5",
+      "source_food_path": "source_food/oat_berry_bowl_v1.png",
+      "source_food_sha256": "05092075da2683fdb96bc5ade5e8173813ff52a5837cf72f180100dd982b2139"
     },
     {
       "asset_key": "cereal_harvest",
@@ -87,14 +89,16 @@
         "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "fa9b25b54481092d0de84f301ddd88e0538aeaae449d411d96857a5eea606d88",
-      "texture_sha256": "1a5d5f22ad0406ecde75f9ef7fdde6915d63b75b081023a4fad4d90ce2e52b73",
-      "geometry_scope_sha256": "1be1d7c08fedcb82a6dc411503a2418fe217a882564f73fc458cd93a4e59f865",
+      "usd_sha256": "ffb3af37880b2430b621fcdf08fee683da18fa7f6fdc40e8c42e85dc976c4d5a",
+      "texture_sha256": "f9fc0cf1afcf163437367985bc9ca92ddd65c00c95f07910cc371250453da5ca",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
       "appearance_scope_sha256": "db76ba4b03d86f4daae7d1385e90a1c8640b69a56e705e9122a6fcedce37af78",
       "normal_texture_path": "textures/cereal_harvest_normal.png",
       "normal_texture_sha256": "112e1b4e3e63bee0bc4633e7ac254cb15cc62e27d8b248f1a1495d7d9a09457f",
       "roughness_texture_path": "textures/cereal_harvest_roughness.png",
-      "roughness_texture_sha256": "6e5847e733624d2a463274004b2f589c1db6d9a6e17873a0451d179de8667827"
+      "roughness_texture_sha256": "6e5847e733624d2a463274004b2f589c1db6d9a6e17873a0451d179de8667827",
+      "source_food_path": "source_food/toasted_loops_bowl_v1.png",
+      "source_food_sha256": "43e5d2f9abae2f9389c5f4af596fb82263df19a0e81c65ba1e64c38aefefe70f"
     },
     {
       "asset_key": "cereal_grain",
@@ -124,9 +128,9 @@
         "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "37f570ae8b942d90ffacb85fc3f892632782d5b1e74634446502b8d6bd9539f1",
+      "usd_sha256": "7c0fe95114b44b0cab580bdf8b49bc230cb4ccd69f76a74a0346251a2982c1f5",
       "texture_sha256": "1e80aa758f54dfae8d89162fbe289bc410afd96756429842ca75920db0a46dca",
-      "geometry_scope_sha256": "0d16be8aa54aca5de0a4eac51086c4da73ff88ddd06b849941f8f4a94cee8cce",
+      "geometry_scope_sha256": "ec19f133267804f9c40e8de9f5b92a36992368704749871aff5f783a3bbd7cf9",
       "appearance_scope_sha256": "889c64d08ff4929c5a5e49e6e49692eefefb43ced0373b42941d08328f3cde34",
       "normal_texture_path": "textures/cereal_grain_normal.png",
       "normal_texture_sha256": "b961cdb60ac23d9a814814ae46d4c762ea520f9132496733aaaacb5f8d8dde50",
@@ -161,9 +165,9 @@
         "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "9c151119c16491234559fc8ec0c41ac31b4a5374ba322b621c90379d079fcce5",
+      "usd_sha256": "4e7bc7839753f582b4964077b1ee9b4e619e8b065038b62c49a091769e4fa0a2",
       "texture_sha256": "4a75dbf006586de9c259d90e91b50af341e2f40370115a8e25b07e27d4421481",
-      "geometry_scope_sha256": "1be1d7c08fedcb82a6dc411503a2418fe217a882564f73fc458cd93a4e59f865",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
       "appearance_scope_sha256": "9feffd3c0718eeaada93b185ffa13e19450a8516d666668f7fd4897743dc67ae",
       "normal_texture_path": "textures/cereal_berry_normal.png",
       "normal_texture_sha256": "c81d29b10bac9372b2534aac1b680fc075b7e3dc540de6922397b5c768f55fd4",
@@ -198,9 +202,9 @@
         "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "f0296dcba1921b4906f09c671acd307d29c623d405fd522ea4a23405b72cce07",
+      "usd_sha256": "02f69c420d3ed908ebe6625938acba968ac65adeaab6849d5fe4ca408840a408",
       "texture_sha256": "b6628d0249c2b737cd0ee20b61d710688aaaf4c73fd2a19a28683d3e4e7db642",
-      "geometry_scope_sha256": "1be1d7c08fedcb82a6dc411503a2418fe217a882564f73fc458cd93a4e59f865",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
       "appearance_scope_sha256": "3a3a3bfa58c5f09c9ffa119b718731935b62716be97a647aca0dd6e11ac09fb6",
       "normal_texture_path": "textures/cereal_honey_normal.png",
       "normal_texture_sha256": "bbeced58ebaebe386e24eb17bc3935ef42335d67cca4e72b30306eeeda77f2c5",
@@ -235,9 +239,9 @@
         "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "fade7529a54a7d24af6ca66dc98c0eff7f86b940fb9229515d0cbe7e49815fb1",
+      "usd_sha256": "d32ffac77753b4a725e543aea445047d7b9af7b89eee3d0c117230631e543cf2",
       "texture_sha256": "4c0991614762a69371b4ea99089c22d2c793dd9e06387d2caa65b2d973059534",
-      "geometry_scope_sha256": "0d16be8aa54aca5de0a4eac51086c4da73ff88ddd06b849941f8f4a94cee8cce",
+      "geometry_scope_sha256": "ec19f133267804f9c40e8de9f5b92a36992368704749871aff5f783a3bbd7cf9",
       "appearance_scope_sha256": "745cd70f59a610cb708914c01d01c0a2dfc3003a990f9a8bca9e64bf98c99607",
       "normal_texture_path": "textures/cereal_morning_normal.png",
       "normal_texture_sha256": "953320c85f9aca21b063bc3bcf6923b9bbb1f582ded8bc75c5923514c1a80496",
@@ -427,14 +431,16 @@
         "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "7fa3cd954133616ef7990e9e09d2e3437ab380bf8e92994b753ad58891c92024",
-      "texture_sha256": "120d03b3030851133fa9c9f18bc8524cd2a866ed3664f2c66b5cee9491190c70",
-      "geometry_scope_sha256": "628746d2391add632ebf1fcf7accc6a5fb8f62ede075d74b26882bff0981c792",
+      "usd_sha256": "bd63f2c58cfe0ddd53a0652db96787e01e0d95e311e21055d1f5cb405fbd603f",
+      "texture_sha256": "da884f7b4ebfa40b03d4c440a8108fb3cd877c1f1500887ad341f40b685e2609",
+      "geometry_scope_sha256": "9afe2d0fd1483cd1906d6b05ccd0fb78a16c63774377cfefa038dc509ecf554a",
       "appearance_scope_sha256": "7a014c062f8be5ae6c9e500cfeb5a3a9eb4f902185acca0ca98e9ff251e07bff",
       "normal_texture_path": "textures/juice_citrus_normal.png",
       "normal_texture_sha256": "cf8959f5fa2461d3cb2eba568e4eb29cb2b8a7e803a67fc19630ac693e9b9d35",
       "roughness_texture_path": "textures/juice_citrus_roughness.png",
-      "roughness_texture_sha256": "04b4c828d62ddaed777d436f2a645cd3e250c398ef4c8eabb88dc61c973171cd"
+      "roughness_texture_sha256": "04b4c828d62ddaed777d436f2a645cd3e250c398ef4c8eabb88dc61c973171cd",
+      "source_food_path": "source_food/citrus_still_life_v1.png",
+      "source_food_sha256": "ba636324e9fff4e56cc35738206fcb72f8f54e5d0ec76827ebafaf03cf1df86b"
     },
     {
       "asset_key": "juice_berry",
@@ -2084,14 +2090,16 @@
         "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "3e496eaad16217dc2e4c2800d7a12a5b01e562cc125ee0b9be00208befeaf48a",
-      "texture_sha256": "7d73a0a485e167349ba510c7e5fb25825bab5a3072c9706a2f9202f2ef5d23b7",
-      "geometry_scope_sha256": "ddb67fac64f2e92e5a5c7a3238f317f2ce54c5242b7c14ad661bbfa4589d33d9",
+      "usd_sha256": "594db77c4df4f279f2b0037a95a04c466fce1ad60c8c2c9bf49b27aced54c041",
+      "texture_sha256": "4fb50fdd5ce5b40903bf13e692299061dc0bb7f0b303a1f25e67a654af5de94e",
+      "geometry_scope_sha256": "7f6172ba23c70a7db24e44e1bd31033be73d33d6a2cb82afb6dadb5f583bcf0e",
       "appearance_scope_sha256": "0d1f8550f8a13715b5a627fcfe6eb59d905d15b2d88cb296fd888b4298eb563c",
       "normal_texture_path": "textures/coffee_bag_normal.png",
       "normal_texture_sha256": "9acbe0171f7cb8e47a3a2680a24ef169f2e64d765599f361f53bd6fbc6d75ee3",
       "roughness_texture_path": "textures/coffee_bag_roughness.png",
-      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514"
+      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514",
+      "source_food_path": "source_food/roasted_coffee_scoop_v1.png",
+      "source_food_sha256": "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56"
     },
     {
       "asset_key": "flour_sack",

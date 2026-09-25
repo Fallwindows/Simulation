@@ -1034,14 +1034,16 @@
         "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "3e496eaad16217dc2e4c2800d7a12a5b01e562cc125ee0b9be00208befeaf48a",
-      "texture_sha256": "7d73a0a485e167349ba510c7e5fb25825bab5a3072c9706a2f9202f2ef5d23b7",
-      "geometry_scope_sha256": "ddb67fac64f2e92e5a5c7a3238f317f2ce54c5242b7c14ad661bbfa4589d33d9",
+      "usd_sha256": "594db77c4df4f279f2b0037a95a04c466fce1ad60c8c2c9bf49b27aced54c041",
+      "texture_sha256": "4fb50fdd5ce5b40903bf13e692299061dc0bb7f0b303a1f25e67a654af5de94e",
+      "geometry_scope_sha256": "7f6172ba23c70a7db24e44e1bd31033be73d33d6a2cb82afb6dadb5f583bcf0e",
       "appearance_scope_sha256": "0d1f8550f8a13715b5a627fcfe6eb59d905d15b2d88cb296fd888b4298eb563c",
       "normal_texture_path": "textures/coffee_bag_normal.png",
       "normal_texture_sha256": "9acbe0171f7cb8e47a3a2680a24ef169f2e64d765599f361f53bd6fbc6d75ee3",
       "roughness_texture_path": "textures/coffee_bag_roughness.png",
-      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514"
+      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514",
+      "source_food_path": "source_food/roasted_coffee_scoop_v1.png",
+      "source_food_sha256": "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56"
     },
     {
       "asset_key": "flour_sack",

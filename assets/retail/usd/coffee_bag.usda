@@ -95,7 +95,7 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(-0.06850, -0.03520, -0.09870), (-0.06850, 0.03520, -0.09870), (-0.06850, 0.03520, 0.09870), (-0.06850, -0.03520, 0.09870)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            int[] faceVertexIndices = [0, 3, 2, 1]
             normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
             texCoord2f[] primvars:st = [(0.000000, 0.040000), (0.186047, 0.040000), (0.186047, 0.960000), (0.000000, 0.960000)] (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Print>
@@ -105,7 +105,7 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(0.06850, 0.03520, -0.09870), (0.06850, -0.03520, -0.09870), (0.06850, -0.03520, 0.09870), (0.06850, 0.03520, 0.09870)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
+            int[] faceVertexIndices = [0, 3, 2, 1]
             normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
             texCoord2f[] primvars:st = [(0.500000, 0.040000), (0.686047, 0.040000), (0.686047, 0.960000), (0.500000, 0.960000)] (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Print>
@@ -115,9 +115,9 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(-0.05940, -0.04100, -0.09870), (0.05940, -0.04100, -0.09870), (0.05940, -0.04100, 0.09870), (-0.05940, -0.04100, 0.09870)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 3, 2, 1]
+            int[] faceVertexIndices = [0, 1, 2, 3]
             normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
-            texCoord2f[] primvars:st = [(0.686047, 0.040000), (1.000000, 0.040000), (1.000000, 0.960000), (0.686047, 0.960000)] (interpolation = "vertex")
+            texCoord2f[] primvars:st = [(1.000000, 0.040000), (0.686047, 0.040000), (0.686047, 0.960000), (1.000000, 0.960000)] (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Print>
         }
     }
