@@ -93,6 +93,15 @@ class DiagnosticFallback:
 
 
 @dataclass(frozen=True)
+class TransitionSampling:
+    mode: str
+    frame_count: int
+    source_frame_start: int | None
+    source_frame_end_exclusive: int | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
 class Transition:
     from_shot: int
     to_shot: int
@@ -101,6 +110,8 @@ class Transition:
     style: str
     easing: str
     intent: str
+    outgoing_sampling: TransitionSampling
+    incoming_sampling: TransitionSampling
 
     @property
     def half_duration_frames(self) -> int:
@@ -181,6 +192,8 @@ class ShotRenderInput:
     receipt_path: Path
     receipt_sha256: str
     presentation_transform: dict[str, object] | None
+    transition_boundary_frame: int | None
+    transition_source_samples: tuple[tuple[int, float], ...]
 
 
 @dataclass(frozen=True)
@@ -332,6 +345,47 @@ def load_plan(path: str | Path) -> PresentationPlan:
     if not isinstance(transition_data, list) or len(transition_data) != len(SMOOTH_TRANSITION_BOUNDARIES):
         raise ValueError("transition_policy must declare all seven technical boundaries")
     transitions: list[Transition] = []
+
+    def transition_sampling(
+        value: object,
+        *,
+        boundary_frame: int,
+        half_duration_frames: int,
+        side: str,
+    ) -> TransitionSampling:
+        if not isinstance(value, dict):
+            raise ValueError(f"transition at frame {boundary_frame} must declare {side} source sampling")
+        allowed = {"mode", "frame_count", "source_frame_start", "source_frame_end_exclusive", "reason"}
+        if not set(value).issubset(allowed):
+            raise ValueError(f"transition at frame {boundary_frame} {side} source sampling has unknown fields")
+        mode = str(value.get("mode", ""))
+        frame_count = _positive_int(
+            value.get("frame_count"),
+            f"transition at frame {boundary_frame} {side} source sampling frame_count",
+        )
+        if frame_count != half_duration_frames:
+            raise ValueError(
+                f"transition at frame {boundary_frame} {side} source sampling must cover one half-window"
+            )
+        reason_value = value.get("reason")
+        reason = str(reason_value).strip() if reason_value is not None else None
+        if mode == "edge_clone":
+            if value.get("source_frame_start") is not None or value.get("source_frame_end_exclusive") is not None:
+                raise ValueError("edge-clone sampling cannot declare a moving source range")
+            return TransitionSampling(mode, frame_count, None, None, reason)
+        if mode != "contiguous_postroll" or side != "outgoing":
+            raise ValueError(
+                f"transition at frame {boundary_frame} {side} source sampling mode is unsupported"
+            )
+        start = int(value.get("source_frame_start", -1))
+        end = int(value.get("source_frame_end_exclusive", -1))
+        if start != boundary_frame or end != boundary_frame + frame_count:
+            raise ValueError(
+                f"transition at frame {boundary_frame} contiguous post-roll must cover "
+                f"source frames {boundary_frame}-{boundary_frame + frame_count - 1}"
+            )
+        return TransitionSampling(mode, frame_count, start, end, reason)
+
     for index, item in enumerate(transition_data):
         if not isinstance(item, dict):
             raise ValueError(f"transition {index} must be a mapping")
@@ -355,7 +409,45 @@ def load_plan(path: str | Path) -> PresentationPlan:
         intent = str(item.get("intent", "")).strip()
         if style != "smooth_crossfade" or easing != "smoothstep" or not intent:
             raise ValueError(f"transition at frame {boundary_frame} lacks the approved style, easing, or intent")
-        transitions.append(Transition(from_shot, to_shot, boundary_frame, duration_frames, style, easing, intent))
+        sampling_value = item.get("source_sampling")
+        if not isinstance(sampling_value, dict) or set(sampling_value) != {"outgoing", "incoming"}:
+            raise ValueError(f"transition at frame {boundary_frame} must declare outgoing and incoming source sampling")
+        outgoing_sampling = transition_sampling(
+            sampling_value["outgoing"],
+            boundary_frame=boundary_frame,
+            half_duration_frames=duration_frames // 2,
+            side="outgoing",
+        )
+        incoming_sampling = transition_sampling(
+            sampling_value["incoming"],
+            boundary_frame=boundary_frame,
+            half_duration_frames=duration_frames // 2,
+            side="incoming",
+        )
+        if boundary_frame == 540:
+            if (
+                outgoing_sampling.mode != "contiguous_postroll"
+                or incoming_sampling.mode != "edge_clone"
+                or not incoming_sampling.reason
+            ):
+                raise ValueError(
+                    "transition at frame 540 requires moving RGB post-roll and a reasoned technical start clone"
+                )
+        elif outgoing_sampling.mode != "edge_clone" or incoming_sampling.mode != "edge_clone":
+            raise ValueError(f"transition at frame {boundary_frame} must retain symmetric edge clones")
+        transitions.append(
+            Transition(
+                from_shot,
+                to_shot,
+                boundary_frame,
+                duration_frames,
+                style,
+                easing,
+                intent,
+                outgoing_sampling,
+                incoming_sampling,
+            )
+        )
     for previous, current in zip(transitions, transitions[1:]):
         if previous.end_frame_exclusive > current.start_frame:
             raise ValueError("transition windows must not overlap")
@@ -373,7 +465,7 @@ def inspect_inputs(
     data = _mapping(source)
     schema_version = int(data.get("schema_version", -1))
     repo_root = plan.path.parents[2]
-    if schema_version == 3:
+    if schema_version == 4:
         from .complete_bundle import validate_complete_bundle
 
         validated = validate_complete_bundle(
@@ -399,6 +491,8 @@ def inspect_inputs(
                 item.receipt_path,
                 item.receipt_sha256,
                 item.presentation_transform,
+                item.transition_boundary_frame,
+                item.transition_source_samples,
             )
             for item in validated.shots
         }

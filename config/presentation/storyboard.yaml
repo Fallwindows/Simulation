@@ -30,6 +30,20 @@
         "duration_frames": 18,
         "style": "smooth_crossfade",
         "easing": "smoothstep",
+        "source_sampling": {
+          "outgoing": {
+            "mode": "contiguous_postroll",
+            "frame_count": 9,
+            "source_frame_start": 540,
+            "source_frame_end_exclusive": 549,
+            "reason": "M1 remains in forward cruise through the outgoing half-window"
+          },
+          "incoming": {
+            "mode": "edge_clone",
+            "frame_count": 9,
+            "reason": "the technical producer has no validated frame-level preroll mapping"
+          }
+        },
         "intent": "activate the sensor visualization while preserving the established aisle view"
       },
       {
@@ -39,6 +53,10 @@
         "duration_frames": 18,
         "style": "smooth_crossfade",
         "easing": "smoothstep",
+        "source_sampling": {
+          "outgoing": {"mode": "edge_clone", "frame_count": 9},
+          "incoming": {"mode": "edge_clone", "frame_count": 9}
+        },
         "intent": "fade RGB context away into the point-cloud-only environment"
       },
       {
@@ -48,6 +66,10 @@
         "duration_frames": 18,
         "style": "smooth_crossfade",
         "easing": "smoothstep",
+        "source_sampling": {
+          "outgoing": {"mode": "edge_clone", "frame_count": 9},
+          "incoming": {"mode": "edge_clone", "frame_count": 9}
+        },
         "intent": "move from current environment returns into the persistent map reveal"
       },
       {
@@ -57,6 +79,10 @@
         "duration_frames": 12,
         "style": "smooth_crossfade",
         "easing": "smoothstep",
+        "source_sampling": {
+          "outgoing": {"mode": "edge_clone", "frame_count": 6},
+          "incoming": {"mode": "edge_clone", "frame_count": 6}
+        },
         "intent": "introduce object-level reconstruction without a camera or overlay snap"
       },
       {
@@ -66,6 +92,10 @@
         "duration_frames": 12,
         "style": "smooth_crossfade",
         "easing": "smoothstep",
+        "source_sampling": {
+          "outgoing": {"mode": "edge_clone", "frame_count": 6},
+          "incoming": {"mode": "edge_clone", "frame_count": 6}
+        },
         "intent": "focus from the multi-object view onto the selected persistent item"
       },
       {
@@ -75,6 +105,10 @@
         "duration_frames": 12,
         "style": "smooth_crossfade",
         "easing": "smoothstep",
+        "source_sampling": {
+          "outgoing": {"mode": "edge_clone", "frame_count": 6},
+          "incoming": {"mode": "edge_clone", "frame_count": 6}
+        },
         "intent": "expand from item detail to the integrated observed-aisle overview"
       },
       {
@@ -84,6 +118,10 @@
         "duration_frames": 12,
         "style": "smooth_crossfade",
         "easing": "smoothstep",
+        "source_sampling": {
+          "outgoing": {"mode": "edge_clone", "frame_count": 6},
+          "incoming": {"mode": "edge_clone", "frame_count": 6}
+        },
         "intent": "settle the integrated map view into the final technical statement"
       }
     ]

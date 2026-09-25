@@ -45,6 +45,8 @@ class PlannedSegment:
     video_sha256: str | None = None
     receipt_sha256: str | None = None
     presentation_transform: dict[str, object] | None = None
+    transition_boundary_frame: int | None = None
+    transition_source_samples: tuple[tuple[int, float], ...] = ()
 
 
 def _file_sha256(path: Path) -> str:
@@ -102,6 +104,8 @@ def plan_segments(plan: PresentationPlan, report: InputReport, mode: str) -> tup
                     source.video_sha256,
                     source.receipt_sha256,
                     source.presentation_transform,
+                    source.transition_boundary_frame,
+                    source.transition_source_samples,
                 )
             )
             continue
@@ -259,6 +263,67 @@ def _held_source_time(
     }
 
 
+def _transition_frame_source(
+    segment: PlannedSegment,
+    source_frame: int,
+    fps: int,
+) -> dict[str, Any]:
+    data_extent = None
+    if segment.source_time_range_s is not None:
+        data_extent = {
+            "start_s": segment.source_time_range_s[0],
+            "end_s": segment.source_time_range_s[1],
+            "basis": segment.source_time_basis,
+        }
+    observed = dict(segment.transition_source_samples).get(source_frame)
+    if segment.source_role == "rgb_capture" and observed is not None:
+        measurement_timestamp = observed
+        measurement_basis = segment.source_time_basis
+        binding = {
+            "status": "validated",
+            "mechanism": "hash-bound contiguous RGB frame_index observed stamp",
+        }
+    else:
+        measurement_timestamp = None
+        measurement_basis = None
+        binding = {
+            "status": "unavailable",
+            "reason": (
+                "producer supplies no validated source-video-frame to measurement-time mapping"
+                if segment.source_role != "rgb_capture"
+                else "complete bundle does not bind this RGB transition source frame"
+            ),
+        }
+    return {
+        "source_frame": source_frame,
+        "source_clip_pts_s": round(source_frame / fps, 12),
+        "source_clip_time_basis": f"source video CFR PTS from stream start at {fps} fps",
+        "source_data_time_extent": data_extent,
+        "measurement_timestamp_s": measurement_timestamp,
+        "measurement_time_basis": measurement_basis,
+        "measurement_time_binding": binding,
+    }
+
+
+def _transition_source_frames(
+    transition: Any,
+    outgoing: PlannedSegment,
+    incoming: PlannedSegment,
+    relative_frame: int,
+) -> tuple[int, int]:
+    half = transition.half_duration_frames
+    outgoing_start = outgoing.source_start_frame + outgoing.shot.frame_count - half
+    if transition.outgoing_sampling.mode == "contiguous_postroll":
+        outgoing_frame = outgoing_start + relative_frame
+    else:
+        outgoing_frame = outgoing_start + min(relative_frame, half - 1)
+    if transition.incoming_sampling.mode == "edge_clone":
+        incoming_frame = incoming.source_start_frame + max(0, relative_frame - half)
+    else:
+        raise ValueError(f"unsupported incoming sampling mode {transition.incoming_sampling.mode}")
+    return outgoing_frame, incoming_frame
+
+
 def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment, ...]) -> list[dict[str, Any]]:
     by_shot = {segment.shot.number: segment for segment in segments}
     result = []
@@ -272,6 +337,9 @@ def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment,
             progress = 1.0 - relative_frame / transition.duration_frames
             outgoing_weight = _smoothstep(progress)
             film_frame = transition.start_frame + relative_frame
+            outgoing_sample_frame, incoming_sample_frame = _transition_source_frames(
+                transition, outgoing, incoming, relative_frame
+            )
             samples.append(
                 {
                     "film_frame": film_frame,
@@ -279,8 +347,43 @@ def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment,
                     "descending_progress": round(progress, 12),
                     "outgoing_weight": round(outgoing_weight, 12),
                     "incoming_weight": round(1.0 - outgoing_weight, 12),
+                    "sources": {
+                        "outgoing": _transition_frame_source(outgoing, outgoing_sample_frame, plan.fps),
+                        "incoming": _transition_frame_source(incoming, incoming_sample_frame, plan.fps),
+                    },
                 }
             )
+        if transition.outgoing_sampling.mode == "contiguous_postroll":
+            outgoing_source_summary = {
+                "shot": transition.from_shot,
+                "view_id": outgoing.view_id,
+                "source_role": outgoing.source_role,
+                "source_video_sha256": outgoing.video_sha256,
+                "source_receipt_sha256": outgoing.receipt_sha256,
+                "sampling_mode": "contiguous_postroll",
+                "source_frame_start": samples[0]["sources"]["outgoing"]["source_frame"],
+                "source_frame_end_exclusive": samples[-1]["sources"]["outgoing"]["source_frame"] + 1,
+                "postroll_source_frame_start": transition.outgoing_sampling.source_frame_start,
+                "postroll_source_frame_end_exclusive": transition.outgoing_sampling.source_frame_end_exclusive,
+                "co_timed_with_other_source": False,
+                "held_film_frames": None,
+            }
+        else:
+            outgoing_source_summary = {
+                "shot": transition.from_shot,
+                "view_id": outgoing.view_id,
+                "source_role": outgoing.source_role,
+                "source_video_sha256": outgoing.video_sha256,
+                "source_receipt_sha256": outgoing.receipt_sha256,
+                "sampling_mode": "edge_clone",
+                "source_frame": outgoing_frame,
+                **_held_source_time(outgoing, outgoing_frame, 1, plan.fps),
+                "co_timed_with_other_source": False,
+                "held_film_frames": {
+                    "start_frame": transition.boundary_frame,
+                    "end_frame_exclusive": transition.end_frame_exclusive,
+                },
+            }
         result.append(
             {
                 "from_shot": transition.from_shot,
@@ -305,27 +408,31 @@ def _transition_manifest(plan: PresentationPlan, segments: tuple[PlannedSegment,
                     "shared_between_shots": [transition.from_shot, transition.to_shot],
                     "policy": "every frame in this window is an editorial mixture even when its film index falls inside one nominal shot interval",
                 },
-                "held_sources": {
+                "source_sampling_policy": {
                     "outgoing": {
-                        "shot": transition.from_shot,
-                        "view_id": outgoing.view_id,
-                        "source_role": outgoing.source_role,
-                        "source_video_sha256": outgoing.video_sha256,
-                        "source_receipt_sha256": outgoing.receipt_sha256,
-                        "source_frame": outgoing_frame,
-                        **_held_source_time(outgoing, outgoing_frame, 1, plan.fps),
-                        "co_timed_with_other_source": False,
-                        "held_film_frames": {
-                            "start_frame": transition.boundary_frame,
-                            "end_frame_exclusive": transition.end_frame_exclusive,
-                        },
+                        "mode": transition.outgoing_sampling.mode,
+                        "frame_count": transition.outgoing_sampling.frame_count,
+                        "source_frame_start": transition.outgoing_sampling.source_frame_start,
+                        "source_frame_end_exclusive": transition.outgoing_sampling.source_frame_end_exclusive,
+                        "reason": transition.outgoing_sampling.reason,
                     },
+                    "incoming": {
+                        "mode": transition.incoming_sampling.mode,
+                        "frame_count": transition.incoming_sampling.frame_count,
+                        "source_frame_start": transition.incoming_sampling.source_frame_start,
+                        "source_frame_end_exclusive": transition.incoming_sampling.source_frame_end_exclusive,
+                        "reason": transition.incoming_sampling.reason,
+                    },
+                },
+                "held_sources": {
+                    "outgoing": outgoing_source_summary,
                     "incoming": {
                         "shot": transition.to_shot,
                         "view_id": incoming.view_id,
                         "source_role": incoming.source_role,
                         "source_video_sha256": incoming.video_sha256,
                         "source_receipt_sha256": incoming.receipt_sha256,
+                        "sampling_mode": "edge_clone",
                         "source_frame": incoming_frame,
                         **_held_source_time(incoming, incoming_frame, 0, plan.fps),
                         "co_timed_with_other_source": False,
@@ -396,6 +503,8 @@ def _validate_source(
     ) != (fps, 1, fps, 1):
         raise ValueError(f"{segment.video_path} must be constant {fps} fps")
     required_end = segment.source_start_frame + segment.shot.frame_count
+    if segment.transition_boundary_frame is not None:
+        required_end += len(segment.transition_source_samples) // 2
     if metadata["frame_count"] < required_end:
         raise ValueError(
             f"{segment.video_path} has {metadata['frame_count']} frames; shot {segment.shot.number:02d} needs {required_end}"
@@ -423,16 +532,28 @@ def _build_filter(
         transition = plan.transition_for_boundary(current.shot.start_frame)
         if transition is not None and (previous.shot.number, current.shot.number) == (transition.from_shot, transition.to_shot):
             active_transitions[index] = transition
-    incoming_pad = {index: item.half_duration_frames for index, item in active_transitions.items()}
-    outgoing_pad = {index - 1: item.half_duration_frames for index, item in active_transitions.items()}
+    incoming_pad = {
+        index: item.half_duration_frames
+        for index, item in active_transitions.items()
+        if item.incoming_sampling.mode == "edge_clone"
+    }
+    outgoing_pad = {
+        index - 1: item.half_duration_frames
+        for index, item in active_transitions.items()
+        if item.outgoing_sampling.mode == "edge_clone"
+    }
     for index, segment in enumerate(segments):
         shot = segment.shot
         output_label = f"v{shot.number:02d}"
         title = f"SHOT {shot.number:02d}  |  {_timestamp(shot.start_frame, plan.fps)}-{_timestamp(shot.end_frame_exclusive, plan.fps)}  |  {shot.title}"
         if segment.video_path is not None:
             inputs.extend(["-i", str(segment.video_path)])
+            source_end = segment.source_start_frame + shot.frame_count
+            outgoing_transition = plan.transition_for_boundary(shot.end_frame_exclusive)
+            if outgoing_transition is not None and outgoing_transition.outgoing_sampling.mode == "contiguous_postroll":
+                source_end += outgoing_transition.outgoing_sampling.frame_count
             chain = [
-                f"[{input_index}:v]trim=start_frame={segment.source_start_frame}:end_frame={segment.source_start_frame + shot.frame_count}",
+                f"[{input_index}:v]trim=start_frame={segment.source_start_frame}:end_frame={source_end}",
                 "setpts=PTS-STARTPTS",
                 f"fps={plan.fps}",
             ]
@@ -793,12 +914,30 @@ def _render_presentation_generation(
                 "kind": segment.kind,
                 "source_role": segment.source_role,
                 "source_start_frame": segment.source_start_frame if segment.video_path is not None else None,
+                "source_end_frame_exclusive": (
+                    segment.source_start_frame
+                    + segment.shot.frame_count
+                    + (len(segment.transition_source_samples) // 2)
+                    if segment.video_path is not None
+                    else None
+                ),
                 "source_time_range_s": list(segment.source_time_range_s) if segment.source_time_range_s else None,
                 "source_time_basis": segment.source_time_basis,
                 "view_id": segment.view_id,
                 "source_video_sha256": segment.video_sha256,
                 "source_receipt_sha256": segment.receipt_sha256,
                 "presentation_transform": segment.presentation_transform,
+                "transition_source": (
+                    {
+                        "boundary_frame": segment.transition_boundary_frame,
+                        "samples": [
+                            {"source_frame": frame, "measurement_timestamp_s": stamp}
+                            for frame, stamp in segment.transition_source_samples
+                        ],
+                    }
+                    if segment.transition_boundary_frame is not None
+                    else None
+                ),
                 "missing_genuine_roles": list(segment.missing_roles),
                 "editorial_shared_transition_frames": _shot_transition_windows(plan, segment.shot),
             }

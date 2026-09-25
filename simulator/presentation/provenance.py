@@ -178,7 +178,7 @@ def schema_catalog() -> dict[str, Any]:
         "schema_version": 1,
         "input_manifest_schema_versions": {
             "diagnostic_or_single_role": 2,
-            "complete_shot_bundle": 3,
+            "complete_shot_bundle": 4,
         },
         "rgb_capture_acceptance": {
             "mechanism": "reviewed_exact_capture_allowlist",
@@ -235,7 +235,7 @@ def schema_catalog() -> dict[str, Any]:
             ],
         },
         "complete_bundle": {
-            "schema_id": "simulation.presentation.complete_bundle.v3",
+            "schema_id": "simulation.presentation.complete_bundle.v4",
             "producer_id": "simulator.presentation.complete_bundle_emitter.v1",
             "technical_producer_id": "grocery_sim.technical_views.cpu.v1",
             "technical_views": [
