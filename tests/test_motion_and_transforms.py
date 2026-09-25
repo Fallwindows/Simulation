@@ -1,17 +1,21 @@
 import math
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from pathlib import Path
 
 from simulator.config.loader import load_scenario
-from simulator.motion.trajectory import StraightTrajectory, WalkingTrajectory
+from simulator.motion.trajectory import PoseSample, StraightTrajectory, WalkingTrajectory, interpolate_pose
 from simulator.sensors.rig import assert_no_ground_truth_odometry_leakage, build_sensor_rig_description
 from simulator.runtime.isaac_sim_runner import lidar_runtime_spec
 from simulator.sensors.transforms import (
     Transform,
     camera_optical_quaternion,
     camera_usd_quaternion,
+    interpolate_position,
+    interpolate_transform,
     quaternion_from_rpy_deg,
+    quaternion_slerp,
     quaternion_wxyz_to_xyzw,
     quaternion_xyzw_to_wxyz,
     rpy_deg_from_quaternion,
@@ -44,6 +48,101 @@ class MotionTests(unittest.TestCase):
         walking_distance = walking.sample(walking_config.duration_s).position_m[0] - walking.sample(0.0).position_m[0]
         self.assertAlmostEqual(straight_distance, walking_distance, places=6)
         self.assertAlmostEqual(self.scenario.trajectory.speed_mps, walking_config.speed_mps, places=6)
+
+    def test_eased_travel_is_rate_independent_and_bounded(self):
+        walking_config = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml").trajectory
+        trajectory = StraightTrajectory(walking_config)
+        common_30_hz = [trajectory.sample(i / 30.0) for i in range(round(walking_config.duration_s * 30.0) + 1)]
+        common_60_hz = [trajectory.sample(i / 60.0) for i in range(round(walking_config.duration_s * 60.0) + 1)]
+        self.assertEqual(common_30_hz, common_60_hz[::2])
+        self.assertEqual(trajectory.sample(-1.0), common_30_hz[0])
+        self.assertEqual(trajectory.sample(walking_config.duration_s + 1.0), common_30_hz[-1])
+
+        for hz, samples in ((30.0, common_30_hz), (60.0, common_60_hz)):
+            dt = 1.0 / hz
+            x = [sample.position_m[0] for sample in samples]
+            velocity = [(right - left) / dt for left, right in zip(x, x[1:])]
+            acceleration = [(right - left) / dt for left, right in zip(velocity, velocity[1:])]
+            jerk = [(right - left) / dt for left, right in zip(acceleration, acceleration[1:])]
+            self.assertLess(velocity[0], 1e-5)
+            self.assertLess(velocity[-1], 1e-5)
+            self.assertTrue(all(value >= 0.0 and math.isfinite(value) for value in velocity))
+            self.assertLess(max(velocity), 1.15)
+            self.assertLess(max(map(abs, acceleration)), 1.05)
+            self.assertLess(max(map(abs, jerk)), 1.5)
+
+    def test_speed_variation_preserves_distance_and_forward_motion(self):
+        walking_config = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml").trajectory
+        varied_config = replace(walking_config, speed_variation_fraction=0.3)
+        trajectory = StraightTrajectory(varied_config)
+        positions = [
+            trajectory.sample(i / varied_config.sample_hz).position_m[0]
+            for i in range(round(varied_config.duration_s * varied_config.sample_hz) + 1)
+        ]
+        self.assertAlmostEqual(positions[-1] - positions[0], varied_config.speed_mps * varied_config.duration_s)
+        self.assertTrue(all(right > left for left, right in zip(positions, positions[1:])))
+
+    def test_walking_pose_stays_finite_unit_and_settled_at_endpoints(self):
+        walking_config = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml").trajectory
+        trajectory = WalkingTrajectory(walking_config)
+        start = trajectory.sample(0.0)
+        end = trajectory.sample(walking_config.duration_s)
+        self.assertEqual(start.position_m, walking_config.start_position_m)
+        self.assertEqual(end.position_m[1:], walking_config.start_position_m[1:])
+        self.assertEqual(start.orientation_xyzw, quaternion_from_rpy_deg(0.0, 0.0, walking_config.yaw_deg))
+        self.assertEqual(end.orientation_xyzw, start.orientation_xyzw)
+        for sample in trajectory.sample_many():
+            self.assertTrue(all(math.isfinite(value) for value in (*sample.position_m, *sample.orientation_xyzw)))
+            self.assertAlmostEqual(math.sqrt(sum(value * value for value in sample.orientation_xyzw)), 1.0, places=12)
+
+    def test_walking_full_pose_has_bounded_numeric_derivatives_at_30_and_60_hz(self):
+        walking_config = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml").trajectory
+        trajectory = WalkingTrajectory(walking_config)
+        for hz in (30.0, 60.0):
+            dt = 1.0 / hz
+            samples = [trajectory.sample(i * dt) for i in range(round(walking_config.duration_s * hz) + 1)]
+            velocity = [
+                tuple((right.position_m[axis] - left.position_m[axis]) / dt for axis in range(3))
+                for left, right in zip(samples, samples[1:])
+            ]
+            acceleration = [
+                tuple((right[axis] - left[axis]) / dt for axis in range(3))
+                for left, right in zip(velocity, velocity[1:])
+            ]
+            jerk = [
+                tuple((right[axis] - left[axis]) / dt for axis in range(3))
+                for left, right in zip(acceleration, acceleration[1:])
+            ]
+            magnitude = lambda vector: math.sqrt(sum(value * value for value in vector))
+            self.assertLess(magnitude(velocity[0]), 1e-5)
+            self.assertLess(magnitude(velocity[-1]), 1e-5)
+            self.assertLess(max(map(magnitude, velocity)), 1.2)
+            self.assertLess(max(map(magnitude, acceleration)), 2.5)
+            self.assertLess(max(map(magnitude, jerk)), 35.0)
+
+    def test_pose_interpolation_is_continuous_and_uses_shortest_rotation(self):
+        start = PoseSample(2.0, (1.0, -2.0, 0.5), quaternion_from_rpy_deg(0.0, 0.0, 170.0))
+        end = PoseSample(4.0, (5.0, 2.0, 2.5), quaternion_from_rpy_deg(0.0, 0.0, -170.0))
+        midpoint = interpolate_pose(start, end, 3.0)
+        self.assertEqual(midpoint.position_m, (3.0, 0.0, 1.5))
+        self.assertAlmostEqual(abs(rpy_deg_from_quaternion(midpoint.orientation_xyzw)[2]), 180.0, places=6)
+        self.assertAlmostEqual(math.sqrt(sum(value * value for value in midpoint.orientation_xyzw)), 1.0, places=12)
+        with self.assertRaisesRegex(ValueError, "does not extrapolate"):
+            interpolate_pose(start, end, 4.1)
+
+    def test_transform_interpolation_preserves_frames_and_rejects_bad_inputs(self):
+        start = Transform("map", "rig", (0.0, 0.0, 0.0), quaternion_from_rpy_deg(0.0, 0.0, 20.0))
+        end = Transform("map", "rig", (4.0, -2.0, 6.0), quaternion_from_rpy_deg(0.0, 0.0, 80.0))
+        midpoint = interpolate_transform(start, end, 0.5)
+        self.assertEqual((midpoint.parent, midpoint.child), ("map", "rig"))
+        self.assertEqual(midpoint.translation_m, (2.0, -1.0, 3.0))
+        self.assertAlmostEqual(rpy_deg_from_quaternion(midpoint.rotation_xyzw)[2], 50.0, places=6)
+        same_rotation = quaternion_slerp(start.rotation_xyzw, tuple(-value for value in start.rotation_xyzw), 0.5)
+        self.assertAlmostEqual(abs(sum(a * b for a, b in zip(start.rotation_xyzw, same_rotation))), 1.0, places=12)
+        with self.assertRaisesRegex(ValueError, "fraction"):
+            interpolate_position((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), math.nan)
+        with self.assertRaisesRegex(ValueError, "finite"):
+            quaternion_slerp((0.0, 0.0, 0.0, math.inf), (0.0, 0.0, 0.0, 1.0), 0.5)
 
     def test_transform_applies_translation_and_rotation(self):
         transform = Transform("a", "b", (1.0, 2.0, 3.0), camera_optical_quaternion())

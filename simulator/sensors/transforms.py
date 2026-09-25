@@ -23,10 +23,50 @@ def quaternion_wxyz_to_xyzw(q: Quaternion) -> Quaternion:
 
 
 def quaternion_normalize(q: Quaternion) -> Quaternion:
+    if len(q) != 4 or not all(math.isfinite(v) for v in q):
+        raise ValueError("quaternion must contain four finite values")
     norm = math.sqrt(sum(v * v for v in q))
-    if norm == 0:
+    if norm <= 1e-12:
         raise ValueError("zero quaternion")
     return tuple(v / norm for v in q)  # type: ignore[return-value]
+
+
+def interpolate_position(start: Vector3, end: Vector3, fraction: float) -> Vector3:
+    """Linearly interpolate two finite positions for ``fraction`` in ``[0, 1]``."""
+
+    fraction = float(fraction)
+    if not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+        raise ValueError("interpolation fraction must be finite and in [0, 1]")
+    if len(start) != 3 or len(end) != 3 or not all(math.isfinite(v) for v in (*start, *end)):
+        raise ValueError("positions must contain three finite values")
+    return tuple(a + fraction * (b - a) for a, b in zip(start, end))  # type: ignore[return-value]
+
+
+def quaternion_slerp(start: Quaternion, end: Quaternion, fraction: float) -> Quaternion:
+    """Interpolate unit orientation on the shortest arc in ROS ``xyzw`` order.
+
+    Quaternion signs describe the same rotation.  Flipping the second input
+    when the dot product is negative prevents a visually discontinuous long
+    rotation through that equivalent sign boundary.
+    """
+
+    fraction = float(fraction)
+    if not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+        raise ValueError("interpolation fraction must be finite and in [0, 1]")
+    left = quaternion_normalize(start)
+    right = quaternion_normalize(end)
+    dot = sum(a * b for a, b in zip(left, right))
+    if dot < 0.0:
+        right = tuple(-value for value in right)  # type: ignore[assignment]
+        dot = -dot
+    dot = min(1.0, max(-1.0, dot))
+    if dot > 0.9995:
+        return quaternion_normalize(tuple(a + fraction * (b - a) for a, b in zip(left, right)))  # type: ignore[arg-type]
+    angle = math.acos(dot)
+    scale = math.sin(angle)
+    left_scale = math.sin((1.0 - fraction) * angle) / scale
+    right_scale = math.sin(fraction * angle) / scale
+    return quaternion_normalize(tuple(left_scale * a + right_scale * b for a, b in zip(left, right)))  # type: ignore[arg-type]
 
 
 def quaternion_from_rpy_deg(roll_deg: float, pitch_deg: float, yaw_deg: float) -> Quaternion:
@@ -83,6 +123,19 @@ class Transform:
     child: str
     translation_m: Vector3
     rotation_xyzw: Quaternion
+
+
+def interpolate_transform(start: Transform, end: Transform, fraction: float) -> Transform:
+    """Interpolate compatible rigid transforms without changing frame meaning."""
+
+    if (start.parent, start.child) != (end.parent, end.child):
+        raise ValueError("transform frames must match for interpolation")
+    return Transform(
+        start.parent,
+        start.child,
+        interpolate_position(start.translation_m, end.translation_m, fraction),
+        quaternion_slerp(start.rotation_xyzw, end.rotation_xyzw, fraction),
+    )
 
 
 def compose(parent_to_mid: Transform, mid_to_child: Transform) -> Transform:
