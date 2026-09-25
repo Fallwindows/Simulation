@@ -120,7 +120,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             }, sort_keys=True, separators=(",", ":")) + "\n")
     metadata = capture / "rgb_video.json"
     write_json(metadata, {
-        "status": "complete", "frame_count": 615, "first_image_stamp_s": 0.0,
+        "status": "complete", "frame_count": 615, "camera_info_count": 615, "first_image_stamp_s": 0.0,
         "last_image_stamp_s": 614 / 30.0, "nominal_fps": 30.0, "width": 1920, "height": 1080,
     })
     transforms = capture / "sensor_transforms.json"
@@ -146,8 +146,12 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     (capture / "inventory_ground_truth.csv").write_text("semantic_id\n1\n", encoding="utf-8")
     write_json(capture / "inventory_ground_truth.json", {"evaluation_only": True, "items": [1]})
     write_json(capture / "effective_config.json", {"lidar": {"hz": 10.0}})
+    bag_counts = {
+        topic: 615 if topic in ("/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info") else 1
+        for topic in TOPICS
+    }
     write_json(capture / "bag_metadata.json", {
-        "status": "complete", "topics": TOPICS, "counts": {topic: 1 for topic in TOPICS},
+        "status": "complete", "topics": TOPICS, "counts": bag_counts,
         "first_stamp_s": {"/sim/lidar/points": 0.2}, "last_stamp_s": {"/sim/lidar/points": 20.4},
     })
     bag = capture / "sensors_bag"
@@ -167,12 +171,13 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         "ros_domain_id": 42, "duration_s": 20.5,
         "bag": {
             "uri": "sensors_bag", "storage_id": "sqlite3", "topics": TOPICS,
-            "counts": {topic: 1 for topic in TOPICS}, "first_clock_s": 0.0, "last_clock_s": 20.5,
+            "counts": bag_counts, "first_clock_s": 0.0, "last_clock_s": 20.5,
         },
         "rgb": {
             "video": video.name, "timestamp_index": frames.name, "camera_info": camera_info.name,
             "metadata": metadata.name,
-            "frame_count": 615, "first_stamp_s": 0.0, "last_stamp_s": 614 / 30.0,
+            "frame_count": 615, "width_px": 1920, "height_px": 1080, "fps": 30.0,
+            "first_stamp_s": 0.0, "last_stamp_s": 614 / 30.0,
         },
         "ground_truth": {
             "inventory_csv": "inventory_ground_truth.csv", "inventory_json": "inventory_ground_truth.json",
