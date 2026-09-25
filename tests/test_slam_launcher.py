@@ -316,7 +316,9 @@ foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryCha
   if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
   Invoke-Expression $definition[0].Extent.Text
 }
-$script:raceSlamDirectory = Join-Path $RunDirectory "slam"
+$script:raceLogsDirectory = Join-Path $RunDirectory "logs"
+$script:raceSlamRoot = Join-Path $RunDirectory "slam"
+$script:raceSlamDirectory = Join-Path $script:raceSlamRoot "selected"
 $script:raceTargetDirectory = $null
 $script:raceRenamedDirectory = $null
 $script:raceOutsideDirectory = $OutsideDirectory
@@ -327,9 +329,13 @@ $outerFailure = $null
 $hook = {
   param($slamDirectory, $attemptsDirectory, $attemptDirectory, $priorDirectory)
   $script:raceTargetDirectory = switch ($TargetLocation) {
-    "slam" { $slamDirectory }
+    "run" { $RunDirectory }
+    "logs" { $script:raceLogsDirectory }
+    "slam_root" { $script:raceSlamRoot }
+    "selected" { $slamDirectory }
     "attempts" { $attemptsDirectory }
     "attempt" { $attemptDirectory }
+    "prior" { $priorDirectory }
     default { throw "Unknown target location: $TargetLocation" }
   }
   $script:raceRenamedDirectory = $script:raceTargetDirectory + "-checked"
@@ -342,7 +348,7 @@ $hook = {
   }
 }
 try {
-  $attempt = Start-SlamAttempt -SlamDirectory $script:raceSlamDirectory -ContainmentRoot $RunDirectory -BeforeMutationHook $hook
+  $attempt = Start-SlamAttempt -SlamDirectory $script:raceSlamDirectory -ContainmentRoot $RunDirectory -SlamRoot $script:raceSlamRoot -LogsDirectory $script:raceLogsDirectory -BeforeMutationHook $hook
 } catch {
   $outerFailure = $_.Exception.Message
 }
@@ -663,14 +669,16 @@ Wait-Process -Id $child.Id
                 finally:
                     os.rmdir(junction)
 
-    def test_checked_slam_directory_cannot_be_replaced_before_mutation(self):
-        for target_location in ("slam", "attempts", "attempt"):
+    def test_all_leased_output_directories_cannot_be_replaced_before_mutation(self):
+        for target_location in ("run", "logs", "slam_root", "selected", "attempts", "attempt", "prior"):
             with self.subTest(target_location=target_location), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 run = root / "run"
-                slam = run / "slam"
+                slam = run / "slam" / "selected"
+                logs = run / "logs"
                 outside = root / "outside"
                 slam.mkdir(parents=True)
+                logs.mkdir()
                 outside.mkdir()
                 (slam / "slam_manifest.json").write_text(json.dumps({"status": "complete", "source": "inside"}), encoding="utf-8")
                 (slam / "rtabmap.db").write_bytes(b"inside-database")
@@ -691,7 +699,7 @@ Wait-Process -Id $child.Id
                 self.assertFalse(result["target_is_junction"])
                 self.assertFalse(result["renamed_exists"])
                 self.assertTrue(result["post_dispose_rename_succeeded"])
-                self.assertGreaterEqual(result["guard_count"], 5)
+                self.assertEqual(result["guard_count"], 7)
                 self.assertTrue(result["prior_manifest_exists"])
                 self.assertTrue(result["prior_database_exists"])
                 self.assertTrue(result["attempt_receipt_exists"])
