@@ -691,8 +691,38 @@ class RetailAssetTests(unittest.TestCase):
             from PIL import Image as PillowImage
         except ImportError as error:
             self.skipTest(f"Pillow image inspection unavailable: {error}")
-        expected_keys = {"cereal_sunrise", "cereal_harvest", "juice_citrus", "coffee_bag"}
-        self.assertEqual(set(packaging_generator.HERO_FOOD_SOURCES), expected_keys)
+        expected_sources = {
+            "cereal_sunrise": (
+                "oat_berry_bowl_v1.png",
+                "05092075da2683fdb96bc5ade5e8173813ff52a5837cf72f180100dd982b2139",
+            ),
+            "cereal_harvest": (
+                "toasted_loops_bowl_v1.png",
+                "43e5d2f9abae2f9389c5f4af596fb82263df19a0e81c65ba1e64c38aefefe70f",
+            ),
+            "juice_citrus": (
+                "citrus_still_life_v1.png",
+                "ba636324e9fff4e56cc35738206fcb72f8f54e5d0ec76827ebafaf03cf1df86b",
+            ),
+            "coffee_bag": (
+                "coffee_scoop_beans_v2.png",
+                "cedf0147e54e312d083a9f3ddcbc4c90bcb429e6e60edb21129902e86ee11aeb",
+            ),
+            "tea_box": (
+                "black_tea_cup_leaves_v1.png",
+                "383a7daad52c141b1e7f8dea49a0379a9f78ad51904f1349389e2da0435d5b5f",
+            ),
+            "coffee_canister": (
+                "espresso_cherries_v1.png",
+                "dafa50aa3d242cd3036a92f19efd8b854bcaf620e4589630cf3268d6cb7ab239",
+            ),
+            "snack_wafer": (
+                "vanilla_wafer_stack_v1.png",
+                "0b41cfc9e5dce27ec8e468f1af3c13191fc31da35f3e641dfa754d3b894d8c42",
+            ),
+        }
+        self.assertEqual(packaging_generator.HERO_FOOD_SOURCES, expected_sources)
+        expected_keys = set(expected_sources)
         self.assertEqual(
             len({record[0] for record in packaging_generator.HERO_FOOD_SOURCES.values()}),
             len(expected_keys),
@@ -711,6 +741,24 @@ class RetailAssetTests(unittest.TestCase):
                 self.assertGreaterEqual(alpha_max, 250, asset_key)
             self.assertEqual(manifest_by_key[asset_key]["source_food_path"], f"source_food/{filename}")
             self.assertEqual(manifest_by_key[asset_key]["source_food_sha256"], expected_hash)
+
+        provenance_path = root / "assets" / "retail" / "source_food" / "hero_r4_provenance.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance_by_key = {entry["asset_key"]: entry for entry in provenance["assets"]}
+        self.assertEqual(
+            set(provenance_by_key),
+            {"coffee_bag", "tea_box", "coffee_canister", "snack_wafer"},
+        )
+        for asset_key in provenance_by_key:
+            filename, expected_hash = expected_sources[asset_key]
+            self.assertEqual(provenance_by_key[asset_key]["path"], filename)
+            self.assertEqual(provenance_by_key[asset_key]["sha256"], expected_hash)
+            self.assertEqual(provenance_by_key[asset_key]["mode"], "RGBA")
+            self.assertEqual(provenance_by_key[asset_key]["width_px"], 1536)
+            self.assertEqual(provenance_by_key[asset_key]["height_px"], 1024)
+        provenance_record = manifest["source_food_provenance"]
+        self.assertEqual(provenance_record["path"], "source_food/hero_r4_provenance.json")
+        self.assertEqual(provenance_record["sha256"], hashlib.sha256(provenance_path.read_bytes()).hexdigest())
 
     def test_register_parts_match_upgraded_organic_and_fixture_geometry(self):
         expectations = {

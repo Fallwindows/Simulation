@@ -843,14 +843,16 @@
         "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "5d3e581abb778d2deeae4beb6815c8e387fea225ea85f65d11fa1eb11b2486cb",
-      "texture_sha256": "8f2c01fc63926385beeba529b6cff64a3e9c887ff16e97519b8c7ef8d4321765",
-      "geometry_scope_sha256": "1b7e930e7edf4a1a4e35d2d9e1336e544fef96ee8de04ba0344f0fca4c082bfd",
+      "usd_sha256": "e2583c25cf770789bd453139aa212b5274d550d9e7e55c848f98b9a85bf9be7c",
+      "texture_sha256": "76012b1166c5e9cdabd1b9172f2922e3ff110a82852da20f653c000f1930a1e7",
+      "geometry_scope_sha256": "753d4a743d46615de5553a78fd7e54cf60153f46ae7dc8d881bd1cb2d3a3573b",
       "appearance_scope_sha256": "b6db90916d959613c7b05af2a5bbb7b84438d192673939d3406988e8d8678af6",
       "normal_texture_path": "textures/coffee_canister_normal.png",
       "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
       "roughness_texture_path": "textures/coffee_canister_roughness.png",
-      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac",
+      "source_food_path": "source_food/espresso_cherries_v1.png",
+      "source_food_sha256": "dafa50aa3d242cd3036a92f19efd8b854bcaf620e4589630cf3268d6cb7ab239"
     },
     {
       "asset_key": "sardine_tin",
@@ -919,14 +921,16 @@
         "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "5fdc83aa6563430cbc5bb875376c6f4678e4a8fbfc1042a2e235d8545828e184",
-      "texture_sha256": "751a8f813037f8eb583f6492cf2a8b633dca87c33a663e526f838c00b31bc866",
-      "geometry_scope_sha256": "bb60867be1fff53f2ecdf694e438cf4f9581204d4183c72e40a27fedd4e7fb84",
+      "usd_sha256": "5cb19df1fcc585279f045626f83de37b291c8e2c04ff5f90d273bac6560778c1",
+      "texture_sha256": "cc6c71aca5916a39ed5da87164aea89c1ea9a4891410866a22f334bf9008a76c",
+      "geometry_scope_sha256": "99aff471bf3736704e0cedbbdb93ec079da0a08acc32f12412e24b3bc133a2e3",
       "appearance_scope_sha256": "5ba469d9a332cbf653562e88b39673a7f6721a3875f5ca3be4c8745f675d7522",
       "normal_texture_path": "textures/tea_box_normal.png",
       "normal_texture_sha256": "5d18a0d3ecf8a45f49944ee00ce2a693fd68fea7ade6756386b38ef25b5dd783",
       "roughness_texture_path": "textures/tea_box_roughness.png",
-      "roughness_texture_sha256": "60130ed5de68b57366551612f8a8a61466716fe8a3e20ff422ed02e524142eff"
+      "roughness_texture_sha256": "60130ed5de68b57366551612f8a8a61466716fe8a3e20ff422ed02e524142eff",
+      "source_food_path": "source_food/black_tea_cup_leaves_v1.png",
+      "source_food_sha256": "383a7daad52c141b1e7f8dea49a0379a9f78ad51904f1349389e2da0435d5b5f"
     },
     {
       "asset_key": "pasta_box",
@@ -1035,15 +1039,15 @@
       ],
       "introduced_in": "G02-A",
       "usd_sha256": "594db77c4df4f279f2b0037a95a04c466fce1ad60c8c2c9bf49b27aced54c041",
-      "texture_sha256": "4fb50fdd5ce5b40903bf13e692299061dc0bb7f0b303a1f25e67a654af5de94e",
+      "texture_sha256": "7466bf94e15622c5cd77c3827b4740f2bcd4ebba8531a4c933837c9c88ec8390",
       "geometry_scope_sha256": "7f6172ba23c70a7db24e44e1bd31033be73d33d6a2cb82afb6dadb5f583bcf0e",
       "appearance_scope_sha256": "0d1f8550f8a13715b5a627fcfe6eb59d905d15b2d88cb296fd888b4298eb563c",
       "normal_texture_path": "textures/coffee_bag_normal.png",
       "normal_texture_sha256": "9acbe0171f7cb8e47a3a2680a24ef169f2e64d765599f361f53bd6fbc6d75ee3",
       "roughness_texture_path": "textures/coffee_bag_roughness.png",
       "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514",
-      "source_food_path": "source_food/roasted_coffee_scoop_v1.png",
-      "source_food_sha256": "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56"
+      "source_food_path": "source_food/coffee_scoop_beans_v2.png",
+      "source_food_sha256": "cedf0147e54e312d083a9f3ddcbc4c90bcb429e6e60edb21129902e86ee11aeb"
     },
     {
       "asset_key": "flour_sack",

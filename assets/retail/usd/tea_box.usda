@@ -49,39 +49,39 @@ def Xform "Asset" (
             normal3f[] normals = [(0, 1, 0)] (
                 interpolation = "uniform"
             )
-            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+            texCoord2f[] primvars:st = [(0.170455, 0.040000), (0.500000, 0.040000), (0.500000, 0.960000), (0.170455, 0.960000)] (
                 interpolation = "vertex"
             )
             rel material:binding = </Asset/Looks/Front>
         }
-        def Mesh "LeftPrintPanel" (
+        def Mesh "HeroLeftPrintPanel" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {
-            point3f[] points = [(-0.07350, -0.02700, -0.02565), (-0.07350, 0.02700, -0.02565), (-0.07350, 0.02700, 0.02565), (-0.07350, -0.02700, 0.02565)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
-            normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
-            texCoord2f[] primvars:st = [(0.05, 0.12), (0.34, 0.12), (0.34, 0.88), (0.05, 0.88)] (interpolation = "vertex")
-            rel material:binding = </Asset/Looks/Print>
-        }
-        def Mesh "RightPrintPanel" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
-            point3f[] points = [(0.07350, 0.02700, -0.02565), (0.07350, -0.02700, -0.02565), (0.07350, -0.02700, 0.02565), (0.07350, 0.02700, 0.02565)]
-            int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
-            normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
-            texCoord2f[] primvars:st = [(0.05, 0.12), (0.34, 0.12), (0.34, 0.88), (0.05, 0.88)] (interpolation = "vertex")
-            rel material:binding = </Asset/Looks/Print>
-        }
-        def Mesh "BackPrintPanel" (
-            prepend apiSchemas = ["MaterialBindingAPI"]
-        ) {
-            point3f[] points = [(-0.05510, -0.03850, -0.03610), (0.05510, -0.03850, -0.03610), (0.05510, -0.03850, -0.02090), (-0.05510, -0.03850, -0.02090)]
+            point3f[] points = [(-0.07350, -0.03300, -0.03990), (-0.07350, 0.03300, -0.03990), (-0.07350, 0.03300, 0.03990), (-0.07350, -0.03300, 0.03990)]
             int[] faceVertexCounts = [4]
             int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.000000, 0.040000), (0.170455, 0.040000), (0.170455, 0.960000), (0.000000, 0.960000)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
+        }
+        def Mesh "HeroRightPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.07350, 0.03300, -0.03990), (0.07350, -0.03300, -0.03990), (0.07350, -0.03300, 0.03990), (0.07350, 0.03300, 0.03990)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.500000, 0.040000), (0.670455, 0.040000), (0.670455, 0.960000), (0.500000, 0.960000)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
+        }
+        def Mesh "HeroBackPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.06380, -0.03850, -0.03990), (0.06380, -0.03850, -0.03990), (0.06380, -0.03850, 0.03990), (-0.06380, -0.03850, 0.03990)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
             normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
-            texCoord2f[] primvars:st = [(0.08, 0.08), (0.92, 0.08), (0.92, 0.34), (0.08, 0.34)] (interpolation = "vertex")
+            texCoord2f[] primvars:st = [(1.000000, 0.040000), (0.670455, 0.040000), (0.670455, 0.960000), (1.000000, 0.960000)] (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Print>
         }
     }

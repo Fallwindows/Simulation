@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "collection": "hero-r4-17s-food-cutouts",
+  "created_utc_date": "2026-09-25",
+  "generator": "OpenAI built-in image_gen",
+  "generation_mode": "text-to-image with transparent background",
+  "license": "project-original generated artwork; generated without third-party image inputs",
+  "redistribution": "source images and project-generated derivatives permitted with this repository",
+  "external_source_images": [],
+  "assets": [
+    {
+      "path": "coffee_scoop_beans_v2.png",
+      "asset_key": "coffee_bag",
+      "sha256": "cedf0147e54e312d083a9f3ddcbc4c90bcb429e6e60edb21129902e86ee11aeb",
+      "width_px": 1536,
+      "height_px": 1024,
+      "mode": "RGBA",
+      "prompt": "Transparent premium studio product photograph of a walnut coffee scoop tipped forward, spilling glossy medium-dark roasted coffee beans into a compact crescent pile; front three-quarter view, warm upper-left key light, realistic wood grain and bean creases; no packaging, brand, logo, text, letters, watermark, cup, saucer, or burlap sack."
+    },
+    {
+      "path": "black_tea_cup_leaves_v1.png",
+      "asset_key": "tea_box",
+      "sha256": "383a7daad52c141b1e7f8dea49a0379a9f78ad51904f1349389e2da0435d5b5f",
+      "width_px": 1536,
+      "height_px": 1024,
+      "mode": "RGBA",
+      "prompt": "Transparent premium studio product photograph of a clear glass teacup filled with luminous amber black tea, three fresh tea leaves, a small cluster of dried tea leaves, and a restrained steam wisp; front three-quarter view, soft daylight; no packaging, brand, logo, text, letters, watermark, saucer, spoon, lemon, or flowers."
+    },
+    {
+      "path": "espresso_cherries_v1.png",
+      "asset_key": "coffee_canister",
+      "sha256": "dafa50aa3d242cd3036a92f19efd8b854bcaf620e4589630cf3268d6cb7ab239",
+      "width_px": 1536,
+      "height_px": 1024,
+      "mode": "RGBA",
+      "prompt": "Transparent premium studio product photograph of an ivory ceramic espresso cup with realistic crema, paired with a botanical coffee branch bearing ripe red coffee cherries, glossy green leaves, and a few roasted beans; front three-quarter view, neutral daylight; no packaging, brand, logo, text, letters, watermark, scoop, saucer, spoon, or latte art."
+    },
+    {
+      "path": "vanilla_wafer_stack_v1.png",
+      "asset_key": "snack_wafer",
+      "sha256": "0b41cfc9e5dce27ec8e468f1af3c13191fc31da35f3e641dfa754d3b894d8c42",
+      "width_px": 1536,
+      "height_px": 1024,
+      "mode": "RGBA",
+      "prompt": "Transparent premium commercial food photograph of five crisp golden vanilla wafer fingers in a compact natural stack, with one diagonally broken piece showing fine honeycomb texture and a few close crumbs; warm upper-left studio light; no packaging, brand, logo, text, letters, watermark, plate, napkin, chocolate, fruit, or nuts."
+    }
+  ]
+}
