@@ -30,6 +30,44 @@ from simulator.capture.stamp_digest import stamp_sequence_sha256
 CAMERA_INFO_TOPIC = "/sim/camera/rgb/camera_info"
 
 
+def _probe_decoded_video(path: Path) -> dict[str, object]:
+    """Decode the closed delivery video so a lossy/silent writer cannot pass."""
+
+    capture = cv2.VideoCapture(str(path))
+    if not capture.isOpened():
+        capture.release()
+        return {
+            "opened": False,
+            "frame_count": 0,
+            "widths": [],
+            "heights": [],
+            "reported_fps": None,
+        }
+    frame_count = 0
+    widths: set[int] = set()
+    heights: set[int] = set()
+    reported_fps = float(capture.get(cv2.CAP_PROP_FPS))
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            if frame is None or len(frame.shape) < 2:
+                continue
+            frame_count += 1
+            heights.add(int(frame.shape[0]))
+            widths.add(int(frame.shape[1]))
+    finally:
+        capture.release()
+    return {
+        "opened": True,
+        "frame_count": frame_count,
+        "widths": sorted(widths),
+        "heights": sorted(heights),
+        "reported_fps": reported_fps,
+    }
+
+
 class BagRgbVideoBuilder:
     def __init__(
         self,
@@ -147,6 +185,21 @@ class BagRgbVideoBuilder:
             self.writer = None
         file_size = self.output.stat().st_size if self.output.exists() else 0
         frame_count = len(self.frame_records)
+        decoded_video = _probe_decoded_video(self.output) if file_size > 0 else {
+            "opened": False,
+            "frame_count": 0,
+            "widths": [],
+            "heights": [],
+            "reported_fps": None,
+        }
+        decoded_video_valid = (
+            bool(decoded_video["opened"])
+            and int(decoded_video["frame_count"]) == frame_count
+            and decoded_video["widths"] == [self.expected_width]
+            and decoded_video["heights"] == [self.expected_height]
+            and decoded_video["reported_fps"] is not None
+            and abs(float(decoded_video["reported_fps"]) - self.expected_fps) <= 0.01
+        )
         actual_fps = None
         if self.first_stamp_s is not None and self.last_stamp_s is not None and self.last_stamp_s > self.first_stamp_s:
             actual_fps = (frame_count - 1) / (self.last_stamp_s - self.first_stamp_s)
@@ -179,6 +232,7 @@ class BagRgbVideoBuilder:
             and self.invalid_frames == 0
             and release_error is None
             and file_size > 0
+            and decoded_video_valid
         )
         metadata = {
             "status": "complete" if complete else "failed",
@@ -209,6 +263,8 @@ class BagRgbVideoBuilder:
             "frame_ids": sorted(self.frame_ids),
             "camera_info_frame_id": None if self.camera_info_record is None else self.camera_info_record["frame_id"],
             "file_size_bytes": file_size,
+            "decoded_video": decoded_video,
+            "decoded_video_valid": decoded_video_valid,
             "completion_reason": "closed_bag_exhausted",
         }
         if release_error is not None:

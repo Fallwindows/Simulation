@@ -169,6 +169,7 @@ try {
   if (-not [bool]$runtime.pacing.enabled -or [Math]::Abs([double]$runtime.pacing.requested_realtime_factor - $RealtimeFactor) -gt 1e-9) { throw "Isaac runtime pacing receipt does not match the requested realtime factor." }
   if ([double]$runtime.timestamp_alignment.rgb.max_abs_offset_s -gt (1.0 / 60.0 + 1e-9) -or [double]$runtime.timestamp_alignment.lidar.max_abs_offset_s -gt (1.0 / 60.0 + 1e-9)) { throw "Isaac sensor timestamps are not aligned to /clock within one simulation tick." }
   if ($rgb.status -ne "complete") { throw "RGB capture did not complete." }
+  if (-not [bool]$rgb.decoded_video_valid -or [int]$rgb.decoded_video.frame_count -ne [int]$rgb.frame_count) { throw "Closed RGB video decode audit did not match the source frame index." }
   if (-not (Test-Path -LiteralPath (Join-Path $captureDir "camera_info.json"))) { throw "CameraInfo was not captured." }
   $requiredTopics = @("/clock","/sim/camera/rgb/image_raw","/sim/camera/rgb/camera_info","/sim/lidar/points","/tf","/tf_static")
   $actualTopics = @($bagMeta.topics | Sort-Object)

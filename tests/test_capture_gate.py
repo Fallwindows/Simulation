@@ -1,8 +1,11 @@
 import time
 import unittest
 import os
+import queue
 import subprocess
+import threading
 from pathlib import Path
+from unittest.mock import patch
 
 from evaluation.rgb_video_recorder import RgbVideoRecorder
 from evaluation.rgb_video_from_bag import BagRgbVideoBuilder
@@ -45,6 +48,7 @@ class CaptureGateTests(unittest.TestCase):
         receipt = work.receipt()
         self.assertEqual(receipt["submitted_count"], 2)
         self.assertEqual(receipt["written_count"], 2)
+        self.assertGreaterEqual(receipt["high_water_items"], 1)
         self.assertTrue(receipt["drained"])
         self.assertEqual(receipt["overflow_count"], 0)
         self.assertEqual(writer.close_calls, 1)
@@ -66,6 +70,35 @@ class CaptureGateTests(unittest.TestCase):
         failure_receipt = failing.receipt()
         self.assertFalse(failure_receipt["drained"])
         self.assertIn("OSError", failure_receipt["worker_error"])
+
+    def test_async_bag_high_water_counts_item_even_if_worker_dequeues_immediately(self):
+        class ImmediateDequeueQueue(queue.Queue):
+            dequeued = threading.Event()
+
+            def put_nowait(self, item):
+                super().put_nowait(item)
+                self.dequeued.wait(1.0)
+
+            def get(self, *args, **kwargs):
+                item = super().get(*args, **kwargs)
+                if item is not _SerializedBagWriteQueue._STOP:
+                    self.dequeued.set()
+                return item
+
+        class Writer:
+            def write(self, *_args):
+                pass
+
+            def close(self):
+                pass
+
+        with patch("simulator.capture.rosbag_capture.queue.Queue", ImmediateDequeueQueue):
+            work = _SerializedBagWriteQueue(Writer(), max_items=2, max_bytes=16)
+            work.submit("/rgb", b"1234", 1)
+            self.assertIsNone(work.finish(1.0))
+        receipt = work.receipt()
+        self.assertEqual(receipt["high_water_items"], 1)
+        self.assertEqual(receipt["high_water_bytes"], 4)
 
     def test_offline_video_uses_exact_closed_bag_message_count(self):
         fixture = ROOT / "runs/offline_rgb_builder_fixture"
@@ -119,13 +152,54 @@ class CaptureGateTests(unittest.TestCase):
         builder.consume_image(image(1.0 / 30.0))
         builder.consume_camera_info(camera_info(0.0))
         builder.consume_camera_info(camera_info(1.0 / 30.0))
-        metadata = builder.finalize(expected_image_count=2, expected_camera_info_count=2)
+        decoded_receipt = {"opened": True, "frame_count": 2, "widths": [2], "heights": [1], "reported_fps": 30.0}
+        with patch("evaluation.rgb_video_from_bag._probe_decoded_video", return_value=decoded_receipt):
+            metadata = builder.finalize(expected_image_count=2, expected_camera_info_count=2)
         self.assertEqual(metadata["status"], "complete")
         self.assertEqual(metadata["source"], "closed_rosbag2")
         self.assertEqual(metadata["stamp_sha256"], stamp_sequence_sha256([0.0, 1.0 / 30.0]))
         self.assertEqual(len(paths["frames"].read_text(encoding="utf-8").splitlines()), 2)
         self.assertEqual(writer.frames, 2)
         for path in paths.values():
+            path.unlink(missing_ok=True)
+
+    def test_offline_video_fails_when_closed_file_decodes_fewer_frames(self):
+        fixture = ROOT / "runs/offline_rgb_decode_gate_fixture"
+        fixture.mkdir(parents=True, exist_ok=True)
+        output = fixture / "rgb.mp4"
+        metadata_path = fixture / "rgb.json"
+        frames_path = fixture / "frames.jsonl"
+        camera_path = fixture / "camera.json"
+        for path in (output, metadata_path, frames_path, camera_path):
+            path.unlink(missing_ok=True)
+
+        class SilentWriter:
+            def write(self, _frame):
+                output.write_bytes(b"container-with-no-decoded-frames")
+
+            def release(self):
+                pass
+
+        builder = BagRgbVideoBuilder(output, metadata_path, frames_path, camera_path, 1.0 / 30.0, 2, 1, 30.0, "fixture-bag")
+        builder.writer = SilentWriter()
+        builder.first_stamp_s = 0.0
+        builder.last_stamp_s = 1.0 / 30.0
+        builder.max_frame_gap_s = 1.0 / 30.0
+        builder.frame_ids = {"camera_optical_frame"}
+        builder.frame_records = [
+            {"frame_index": 0, "stamp_s": 0.0, "frame_id": "camera_optical_frame", "width": 2, "height": 1, "encoding": "rgb8"},
+            {"frame_index": 1, "stamp_s": 1.0 / 30.0, "frame_id": "camera_optical_frame", "width": 2, "height": 1, "encoding": "rgb8"},
+        ]
+        builder.camera_info_count = 2
+        builder.camera_info_record = {"frame_id": "camera_optical_frame", "width": 2, "height": 1}
+        decoded_receipt = {"opened": True, "frame_count": 0, "widths": [], "heights": [], "reported_fps": 30.0}
+        with patch("evaluation.rgb_video_from_bag._probe_decoded_video", return_value=decoded_receipt):
+            with self.assertRaisesRegex(RuntimeError, "offline RGB video validation failed"):
+                builder.finalize(expected_image_count=2, expected_camera_info_count=2)
+        receipt = __import__("json").loads(metadata_path.read_text(encoding="utf-8"))
+        self.assertEqual(receipt["status"], "failed")
+        self.assertFalse(receipt["decoded_video_valid"])
+        for path in (output, metadata_path, frames_path, camera_path):
             path.unlink(missing_ok=True)
 
     def test_raw_alignment_uses_worst_nearest_rgb_sample(self):
@@ -199,6 +273,7 @@ class CaptureGateTests(unittest.TestCase):
         self.assertIn('Raw bag asynchronous writer did not drain losslessly.', source)
         self.assertIn('Raw bag RGB and CameraInfo stamps are not paired exactly.', source)
         self.assertIn('Isaac, raw RGB, CameraInfo, and offline video stamp sequences do not match exactly.', source)
+        self.assertIn('Closed RGB video decode audit did not match the source frame index.', source)
         self.assertIn('$captureHorizon', source)
         self.assertNotIn('evaluation.rgb_video_recorder', source)
         self.assertIn('production_zenoh_session.json5', source)

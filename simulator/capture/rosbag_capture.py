@@ -49,6 +49,7 @@ class _SerializedBagWriteQueue:
         self.max_bytes = int(max_bytes)
         self.queue: queue.Queue = queue.Queue(maxsize=int(max_items))
         self.lock = threading.Lock()
+        self.pending_items = 0
         self.pending_bytes = 0
         self.high_water_bytes = 0
         self.high_water_items = 0
@@ -71,19 +72,19 @@ class _SerializedBagWriteQueue:
                 self.overflow_count += 1
                 raise OverflowError("raw bag write queue exceeded its byte budget")
             self.pending_bytes += payload_bytes
+            self.pending_items += 1
             self.submitted_count += 1
             self.high_water_bytes = max(self.high_water_bytes, self.pending_bytes)
+            self.high_water_items = max(self.high_water_items, self.pending_items)
         try:
             self.queue.put_nowait((topic, payload, int(timestamp_ns), payload_bytes))
         except queue.Full as exc:
             with self.lock:
                 self.pending_bytes -= payload_bytes
+                self.pending_items -= 1
                 self.submitted_count -= 1
                 self.overflow_count += 1
             raise OverflowError("raw bag write queue exceeded its item budget") from exc
-        with self.lock:
-            self.high_water_items = max(self.high_water_items, self.queue.qsize())
-
     def _run(self) -> None:
         try:
             while True:
@@ -104,6 +105,7 @@ class _SerializedBagWriteQueue:
                 finally:
                     with self.lock:
                         self.pending_bytes -= payload_bytes
+                        self.pending_items -= 1
                     self.queue.task_done()
         finally:
             try:
@@ -126,7 +128,7 @@ class _SerializedBagWriteQueue:
         with self.lock:
             if self.error is not None:
                 return self.error
-            if self.pending_bytes != 0 or self.submitted_count != self.written_count:
+            if self.pending_items != 0 or self.pending_bytes != 0 or self.submitted_count != self.written_count:
                 return RuntimeError("raw bag write queue did not persist every submitted message")
         return None
 
@@ -137,10 +139,11 @@ class _SerializedBagWriteQueue:
                 "max_bytes": self.max_bytes,
                 "high_water_items": self.high_water_items,
                 "high_water_bytes": self.high_water_bytes,
+                "pending_items": self.pending_items,
                 "submitted_count": self.submitted_count,
                 "written_count": self.written_count,
                 "overflow_count": self.overflow_count,
-                "drained": self.pending_bytes == 0 and self.submitted_count == self.written_count,
+                "drained": self.pending_items == 0 and self.pending_bytes == 0 and self.submitted_count == self.written_count,
                 "worker_error": None if self.error is None else f"{type(self.error).__name__}: {self.error}",
             }
 
@@ -424,6 +427,7 @@ class RawCaptureWriter:
                 "max_bytes": 0,
                 "high_water_items": 0,
                 "high_water_bytes": 0,
+                "pending_items": 0,
                 "submitted_count": sum(self.counts.values()),
                 "written_count": sum(self.counts.values()),
                 "overflow_count": 0,
