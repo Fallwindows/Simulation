@@ -1,7 +1,26 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "standard_front_axis": "+Y",
   "units": "meters",
+  "asset_register_path": "asset_register.json",
+  "generation": {
+    "generator": "tools/retail_assets/generate_packaging.py",
+    "deterministic": true,
+    "requirements": "tools/retail_assets/GENERATION_REQUIREMENTS.md",
+    "pillow_version": "12.3.0",
+    "zlib_version": "1.3.2",
+    "font_sha256": {
+      "C:\\Windows\\Fonts\\segoeui.ttf": "8134dbcd09e7b123c9a7f229d49cffbcb01352cc72ea5e1076b65d0dca9f73cd",
+      "C:\\Windows\\Fonts\\segoeuib.ttf": "aeb9e4a6ec5cc59f4d72df8189032d7dbb28f45161cf1552174818b5465dac4e"
+    },
+    "geometry_signature_excludes": [
+      "asset_key",
+      "product_name",
+      "color",
+      "accent",
+      "texture"
+    ]
+  },
   "assets": [
     {
       "asset_key": "cereal_sunrise",
@@ -15,7 +34,32 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "SUNRISE OATS"
+      "product_name": "SUNRISE OATS",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "aba4991938a6599b1613c807c50dd2a388ec5670a347a98673e4fd9835677036",
+      "texture_sha256": "affd4945591f3c4a88da564360d25ce3a8780decb728094afcfea62ff507bc56",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "5d459ad3b4523c9c715234849e7db0d2c1d5875b3ef366ba080d4c19667d0a82",
+      "normal_texture_path": "textures/cereal_sunrise_normal.png",
+      "normal_texture_sha256": "a4223d2c9be28134c062031ddaa65bd3d611b64b678bb4574dede319c38ffc99",
+      "roughness_texture_path": "textures/cereal_sunrise_roughness.png",
+      "roughness_texture_sha256": "cee7cfc572c4b4004e5e02a1c4a7de3016787d1f19cc5eb8421be9ef6f1f55c5",
+      "source_food_path": "source_food/oat_berry_bowl_v1.png",
+      "source_food_sha256": "05092075da2683fdb96bc5ade5e8173813ff52a5837cf72f180100dd982b2139"
     },
     {
       "asset_key": "cereal_harvest",
@@ -29,7 +73,32 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "HARVEST LOOP"
+      "product_name": "HARVEST LOOP",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "ffb3af37880b2430b621fcdf08fee683da18fa7f6fdc40e8c42e85dc976c4d5a",
+      "texture_sha256": "f9fc0cf1afcf163437367985bc9ca92ddd65c00c95f07910cc371250453da5ca",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "db76ba4b03d86f4daae7d1385e90a1c8640b69a56e705e9122a6fcedce37af78",
+      "normal_texture_path": "textures/cereal_harvest_normal.png",
+      "normal_texture_sha256": "112e1b4e3e63bee0bc4633e7ac254cb15cc62e27d8b248f1a1495d7d9a09457f",
+      "roughness_texture_path": "textures/cereal_harvest_roughness.png",
+      "roughness_texture_sha256": "6e5847e733624d2a463274004b2f589c1db6d9a6e17873a0451d179de8667827",
+      "source_food_path": "source_food/toasted_loops_bowl_v1.png",
+      "source_food_sha256": "43e5d2f9abae2f9389c5f4af596fb82263df19a0e81c65ba1e64c38aefefe70f"
     },
     {
       "asset_key": "cereal_grain",
@@ -43,7 +112,30 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "GRAIN DAY"
+      "product_name": "GRAIN DAY",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "841b6af4a491bfcd9fdc7e3ab86a5ccf964d37c57da44606cba4c3d214168212",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "7c0fe95114b44b0cab580bdf8b49bc230cb4ccd69f76a74a0346251a2982c1f5",
+      "texture_sha256": "1e80aa758f54dfae8d89162fbe289bc410afd96756429842ca75920db0a46dca",
+      "geometry_scope_sha256": "ec19f133267804f9c40e8de9f5b92a36992368704749871aff5f783a3bbd7cf9",
+      "appearance_scope_sha256": "889c64d08ff4929c5a5e49e6e49692eefefb43ced0373b42941d08328f3cde34",
+      "normal_texture_path": "textures/cereal_grain_normal.png",
+      "normal_texture_sha256": "b961cdb60ac23d9a814814ae46d4c762ea520f9132496733aaaacb5f8d8dde50",
+      "roughness_texture_path": "textures/cereal_grain_roughness.png",
+      "roughness_texture_sha256": "a143b8ba24dd75f00186d4b2bff0f5ea445aaae121a1190d9cfacfc9e1f2c9c0"
     },
     {
       "asset_key": "cereal_berry",
@@ -57,7 +149,30 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "BERRY CLOUD"
+      "product_name": "BERRY CLOUD",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "4e7bc7839753f582b4964077b1ee9b4e619e8b065038b62c49a091769e4fa0a2",
+      "texture_sha256": "4a75dbf006586de9c259d90e91b50af341e2f40370115a8e25b07e27d4421481",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "9feffd3c0718eeaada93b185ffa13e19450a8516d666668f7fd4897743dc67ae",
+      "normal_texture_path": "textures/cereal_berry_normal.png",
+      "normal_texture_sha256": "c81d29b10bac9372b2534aac1b680fc075b7e3dc540de6922397b5c768f55fd4",
+      "roughness_texture_path": "textures/cereal_berry_roughness.png",
+      "roughness_texture_sha256": "b2af60d099dd433f2d65ee78304bc6f6f28dd3f91eca0d2d1fda357128fe4956"
     },
     {
       "asset_key": "cereal_honey",
@@ -71,7 +186,30 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "HONEY CRUNCH"
+      "product_name": "HONEY CRUNCH",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "02f69c420d3ed908ebe6625938acba968ac65adeaab6849d5fe4ca408840a408",
+      "texture_sha256": "b6628d0249c2b737cd0ee20b61d710688aaaf4c73fd2a19a28683d3e4e7db642",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "3a3a3bfa58c5f09c9ffa119b718731935b62716be97a647aca0dd6e11ac09fb6",
+      "normal_texture_path": "textures/cereal_honey_normal.png",
+      "normal_texture_sha256": "bbeced58ebaebe386e24eb17bc3935ef42335d67cca4e72b30306eeeda77f2c5",
+      "roughness_texture_path": "textures/cereal_honey_roughness.png",
+      "roughness_texture_sha256": "82a3e2ca5b01f661e97674981a401557ca69e4e80c0ad909e277611032cd7dac"
     },
     {
       "asset_key": "cereal_morning",
@@ -85,7 +223,30 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "MORNING MIX"
+      "product_name": "MORNING MIX",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "841b6af4a491bfcd9fdc7e3ab86a5ccf964d37c57da44606cba4c3d214168212",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "d32ffac77753b4a725e543aea445047d7b9af7b89eee3d0c117230631e543cf2",
+      "texture_sha256": "4c0991614762a69371b4ea99089c22d2c793dd9e06387d2caa65b2d973059534",
+      "geometry_scope_sha256": "ec19f133267804f9c40e8de9f5b92a36992368704749871aff5f783a3bbd7cf9",
+      "appearance_scope_sha256": "745cd70f59a610cb708914c01d01c0a2dfc3003a990f9a8bca9e64bf98c99607",
+      "normal_texture_path": "textures/cereal_morning_normal.png",
+      "normal_texture_sha256": "953320c85f9aca21b063bc3bcf6923b9bbb1f582ded8bc75c5923514c1a80496",
+      "roughness_texture_path": "textures/cereal_morning_roughness.png",
+      "roughness_texture_sha256": "2d33181b55ce62783c3f1a0012d008eb5194d4dd9fda5e28914b0c684c6bb033"
     },
     {
       "asset_key": "snack_cracker",
@@ -99,7 +260,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "CRISP STACK"
+      "product_name": "CRISP STACK",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "91ca60f102e897a797db0a70dc56420d0e3113e7ca30c54e89727eccfe77260f",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "72f967802e2924d586d351c5c691af32ba892d97ff6276f268ae458234f65146",
+      "texture_sha256": "c4c9451735dea423e6b3c7d0f9680af8c39b92ab5422e65f05d5039e7fbf1204",
+      "geometry_scope_sha256": "da72e14f2462a8c736cb317bad7fd1775d2270c2ee2ad93e9f9b5fbfc8d78bb5",
+      "appearance_scope_sha256": "de17e52a4cdab5e966c39cf4b365355fcdefae892cebc80b44c499aa43764067"
     },
     {
       "asset_key": "snack_pretzel",
@@ -113,7 +291,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "PRETZEL POP"
+      "product_name": "PRETZEL POP",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "91ca60f102e897a797db0a70dc56420d0e3113e7ca30c54e89727eccfe77260f",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "a96cc3b009ed786803125cb605ac2526cad41f1927cf464482d1c3e15579dadb",
+      "texture_sha256": "a72a0a7c087cf3178343bfba119790663e7d7dd369410db2b9c7015c39c02f62",
+      "geometry_scope_sha256": "da72e14f2462a8c736cb317bad7fd1775d2270c2ee2ad93e9f9b5fbfc8d78bb5",
+      "appearance_scope_sha256": "ed98c74f50602fa63d010bc0a235186c435b3b732321ba55d7e2d8f6bd4f36e1"
     },
     {
       "asset_key": "snack_chips",
@@ -127,7 +322,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "GARDEN CRUNCH"
+      "product_name": "GARDEN CRUNCH",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "2bff44ad6af5bbda5286a22b04bc0fa61dd21d123a0a748514c01003991de2d2",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "26ec4a439068207e9907103de88e969559e531ee0564aed520ea0a45b8b277a6",
+      "texture_sha256": "5623587a08115271f695a51a64d083b2071ce52bfadfd3cc632db88976e73f3b",
+      "geometry_scope_sha256": "80166286bcb9c39b04c3588a2d4535c01e77fef95ca316da8dce9d5af88c9ff5",
+      "appearance_scope_sha256": "f10b7fd6a246c8d4b786458d1d67b0b67d31248bc93d13370595681d9b55a8c4"
     },
     {
       "asset_key": "snack_wafer",
@@ -141,7 +353,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "WAFER WAVE"
+      "product_name": "WAFER WAVE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "2fb624d26e8971a8a3c448fc767cd50ad0eab84e296bb41d65222b574050d071",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "fc40879ed1a6c52927883f0c2be658fa75b92cdf61fb48ec0a4f5351833f4389",
+      "texture_sha256": "0cd64ff1056fa412c2a858bc9d26844488ab1b36c067b0cda2fb54fae2d0e7c8",
+      "geometry_scope_sha256": "2aa0910e38ad98ede8356ff981dde47c6d40cdcf0583a5268e69b68f335ecac8",
+      "appearance_scope_sha256": "4482e0cd551703362457f44f52b018068a930fc94c84c2bf4258e53fb939768c"
     },
     {
       "asset_key": "snack_popcorn",
@@ -155,7 +384,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "box",
-      "product_name": "POPCORN FIELD"
+      "product_name": "POPCORN FIELD",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "box",
+      "assembly_parts": [
+        "legacy_body",
+        "box"
+      ],
+      "geometry_signature": "91ca60f102e897a797db0a70dc56420d0e3113e7ca30c54e89727eccfe77260f",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "7b938990460d900a55a8a0cae53cf5fdda547a42a00baca61ef43489d3a6656b",
+      "texture_sha256": "ad74d1811baabe89b17f80d7eacf4bb84682381bb465317e9af03bf777e51ad8",
+      "geometry_scope_sha256": "da72e14f2462a8c736cb317bad7fd1775d2270c2ee2ad93e9f9b5fbfc8d78bb5",
+      "appearance_scope_sha256": "46a8f06fe6be011a2e5c99fedc325bf6abb5a738a065ff9151b092b27b6d3f6a"
     },
     {
       "asset_key": "juice_citrus",
@@ -169,7 +415,32 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "carton",
-      "product_name": "CITRUS PRESS"
+      "product_name": "CITRUS PRESS",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "carton",
+      "assembly_parts": [
+        "legacy_body",
+        "carton"
+      ],
+      "geometry_signature": "fc1a4375f470b5829d761bd309ff07e48213480e6139786c52ec3c83cb151f87",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "bd63f2c58cfe0ddd53a0652db96787e01e0d95e311e21055d1f5cb405fbd603f",
+      "texture_sha256": "da884f7b4ebfa40b03d4c440a8108fb3cd877c1f1500887ad341f40b685e2609",
+      "geometry_scope_sha256": "9afe2d0fd1483cd1906d6b05ccd0fb78a16c63774377cfefa038dc509ecf554a",
+      "appearance_scope_sha256": "7a014c062f8be5ae6c9e500cfeb5a3a9eb4f902185acca0ca98e9ff251e07bff",
+      "normal_texture_path": "textures/juice_citrus_normal.png",
+      "normal_texture_sha256": "cf8959f5fa2461d3cb2eba568e4eb29cb2b8a7e803a67fc19630ac693e9b9d35",
+      "roughness_texture_path": "textures/juice_citrus_roughness.png",
+      "roughness_texture_sha256": "04b4c828d62ddaed777d436f2a645cd3e250c398ef4c8eabb88dc61c973171cd",
+      "source_food_path": "source_food/citrus_still_life_v1.png",
+      "source_food_sha256": "ba636324e9fff4e56cc35738206fcb72f8f54e5d0ec76827ebafaf03cf1df86b"
     },
     {
       "asset_key": "juice_berry",
@@ -183,7 +454,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "carton",
-      "product_name": "BERRY POUR"
+      "product_name": "BERRY POUR",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "carton",
+      "assembly_parts": [
+        "legacy_body",
+        "carton"
+      ],
+      "geometry_signature": "fc1a4375f470b5829d761bd309ff07e48213480e6139786c52ec3c83cb151f87",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "ad51bdd2364e762c28234b5d641ee96b6ae9f8ef7a6c931568f8b22bef064fe3",
+      "texture_sha256": "05dd712d2c1c0388a59fc39cc938730b51a6fe338bb5072876c602980bee098c",
+      "geometry_scope_sha256": "ba0c665cd13a0823ae724191e21573d760e4f7b674fc815be0f14c72648d2e79",
+      "appearance_scope_sha256": "fb133a063bcae574cae365441bb655042f190eec5bfdf94f9df3b788be6fb6ea"
     },
     {
       "asset_key": "juice_green",
@@ -197,7 +485,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "carton",
-      "product_name": "GREEN GROVE"
+      "product_name": "GREEN GROVE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "carton",
+      "assembly_parts": [
+        "legacy_body",
+        "carton"
+      ],
+      "geometry_signature": "fc1a4375f470b5829d761bd309ff07e48213480e6139786c52ec3c83cb151f87",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "1fa3acb03fec4b3df7d3c357fdf3b4173c86a049cecbaeb03186a756d6af91f1",
+      "texture_sha256": "f3795674cc8a9fd6878682a2f6885ce789e2dbd48b899d05f165672560c69192",
+      "geometry_scope_sha256": "ba0c665cd13a0823ae724191e21573d760e4f7b674fc815be0f14c72648d2e79",
+      "appearance_scope_sha256": "ae9b8295a88194330aeed623617a19fedc5b199104b09fb395334d52ce9d7448"
     },
     {
       "asset_key": "juice_apple",
@@ -211,7 +516,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "carton",
-      "product_name": "APPLE PRESS"
+      "product_name": "APPLE PRESS",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "carton",
+      "assembly_parts": [
+        "legacy_body",
+        "carton"
+      ],
+      "geometry_signature": "fc1a4375f470b5829d761bd309ff07e48213480e6139786c52ec3c83cb151f87",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "1dfc2b44da040dba5b3e21a2b0f9dc800f3316adf179a4ab61293591df43bb07",
+      "texture_sha256": "1877146d05dd020cdf98ec75af5f0dcd65acb017590d603a629d4af58f7331d6",
+      "geometry_scope_sha256": "ba0c665cd13a0823ae724191e21573d760e4f7b674fc815be0f14c72648d2e79",
+      "appearance_scope_sha256": "4607c1427c6309b553a41ed76aec70aa3c748bb11d2d8efde5c9bb08a841fb29"
     },
     {
       "asset_key": "water_sky",
@@ -225,7 +547,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "bottle",
-      "product_name": "SKY WATER"
+      "product_name": "SKY WATER",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "bottle",
+      "assembly_parts": [
+        "legacy_body",
+        "bottle"
+      ],
+      "geometry_signature": "4a5ca8bbf9800f033c10c3a72bc645c916acf27e7b77d6f7b8ed865c901a46ef",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "166103140833bc60b2d98edf02d72caf9c2a513063dcb3f2857836bd2883c4d2",
+      "texture_sha256": "07be78e2477c440b7271ede5eaf0031bdca8565eaa79ef48a0701a47e6323572",
+      "geometry_scope_sha256": "e225245c3d5fcaacef9512f8b738eb08995891c816c0daaab9059fd64314edf1",
+      "appearance_scope_sha256": "1b82b53c85dd65c32b4b07b7422062e599e56da5c13c8925b72fe5ca8112b5b4"
     },
     {
       "asset_key": "water_clear",
@@ -239,7 +578,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "bottle",
-      "product_name": "CLEAR SPRING"
+      "product_name": "CLEAR SPRING",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "bottle",
+      "assembly_parts": [
+        "legacy_body",
+        "bottle"
+      ],
+      "geometry_signature": "4a5ca8bbf9800f033c10c3a72bc645c916acf27e7b77d6f7b8ed865c901a46ef",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "b544a5b63642ab68b59c07f4b7497f25801e298c976ea394b82d37409d50226e",
+      "texture_sha256": "073636eb6274f859d2cd615b429097a9a6433bb854633d0f1016d3c92e0e5aab",
+      "geometry_scope_sha256": "e225245c3d5fcaacef9512f8b738eb08995891c816c0daaab9059fd64314edf1",
+      "appearance_scope_sha256": "d2a850274494453437772625932f16af4bbad7e198bc5fc48edafe9bf7009849"
     },
     {
       "asset_key": "soda_orbit",
@@ -253,7 +609,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "bottle",
-      "product_name": "ORBIT FIZZ"
+      "product_name": "ORBIT FIZZ",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "bottle",
+      "assembly_parts": [
+        "legacy_body",
+        "bottle"
+      ],
+      "geometry_signature": "3ba9ae6756059b73053fd76672b259d55bf2e064c3a0e56ad73a4a196fb9ff31",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "8bdba8584d001690d2266048214b0127f886f91dd8ec2262490991707904a2ac",
+      "texture_sha256": "d9c0b4d350edbbb7280133525ec82e81975fd69033a784ce618c3fe63a66d093",
+      "geometry_scope_sha256": "286d9103b570531028d1cf2218f328cbb9f0e3d05e26602f8a3a278d4d3c4701",
+      "appearance_scope_sha256": "5bb02104f4e561a0b0458c401bd4e142f379cedaa2afea95a41a6e829fee5407"
     },
     {
       "asset_key": "soda_cherry",
@@ -267,7 +640,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "bottle",
-      "product_name": "CHERRY SPARK"
+      "product_name": "CHERRY SPARK",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "bottle",
+      "assembly_parts": [
+        "legacy_body",
+        "bottle"
+      ],
+      "geometry_signature": "3ba9ae6756059b73053fd76672b259d55bf2e064c3a0e56ad73a4a196fb9ff31",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "5cce86b2e4c900ad9ad2313316f7b94cca5aa152971427347f61ffdcb6fde146",
+      "texture_sha256": "c7f2d2c500b32bc56babd7c23f69d9c77788f3a1a01bbfd719396b8bf012d998",
+      "geometry_scope_sha256": "286d9103b570531028d1cf2218f328cbb9f0e3d05e26602f8a3a278d4d3c4701",
+      "appearance_scope_sha256": "bac7c7d9edfa9c5fed3ed923a135ba52b09a461ce980f846b09a4060922f4e40"
     },
     {
       "asset_key": "soda_lime",
@@ -281,7 +671,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "bottle",
-      "product_name": "LIME LIFT"
+      "product_name": "LIME LIFT",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "bottle",
+      "assembly_parts": [
+        "legacy_body",
+        "bottle"
+      ],
+      "geometry_signature": "3ba9ae6756059b73053fd76672b259d55bf2e064c3a0e56ad73a4a196fb9ff31",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "c935155a67a522d8a01af930e108aafd80b412051ecd17c6e93199df7bbac907",
+      "texture_sha256": "57bda7f07d443959a620cb84c6998e818969ff3637f21ce33751c832535835c4",
+      "geometry_scope_sha256": "286d9103b570531028d1cf2218f328cbb9f0e3d05e26602f8a3a278d4d3c4701",
+      "appearance_scope_sha256": "702e22365963570d18d8d10c526da1e76b460260f413b772f7388c4b3e0bd2a0"
     },
     {
       "asset_key": "can_soup_red",
@@ -295,7 +702,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "can",
-      "product_name": "HEARTH SOUP"
+      "product_name": "HEARTH SOUP",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "can",
+      "assembly_parts": [
+        "legacy_body",
+        "can"
+      ],
+      "geometry_signature": "63ea39449401841884767f804b1568640e8e85ed002bff58cea795acc7dc8371",
+      "material_classes": [
+        "printed_label",
+        "metal"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "4b874fdd63e15f134f940ff206d368c361894743f64724c0596cc0151411caaf",
+      "texture_sha256": "2f084d6ef182c8d354bbd87bd9931a8ac0e65d4c98e7ddc44b4aa09789a49f50",
+      "geometry_scope_sha256": "5d7f7837d16a311958f1862011e32caccee9c7dc0e95671a2815e8f2daacaddb",
+      "appearance_scope_sha256": "f54dab52e1a065a0ec309a91041dd5dc60a405e592a2992784729323b3ef8b20"
     },
     {
       "asset_key": "can_soup_green",
@@ -309,7 +733,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "can",
-      "product_name": "HERB SOUP"
+      "product_name": "HERB SOUP",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "can",
+      "assembly_parts": [
+        "legacy_body",
+        "can"
+      ],
+      "geometry_signature": "63ea39449401841884767f804b1568640e8e85ed002bff58cea795acc7dc8371",
+      "material_classes": [
+        "printed_label",
+        "metal"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "764a35c2ae771ec0ec13362ce78a576b8c999c4a306fc15adb1a49a28b9c8c2d",
+      "texture_sha256": "4659d641b49db36a4d24b6e6eb0bc7d814fbf0fccd53cd59ce8677f15aef44c8",
+      "geometry_scope_sha256": "5d7f7837d16a311958f1862011e32caccee9c7dc0e95671a2815e8f2daacaddb",
+      "appearance_scope_sha256": "dc21b784d018c2c7442300e0ccf4193b0de151040a1136635979c3cee66eface"
     },
     {
       "asset_key": "can_beans",
@@ -323,7 +764,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "can",
-      "product_name": "BLUE BEANS"
+      "product_name": "BLUE BEANS",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "can",
+      "assembly_parts": [
+        "legacy_body",
+        "can"
+      ],
+      "geometry_signature": "63ea39449401841884767f804b1568640e8e85ed002bff58cea795acc7dc8371",
+      "material_classes": [
+        "printed_label",
+        "metal"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "58d58e320b4033548eac8f04185a3bdb06c3ea3dfb6ac937885a0378732cac94",
+      "texture_sha256": "49ea8c9eae61bb2e141698936cfeabd4f71b6f948f4cea1c9ac12bff1150d394",
+      "geometry_scope_sha256": "5d7f7837d16a311958f1862011e32caccee9c7dc0e95671a2815e8f2daacaddb",
+      "appearance_scope_sha256": "a868712311bb87bb858661cbd38406b01ac41aa27d38846b0dc191218f63a8b6"
     },
     {
       "asset_key": "can_tomato",
@@ -337,7 +795,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "can",
-      "product_name": "TOMATO TABLE"
+      "product_name": "TOMATO TABLE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "can",
+      "assembly_parts": [
+        "legacy_body",
+        "can"
+      ],
+      "geometry_signature": "63ea39449401841884767f804b1568640e8e85ed002bff58cea795acc7dc8371",
+      "material_classes": [
+        "printed_label",
+        "metal"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "79e24907db1dddfbed74a3804ec93c275160d2e53e28cd8b44f8bb29872e9fd3",
+      "texture_sha256": "82af0d8874b0e993f4ee6e7383f8030de89146d8a0fe677aed7f5ef45c944b5e",
+      "geometry_scope_sha256": "5d7f7837d16a311958f1862011e32caccee9c7dc0e95671a2815e8f2daacaddb",
+      "appearance_scope_sha256": "a18f2a16506cebc2d84339c618fe29cf54d64c433529eae6ca4472de123a54f2"
     },
     {
       "asset_key": "jar_honey",
@@ -351,7 +826,25 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "jar",
-      "product_name": "GOLDEN HIVE"
+      "product_name": "GOLDEN HIVE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "jar",
+      "assembly_parts": [
+        "legacy_body",
+        "jar"
+      ],
+      "geometry_signature": "7c1f2998692532a4dcb489d41b04fe69a1c5a3b937b61551a6b78b3377bb117d",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "cd8c778312fed7357ebf5336b604faa903fd88fd6b73eced26636fe8d04c62c0",
+      "texture_sha256": "d1c343e51c4f5bb83e203f426505810809c3888595183bbd60e85148b53d3f0c",
+      "geometry_scope_sha256": "b547ff94547358f98e60ac5cefb36b07f76bee9b0b381bbe71be491e9613c138",
+      "appearance_scope_sha256": "ecc28c092eae50d26ac4ec90b155892462739f63c5bb8f0d13e209fbfcbabfa0"
     },
     {
       "asset_key": "jar_pickle",
@@ -365,7 +858,25 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "jar",
-      "product_name": "DILL GARDEN"
+      "product_name": "DILL GARDEN",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "jar",
+      "assembly_parts": [
+        "legacy_body",
+        "jar"
+      ],
+      "geometry_signature": "7c1f2998692532a4dcb489d41b04fe69a1c5a3b937b61551a6b78b3377bb117d",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "5e0914fd68b6949795d7f7c7323b767ca80ecb32fa31b632a08f7eb39976a3d4",
+      "texture_sha256": "27878d02fb89808ac13055bb530bf850a109e13ebf6839d92732cf800bb6b11a",
+      "geometry_scope_sha256": "b547ff94547358f98e60ac5cefb36b07f76bee9b0b381bbe71be491e9613c138",
+      "appearance_scope_sha256": "055f34906006e3bfa1b244bf0085f29e6b8cc3924bd5fdf51a35dc0e45913f4e"
     },
     {
       "asset_key": "jar_sauce",
@@ -379,7 +890,25 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "jar",
-      "product_name": "SAUCE HOUSE"
+      "product_name": "SAUCE HOUSE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "jar",
+      "assembly_parts": [
+        "legacy_body",
+        "jar"
+      ],
+      "geometry_signature": "7c1f2998692532a4dcb489d41b04fe69a1c5a3b937b61551a6b78b3377bb117d",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "b7695adbcfc75db240872da3a54e7c244d308cb7252ad621030d1e293bc3e312",
+      "texture_sha256": "f9ea4eff5c057405f37cd4cc642e9229ad1b7ac991f3e3cb26d1a8ac6975c15d",
+      "geometry_scope_sha256": "b547ff94547358f98e60ac5cefb36b07f76bee9b0b381bbe71be491e9613c138",
+      "appearance_scope_sha256": "758525f0ed1941c8b91209caf497ae075214fe3f972a2d6b77e08f4625c4e896"
     },
     {
       "asset_key": "produce_crate_green",
@@ -393,7 +922,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "crate",
-      "product_name": "FARM CRATE"
+      "product_name": "FARM CRATE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "crate",
+      "assembly_parts": [
+        "legacy_body",
+        "crate"
+      ],
+      "geometry_signature": "87f4ed3da5c610cbcb01448cef4f7c75fde1e185be31203943dee4008eca04e9",
+      "material_classes": [
+        "fixture_body",
+        "metal_or_clear_plastic"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "1c3ced2e92c821227cac8ca1493e5b92a44afa4611ef95057ad6f6f5a4d6e590",
+      "texture_sha256": "c52d9b305880a499555a201b8d21fce1da4238dab1a7e85c5a1f98aaaf1ce949",
+      "geometry_scope_sha256": "795ff48554e62f2c88c0d11faf96bf3cc2f8221710f2a2ce57af5cfacca1e0e7",
+      "appearance_scope_sha256": "93d30a03f97d5f0392812a1f9aebcb8574cd4b9b5082f6666e5445bbd01de861"
     },
     {
       "asset_key": "produce_crate_red",
@@ -407,7 +953,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "crate",
-      "product_name": "MARKET CRATE"
+      "product_name": "MARKET CRATE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "crate",
+      "assembly_parts": [
+        "legacy_body",
+        "crate"
+      ],
+      "geometry_signature": "87f4ed3da5c610cbcb01448cef4f7c75fde1e185be31203943dee4008eca04e9",
+      "material_classes": [
+        "fixture_body",
+        "metal_or_clear_plastic"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "091cd7f43c3308a2c63437991c01b69c9eff42c51fc19e04f5c7f298be21350f",
+      "texture_sha256": "80f8479c79f9370b6cc1ea91c2c51f9ea8545d1b95a552d84f4e1a181e29e4b6",
+      "geometry_scope_sha256": "795ff48554e62f2c88c0d11faf96bf3cc2f8221710f2a2ce57af5cfacca1e0e7",
+      "appearance_scope_sha256": "bbad5badab689f2ffb7de2a4e331b05d0efeb19cf8200b7268d170cc21635352"
     },
     {
       "asset_key": "red_apple",
@@ -421,7 +984,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "fruit",
-      "product_name": "RED APPLE"
+      "product_name": "RED APPLE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "fruit",
+      "assembly_parts": [
+        "legacy_body",
+        "fruit"
+      ],
+      "geometry_signature": "fee617b405dc6f6a0611ae8f7d8f00accf4524af9702fbf3b4570e89e9043570",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "78e4266b1eb43846321cb5a59c11b98c003b8678406781e52582fd41aacc52eb",
+      "texture_sha256": "ce334bd9aba88b1b51c81e0015c12926fd2a8da1a38636f74aa5262126942a4b",
+      "geometry_scope_sha256": "bc19a217fb44fef7eb9baabd9415bcb4932d7ae5aa10cfd3700311166923ce36",
+      "appearance_scope_sha256": "61cfccbecc1d6112870e79c9d47c5829db9891ce8854975d2d4ab958ef58f51c"
     },
     {
       "asset_key": "green_apple",
@@ -435,7 +1015,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "fruit",
-      "product_name": "GREEN APPLE"
+      "product_name": "GREEN APPLE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "fruit",
+      "assembly_parts": [
+        "legacy_body",
+        "fruit"
+      ],
+      "geometry_signature": "fee617b405dc6f6a0611ae8f7d8f00accf4524af9702fbf3b4570e89e9043570",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "7f0568bce255651b2400e3d18c1aa00e08a636696666a328a4b4b8be39a3bf1f",
+      "texture_sha256": "f4a31a0db6490ef4bd6f07292dfff46673bc0bdd129b6cbb8b0afb3446531352",
+      "geometry_scope_sha256": "bc19a217fb44fef7eb9baabd9415bcb4932d7ae5aa10cfd3700311166923ce36",
+      "appearance_scope_sha256": "2f8f829e8d03bc328c793afdb21c80353a8f6ce38be8bf709c7aac85ef3424e6"
     },
     {
       "asset_key": "orange",
@@ -449,7 +1046,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "fruit",
-      "product_name": "ORANGE"
+      "product_name": "ORANGE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "fruit",
+      "assembly_parts": [
+        "legacy_body",
+        "fruit"
+      ],
+      "geometry_signature": "a2db2cb97168d36028a1d1355e784e16c0a39e74da44cade33655674817b6e73",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "953043af49c1887c40031e2c0dd474d3b76bb045b3ec23a95886c392d8f26bb7",
+      "texture_sha256": "1e94b42565dee2cdc6c2913c5b50ffb86c5297feb002518099c98998e85c51a5",
+      "geometry_scope_sha256": "1d91cadd2ba5cbb381dd375f35b72130059a32e10d0a0128790962691480a61a",
+      "appearance_scope_sha256": "8d2cbd056f9a28feb3f9742a6bb8d83b2f892d16b1740c6368b6459dc8c00d0d"
     },
     {
       "asset_key": "lemon",
@@ -463,7 +1077,24 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "fruit",
-      "product_name": "LEMON"
+      "product_name": "LEMON",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "fruit",
+      "assembly_parts": [
+        "legacy_body",
+        "fruit"
+      ],
+      "geometry_signature": "b853714036b817583fbb5d2a79efd391a5b7cf05555c1102e7d0f3e3e434fb60",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "dcaef737ab1c36a3ed34815cc07fffde71a90a793f34c53c9c0cc90604cbc194",
+      "texture_sha256": "5ae3a264d409b8b5e9ae5591569361c4ebb578342d19905421698123cc7913a1",
+      "geometry_scope_sha256": "5bd7d42da65230780e238c224c9219099471ca0a66f0138fa4a99061d4da7310",
+      "appearance_scope_sha256": "288b8c806e5131166d9c302c76391d4cf2db0145e5348057f1d1336562c7a1a5"
     },
     {
       "asset_key": "promo_market_sign",
@@ -477,7 +1108,1728 @@
       ],
       "local_front_axis": "+Y",
       "model_type": "sign",
-      "product_name": "FRESH MARKET"
+      "product_name": "FRESH MARKET",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "sign",
+      "assembly_parts": [
+        "legacy_body",
+        "sign"
+      ],
+      "geometry_signature": "afa110ff91e42bfcc7281cd57f835efc9154fcdf993f05b561746eb6b94cbc1d",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail"
+      ],
+      "introduced_in": "baseline",
+      "usd_sha256": "c64d2ad0a9766e88fd2b32a66fa13adc1bd8bcbe57c7b51518aa3d05534b3efb",
+      "texture_sha256": "c79d4aa19e48a0887b181cf227ae10b5e686d785dc26c7e79a35c7813efc3028",
+      "geometry_scope_sha256": "7c3381e8caba0de55306fa27080ed23a5ae30e0b41f8baecb134d7f1fa8553c8",
+      "appearance_scope_sha256": "9f810ec6d253b029a5bd11f3cbd5867b08f5ef31f68c29f816009c7e0744b3c6"
+    },
+    {
+      "asset_key": "milk_gallon",
+      "category": "milk",
+      "usd_path": "usd/milk_gallon.usda",
+      "texture_path": "textures/milk_gallon.png",
+      "dimensions_m": [
+        0.18,
+        0.13,
+        0.29
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "milk_jug",
+      "product_name": "MEADOW MILK",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "milk_jug",
+      "assembly_parts": [
+        "jug_body",
+        "shoulder",
+        "offset_neck",
+        "handle",
+        "cap"
+      ],
+      "geometry_signature": "48341c6db744d342e3f34925f719a63792112d27768f587a35231734a1fc6fce",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "18ad59f98540de8eb818a1b4d8fd7111be13de3861cff3d8cf346caacef2605e",
+      "texture_sha256": "af7ff4b80f063c183513510c4d5e91cf4631fe41d8a0544c7895881fd2315c82",
+      "geometry_scope_sha256": "f6cf0e86a32ca2b65260e337296ac44f8e84ea0875087f76fb4c3be9385a5e57",
+      "appearance_scope_sha256": "06c6739799c508d11b45e51ccd4f444ae563c1b83520de989166be8e58540501",
+      "normal_texture_path": "textures/milk_gallon_normal.png",
+      "normal_texture_sha256": "304826598bda970c4bed7bfe450621874150a69bb914f2fa31e373acb2811cff",
+      "roughness_texture_path": "textures/milk_gallon_roughness.png",
+      "roughness_texture_sha256": "07faa49fba54318de5e06b55294a0fe78d97c7c0a996cf9ea6a040e31e0791a1"
+    },
+    {
+      "asset_key": "milk_carton",
+      "category": "milk",
+      "usd_path": "usd/milk_carton.usda",
+      "texture_path": "textures/milk_carton.png",
+      "dimensions_m": [
+        0.1,
+        0.09,
+        0.24
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "gable_carton",
+      "product_name": "VALLEY MILK",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "gable_carton",
+      "assembly_parts": [
+        "carton_body",
+        "gable_left",
+        "gable_right",
+        "top_seam",
+        "pour_cap"
+      ],
+      "geometry_signature": "64778e1e9623962f5b3ee52e4038ad7cbd1e4cf4d37b5dd2be9cd801f6db89e8",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "b239f6a55f35326cde3b790cf1f01cd34fe63a424e628a54b044d25c8b1baf2b",
+      "texture_sha256": "eb86991fa923e680cc3797f397fe8e647f0344bd4e7b903064cb0ffaa0e83fff",
+      "geometry_scope_sha256": "8e9ee35920a4ac0c0cab7591cbcff27fc0f203d4c780c9c462b0f4e229dc1603",
+      "appearance_scope_sha256": "f8f1b83a4ae212861d58f96dc095e828fe26e0c13251acb9b4b9204b64a05728",
+      "normal_texture_path": "textures/milk_carton_normal.png",
+      "normal_texture_sha256": "bb180835c64ab2b36bd9055ffff3726c15a09d4b25c27d8a0fea8fb736e4c8d0",
+      "roughness_texture_path": "textures/milk_carton_roughness.png",
+      "roughness_texture_sha256": "8a390ace6a1ef3e5438813672b954786dd201bd195258fa8d39106a44d85911b"
+    },
+    {
+      "asset_key": "yogurt_cup",
+      "category": "refrigerated",
+      "usd_path": "usd/yogurt_cup.usda",
+      "texture_path": "textures/yogurt_cup.png",
+      "dimensions_m": [
+        0.12,
+        0.12,
+        0.11
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "yogurt_cup",
+      "product_name": "BERRY YOGURT",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "yogurt_cup",
+      "assembly_parts": [
+        "tapered_cup",
+        "foil_lid",
+        "base_ring"
+      ],
+      "geometry_signature": "f0692b3bf65b5549cf2908cfea30fb87cdc323e162b38c91471fd9800ef77613",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "fbbd5119448d147f6c7d191dc89968e9f905f2b4be6cb66fed9706e064fba56f",
+      "texture_sha256": "264ca138f381d58609d2c29765214f2110cb801f077ac6659a4749601d184649",
+      "geometry_scope_sha256": "1ec72e8924345d2580cc9beddbf9a3069314765e9153789a96f696dcf8ce40ea",
+      "appearance_scope_sha256": "e998470f21e05a483103f9f0723ccb56e1801f56cbd0fc4030d2d82530a692eb",
+      "normal_texture_path": "textures/yogurt_cup_normal.png",
+      "normal_texture_sha256": "5c06eb0bc53cbd1614fbc32b1f09412157d7338d8e614661f8fde45e4d2b5908",
+      "roughness_texture_path": "textures/yogurt_cup_roughness.png",
+      "roughness_texture_sha256": "dcb6975e9695b22182aca07772a2900bb19eeddc09a7dcfae325335f50c28fdf"
+    },
+    {
+      "asset_key": "egg_carton",
+      "category": "refrigerated",
+      "usd_path": "usd/egg_carton.usda",
+      "texture_path": "textures/egg_carton.png",
+      "dimensions_m": [
+        0.29,
+        0.11,
+        0.075
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "egg_carton",
+      "product_name": "FARM EGGS",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "egg_carton",
+      "assembly_parts": [
+        "tray",
+        "hinged_lid",
+        "six_domes",
+        "latch"
+      ],
+      "geometry_signature": "4c864b141796939011c81b72fbc8f49e3689dc016b3bfd873323308c6a114de3",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "2af0ea104f0a5b9f9363410a0ad30e92dc80b98df44fe98ae43746b84015b875",
+      "texture_sha256": "bda2b469aa821b89e832f3437ac5bed303b2c4117e2886dc489b217e08bd7b59",
+      "geometry_scope_sha256": "f74f712835cf8eb52c3eea82f0aa75cca96927049143886628c4e082abdc292a",
+      "appearance_scope_sha256": "91e523895c549fec21d688b5a64905229cf28978ad215f69a855f817708d66f9",
+      "normal_texture_path": "textures/egg_carton_normal.png",
+      "normal_texture_sha256": "0e11ea685634361eabd53a199fae38fd166029aaaefa2571384ccb2ec096e3b4",
+      "roughness_texture_path": "textures/egg_carton_roughness.png",
+      "roughness_texture_sha256": "f26cc90cc7ec11ba3090b7618257b0f74f13d3c3cebed27e2069288c5f490858"
+    },
+    {
+      "asset_key": "butter_pack",
+      "category": "refrigerated",
+      "usd_path": "usd/butter_pack.usda",
+      "texture_path": "textures/butter_pack.png",
+      "dimensions_m": [
+        0.16,
+        0.065,
+        0.055
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "butter_pack",
+      "product_name": "CREAMERY BUTTER",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "butter_pack",
+      "assembly_parts": [
+        "wrapped_block",
+        "folded_ends",
+        "paper_band"
+      ],
+      "geometry_signature": "8443cb984f417c2a0e8ee0aa4b397cdd93c4deb19108916def9869cf9e60544e",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "1d9162569be75d81cb070bd748d2e53108abbd9d4c0f000f44b29418c198e64d",
+      "texture_sha256": "d73f4983baec673d91ead521004ba2b587f97c09cdadce09d0cc45d7a81eb2ee",
+      "geometry_scope_sha256": "7e2b2beab2e32f7c5b1ecff5a1fb2aa830edea2463cb61eb8838af05e8481c15",
+      "appearance_scope_sha256": "f31bef5dfc846ca498c03545a9574cee6ef71a933fc6f61afb08d4e9be45b84d",
+      "normal_texture_path": "textures/butter_pack_normal.png",
+      "normal_texture_sha256": "fd58f0e1898561a874066d87a8328b13948a971089cb4f4d7f89bac4edf2c2b7",
+      "roughness_texture_path": "textures/butter_pack_roughness.png",
+      "roughness_texture_sha256": "6cd3a67ea8bdc0fe8226bc8755f132aacaa025eb3b4f62d68e7e49d8cd5965d7"
+    },
+    {
+      "asset_key": "cheese_wedge",
+      "category": "refrigerated",
+      "usd_path": "usd/cheese_wedge.usda",
+      "texture_path": "textures/cheese_wedge.png",
+      "dimensions_m": [
+        0.15,
+        0.085,
+        0.075
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "cheese_wedge",
+      "product_name": "AGED CHEDDAR",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "cheese_wedge",
+      "assembly_parts": [
+        "triangular_wedge",
+        "wax_rind",
+        "label_panel"
+      ],
+      "geometry_signature": "9f19af24f65ab8fcbdec2a668e608afc87da72d46df1f213c222e94432b8eba5",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "61670939b97474898bcef622d0af521165d7c4b9af4f221fd1fed43dcab6ecab",
+      "texture_sha256": "96487519a93eed51fa6b245e0c9b1b3f86b7c1672eb2a4e7e6ac7a09e1cf3fe3",
+      "geometry_scope_sha256": "b706d7e9e380c2be277b374ec2e96235ecfb7519d61e2cdb1a4f82ab55e2f455",
+      "appearance_scope_sha256": "35fa8a29245e0cf64a2a7c46e414b2567b49a324e20ebf8d15dac928a7ed7747",
+      "normal_texture_path": "textures/cheese_wedge_normal.png",
+      "normal_texture_sha256": "00a3530496e3f08993be5a67ae0f87621d563957e64e77480cce59ef28bca0db",
+      "roughness_texture_path": "textures/cheese_wedge_roughness.png",
+      "roughness_texture_sha256": "0c4a834dc04f00cf5762b3faa958fa9ecfff2ae6e29baacfccfa7b728a9b7c28"
+    },
+    {
+      "asset_key": "frozen_pizza",
+      "category": "frozen",
+      "usd_path": "usd/frozen_pizza.usda",
+      "texture_path": "textures/frozen_pizza.png",
+      "dimensions_m": [
+        0.29,
+        0.045,
+        0.29
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "flat_carton",
+      "product_name": "STONE PIZZA",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "flat_carton",
+      "assembly_parts": [
+        "shallow_carton",
+        "edge_lip",
+        "round_window"
+      ],
+      "geometry_signature": "d296fba0fb7c0e72c37dcec832447a2879f1c8053e2b396a268170447d0b0ee1",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "cf1e67f2165e147fb9331a389523d5ca9668ef4c2d2cb098e41699b7e3f46fe0",
+      "texture_sha256": "3f78e66f0b64b480f30c8eadd647340d8d5a663f36153d8cb4e245e47cf122ff",
+      "geometry_scope_sha256": "5d1a5004520c4e5c554a6f4b9c1d3e30c82dca290fd52c3ba016c3d04dd82c82",
+      "appearance_scope_sha256": "4aa20e20106eda42368f5dc6265335144bdf4652215a8f77b5c43670d2f68d1e",
+      "normal_texture_path": "textures/frozen_pizza_normal.png",
+      "normal_texture_sha256": "9ce356cd11a23df0447119a7377fc7ef2147a8f9e4b22fea3a9b4ea630f71bd1",
+      "roughness_texture_path": "textures/frozen_pizza_roughness.png",
+      "roughness_texture_sha256": "5c1b0134fe701b1a974dc4737e444d897a9b18771340beb83d67fc720e5c1964"
+    },
+    {
+      "asset_key": "icecream_tub",
+      "category": "frozen",
+      "usd_path": "usd/icecream_tub.usda",
+      "texture_path": "textures/icecream_tub.png",
+      "dimensions_m": [
+        0.13,
+        0.11,
+        0.15
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "oval_tub",
+      "product_name": "VANILLA CREAM",
+      "department": "refrigerated",
+      "intended_support": "shelf",
+      "assembly_profile": "oval_tub",
+      "assembly_parts": [
+        "oval_tub",
+        "rolled_rim",
+        "domed_lid"
+      ],
+      "geometry_signature": "b9826dc18a63f81dc09b18793550f7e3acd55c663b23a5a7ae9dfed14efaea1a",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "ef4c902eb685a98c8836f733e6175bb1873c293560003fcff8ec846a6efc8b40",
+      "texture_sha256": "ea9bdbe38e6a23f1bd9b8bdeeb5710009150274f4169d01330ff8c6cbbae6a77",
+      "geometry_scope_sha256": "563b3e50335c10df15d341879ef891aa2cd2ebea88937d1ac1bff925698a865f",
+      "appearance_scope_sha256": "92d452f9decce4b052682d5518435cbdad571ff939dc3a0b3015100030e2a338",
+      "normal_texture_path": "textures/icecream_tub_normal.png",
+      "normal_texture_sha256": "032aab318950f9470e25b21bc9407e5a34e9245df5349cb073169cf663a449ee",
+      "roughness_texture_path": "textures/icecream_tub_roughness.png",
+      "roughness_texture_sha256": "d7abb3d260b7d9bbc4af3be472f016fac539e331ac8a9357b122b43a906206c0"
+    },
+    {
+      "asset_key": "olive_oil",
+      "category": "condiments",
+      "usd_path": "usd/olive_oil.usda",
+      "texture_path": "textures/olive_oil.png",
+      "dimensions_m": [
+        0.085,
+        0.075,
+        0.29
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "oil_bottle",
+      "product_name": "GROVE OIL",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "oil_bottle",
+      "assembly_parts": [
+        "square_glass_body",
+        "sloped_shoulders",
+        "long_neck",
+        "pour_spout",
+        "cap"
+      ],
+      "geometry_signature": "362d600c8a196b022144b28dce75f5b2ff90948bcc94cada7738bf3370f8fb31",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "648889e5e576d3e8e11174e0a429624923afec73df9474a56d08fd75b7f54373",
+      "texture_sha256": "ded26162a7e6002ce167af864a06734aee3a05ec0e1471c686d0daaa1f446c61",
+      "geometry_scope_sha256": "561c78b0e41fb796d320e1b4c39433b8b83ea93659c6e33e0ffc8d5fdc9d065d",
+      "appearance_scope_sha256": "e9e4212c54ce2d1dc92f8910a87c4dfc71418283a32ba3c8bfb06d321cf1e82a",
+      "normal_texture_path": "textures/olive_oil_normal.png",
+      "normal_texture_sha256": "f22c707f5fe3fae311ee67f24678f92c90106ebdeb639f6701ab50b80689e9f4",
+      "roughness_texture_path": "textures/olive_oil_roughness.png",
+      "roughness_texture_sha256": "b8d921418acc05490f41e5e3e8594fb2eb1da2551b3c8627a085846a2cf1e299"
+    },
+    {
+      "asset_key": "maple_syrup",
+      "category": "condiments",
+      "usd_path": "usd/maple_syrup.usda",
+      "texture_path": "textures/maple_syrup.png",
+      "dimensions_m": [
+        0.12,
+        0.075,
+        0.23
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "handled_bottle",
+      "product_name": "MAPLE SYRUP",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "handled_bottle",
+      "assembly_parts": [
+        "flask_body",
+        "neck",
+        "side_handle",
+        "cap"
+      ],
+      "geometry_signature": "ed1122c57a86d4efe25f6afe7de9dad69e9f20dc34d26f6d2874b7f73ddf919e",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "527959ef3375cdef1e1249a5abc1d87e839bdd5c43a96498d7581355eaa3a8fc",
+      "texture_sha256": "1ddd6a93056c04fadb12b8f90aa3bec8e197b25e341c94da21945ab1994a1d69",
+      "geometry_scope_sha256": "5a62151b5e7d507fa392f4f9ee4c02399180b3ebe88f13399186bb8d3d0f1055",
+      "appearance_scope_sha256": "629e7fc59634d2c37ee673804099e50131f49ac9c943b95beb0626b9e496ee99",
+      "normal_texture_path": "textures/maple_syrup_normal.png",
+      "normal_texture_sha256": "70e9839743e6d28f4461c49e99572682f98f753adab59211014092d35b856234",
+      "roughness_texture_path": "textures/maple_syrup_roughness.png",
+      "roughness_texture_sha256": "e9242529d47a418dbeb1f8969809deea4c0ed672f4348e84631f9dd2177248cb"
+    },
+    {
+      "asset_key": "sports_drink",
+      "category": "beverage",
+      "usd_path": "usd/sports_drink.usda",
+      "texture_path": "textures/sports_drink.png",
+      "dimensions_m": [
+        0.095,
+        0.095,
+        0.245
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "grip_bottle",
+      "product_name": "ACTIVE HYDRATE",
+      "department": "beverage",
+      "intended_support": "shelf",
+      "assembly_profile": "grip_bottle",
+      "assembly_parts": [
+        "ribbed_body",
+        "waist",
+        "shoulder",
+        "sports_cap"
+      ],
+      "geometry_signature": "fbd4782a5c6d794872df4d6af8dbbe529a58413ab6b719b43007767059c98811",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "dff212113133d723eeb64250c9ebf2a546300b42d125eef4fbc8e2a9e9fadf89",
+      "texture_sha256": "f96547569271047c1739fcf141ab6f8c8dc66b06f6cc905f07f9733a141007b4",
+      "geometry_scope_sha256": "2cda137d0090585d6d7f1d91cb88eaab5a155d78ca92d67b298b953dc85d45b9",
+      "appearance_scope_sha256": "b3695db6d6dc116c1e1ab3fb667125f6c0842ccb53434b0f929835b2ffb5f87a",
+      "normal_texture_path": "textures/sports_drink_normal.png",
+      "normal_texture_sha256": "2bc1315057656f69ad67d808d7167a8c8b4938ab120695d7ff25aeb70c2194d4",
+      "roughness_texture_path": "textures/sports_drink_roughness.png",
+      "roughness_texture_sha256": "ebd8f29d19a343b989820b60feab59e9c3a49b41e1f554ae062dfc049d12092a"
+    },
+    {
+      "asset_key": "sparkling_wine",
+      "category": "beverage",
+      "usd_path": "usd/sparkling_wine.usda",
+      "texture_path": "textures/sparkling_wine.png",
+      "dimensions_m": [
+        0.085,
+        0.085,
+        0.31
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "longneck_bottle",
+      "product_name": "ORCHARD SPARKLE",
+      "department": "beverage",
+      "intended_support": "shelf",
+      "assembly_profile": "longneck_bottle",
+      "assembly_parts": [
+        "glass_body",
+        "deep_punt",
+        "long_shoulders",
+        "foil_neck",
+        "cork"
+      ],
+      "geometry_signature": "c69595e2d542c7821679ff3316514533582506b878d1c58a5a2f3ebeb830264f",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "1b9053bfc15ee425a9014b874750943c0c5910b2e693f2686adf27bf8260fb6a",
+      "texture_sha256": "e20ef001ab2e14877721cb4fed4c8420ecc757216bbf63a15b5c0a0fe97e4a41",
+      "geometry_scope_sha256": "8fd074ff6ee8d7bddbb6b30a76c2d766853e7b05ed2e8713979e49caad4c415c",
+      "appearance_scope_sha256": "73b932b05e696a2ec30670d9320fe04965ae6c8fe7b039c05ebc5d02fe9a9800",
+      "normal_texture_path": "textures/sparkling_wine_normal.png",
+      "normal_texture_sha256": "f892814d5ed7b2830e325c6e1446b6a82ba2d0df59e91de79bc3d4e80673fd1d",
+      "roughness_texture_path": "textures/sparkling_wine_roughness.png",
+      "roughness_texture_sha256": "728843b64edb235e98a0967359966ec6b30b2aaa8e37bb5c901e269f1ca6bbd0"
+    },
+    {
+      "asset_key": "spray_cleaner",
+      "category": "cleaning",
+      "usd_path": "usd/spray_cleaner.usda",
+      "texture_path": "textures/spray_cleaner.png",
+      "dimensions_m": [
+        0.115,
+        0.075,
+        0.29
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "trigger_spray",
+      "product_name": "CLEAR SURFACE",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "trigger_spray",
+      "assembly_parts": [
+        "bottle_body",
+        "offset_neck",
+        "trigger_head",
+        "nozzle",
+        "lever"
+      ],
+      "geometry_signature": "ecb304cbc41b65e6e926c2886f27addf481383f39d47a3134c23a226c94f685b",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "7323f13a780e2fe86e82b430aa6fd655940e7f6ada70474f4e24119bd76f991f",
+      "texture_sha256": "65b5fdbd1adc0e10284a796b6784e0fbb44beff9152ce5826af2557b08f0a057",
+      "geometry_scope_sha256": "46bd622153217a84363bb475339f362c039957b2799f784c4392954941a18620",
+      "appearance_scope_sha256": "734237095cbeea7bae811a58693cee1f5761fc704b2093a71d0354137c8d7677",
+      "normal_texture_path": "textures/spray_cleaner_normal.png",
+      "normal_texture_sha256": "92112cafe7fa2d1883c2dc1642c78493dc3ffe8c295afb56f13af01e0c8e5aa4",
+      "roughness_texture_path": "textures/spray_cleaner_roughness.png",
+      "roughness_texture_sha256": "e8545a15a5cf397eb0e6cdf94e38458e66b479d3e789bfe60b6b3c6b32587b1e"
+    },
+    {
+      "asset_key": "dish_soap",
+      "category": "cleaning",
+      "usd_path": "usd/dish_soap.usda",
+      "texture_path": "textures/dish_soap.png",
+      "dimensions_m": [
+        0.09,
+        0.06,
+        0.245
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "squeeze_bottle",
+      "product_name": "CITRUS DISH",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "squeeze_bottle",
+      "assembly_parts": [
+        "waisted_body",
+        "shoulder",
+        "flip_spout"
+      ],
+      "geometry_signature": "fdb4457293f5eef3d312858ada892c4b01fe76e7939b356372cb81c0971dfb37",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "ad6723fb8eafd702787c2baf6cc43f534e378397348e6ffa2b4ccfa0ea9fbd77",
+      "texture_sha256": "80bb7cf363e8001dd0d118167056737e014840f0f3a90203261bd1bb7fae09db",
+      "geometry_scope_sha256": "8f6065b8841f46a79a0f779dee38a757b9da669fc4791aba0393a024768c0a30",
+      "appearance_scope_sha256": "2229f3d18c06ba88532584f5c91695e3ea51a601c125d2f6c8d4aa4ff540fe29",
+      "normal_texture_path": "textures/dish_soap_normal.png",
+      "normal_texture_sha256": "d8b624ecdc3579c7f8e381bdfe73fde916e2aeb20da4474642a6de55f2df02be",
+      "roughness_texture_path": "textures/dish_soap_roughness.png",
+      "roughness_texture_sha256": "83a38b48c2e68d6c441e536f6d5741b43376dede8a50bf7f9092b4b3dc072193"
+    },
+    {
+      "asset_key": "detergent_jug",
+      "category": "cleaning",
+      "usd_path": "usd/detergent_jug.usda",
+      "texture_path": "textures/detergent_jug.png",
+      "dimensions_m": [
+        0.2,
+        0.12,
+        0.31
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "detergent_jug",
+      "product_name": "FRESH LAUNDRY",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "detergent_jug",
+      "assembly_parts": [
+        "broad_jug",
+        "hollow_handle",
+        "angled_spout",
+        "measuring_cap"
+      ],
+      "geometry_signature": "f392d10ee3feac5a56d27604119935f196b36a1b3cbf7717e02db0cc225211eb",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "47ba774922c2d33c7cf237c8920e65e0aeec21a28a601cf9181441db2a98e42c",
+      "texture_sha256": "258b82f515c043b95190391c552d32903b68f0e63bbd66c0ad8507b677f4192e",
+      "geometry_scope_sha256": "391189144edef8ccbd741f66b9c13768b97c255dca976298a2c0fd393ef15f95",
+      "appearance_scope_sha256": "94537ac332b247b94cb4daa50d3df968f4e86b635ef6256406c269d87369f290",
+      "normal_texture_path": "textures/detergent_jug_normal.png",
+      "normal_texture_sha256": "a78cf020e0a2e0db16ae91c636c2e227d542f93c9efef2fa08459e6f9b71ac20",
+      "roughness_texture_path": "textures/detergent_jug_roughness.png",
+      "roughness_texture_sha256": "3abfcbd67a84491d10850035b2576a8d238cb7a6a19281f19aa524cd73859f23"
+    },
+    {
+      "asset_key": "bleach_jug",
+      "category": "cleaning",
+      "usd_path": "usd/bleach_jug.usda",
+      "texture_path": "textures/bleach_jug.png",
+      "dimensions_m": [
+        0.17,
+        0.115,
+        0.295
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bleach_jug",
+      "product_name": "BRIGHT WHITE",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "bleach_jug",
+      "assembly_parts": [
+        "jug_body",
+        "high_handle",
+        "offset_spout",
+        "safety_cap"
+      ],
+      "geometry_signature": "b34e0b7eb97d165ba75c412450d6a38e0e64321996f979778a8f9b4b117be5df",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "b25f8f19ea4f90259227a36806e517a2965cf3fc0848877a8500a249c4a877fe",
+      "texture_sha256": "f7161d1398a76d09dd42d4d215a7cbf2f3116dd3b1bacc68a0d13a97c9b4e04d",
+      "geometry_scope_sha256": "2ea8d9d8f908b2b60730b532cf18459c75bdc8bfb94af0f837cb5d3981e35ee6",
+      "appearance_scope_sha256": "b19d8b210e2b6353db0a94baec55d1c70cb337a3492655e2587dcc71d46e829f",
+      "normal_texture_path": "textures/bleach_jug_normal.png",
+      "normal_texture_sha256": "8eadfc6a859624b743ddf35c54a9a737529aa87f0a6a292d81503d3b271b6b55",
+      "roughness_texture_path": "textures/bleach_jug_roughness.png",
+      "roughness_texture_sha256": "aadfeb4da266e6df98954eaad7908fbbca5534b9b23cf730c512229b39848468"
+    },
+    {
+      "asset_key": "hand_soap",
+      "category": "cleaning",
+      "usd_path": "usd/hand_soap.usda",
+      "texture_path": "textures/hand_soap.png",
+      "dimensions_m": [
+        0.085,
+        0.07,
+        0.2
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "pump_bottle",
+      "product_name": "GENTLE HANDS",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "pump_bottle",
+      "assembly_parts": [
+        "rounded_body",
+        "neck",
+        "pump_stem",
+        "pump_head",
+        "nozzle"
+      ],
+      "geometry_signature": "2c6f57fd6472dcaaf21da82e05ecdda24ca27774b7a5b488e44913e86da56161",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "dd67a0409a8f4dc652d39134f6eee002973780ea7b8435a9aa8baad06c23510b",
+      "texture_sha256": "20667df607d4649a9c4caa926311570ee36f653dff6e91b690be28001e37d7e6",
+      "geometry_scope_sha256": "0e4894b0c3d4300325c77b78e7c51a15aa72f2dec4036bf7f0d52e687fc97c35",
+      "appearance_scope_sha256": "c6b88c4a5033e8c09a931035990136b0318a52589031832ad89611c94f635972",
+      "normal_texture_path": "textures/hand_soap_normal.png",
+      "normal_texture_sha256": "ece56b98faf96b8c712c1ee36053139bac0cdd5678cc3fcf2d1347cff0553dc7",
+      "roughness_texture_path": "textures/hand_soap_roughness.png",
+      "roughness_texture_sha256": "2824afa549e86203772d4fa3b53f1e48db30b67878369263fcc30fd90107f9cb"
+    },
+    {
+      "asset_key": "shampoo",
+      "category": "cleaning",
+      "usd_path": "usd/shampoo.usda",
+      "texture_path": "textures/shampoo.png",
+      "dimensions_m": [
+        0.09,
+        0.065,
+        0.24
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "flip_bottle",
+      "product_name": "DAILY SHAMPOO",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "flip_bottle",
+      "assembly_parts": [
+        "tapered_body",
+        "recessed_grip",
+        "bottom_flip_cap"
+      ],
+      "geometry_signature": "eb448d647d662d1a069c7aef081f33d73669d47e4934110eb0364534bb1e4a36",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "ca43d7ce05e5831156b62af1fbe75536e3a653ab87024b813212fa50c15cc5cd",
+      "texture_sha256": "40cc11cf09e360233bd3c089a30ebb5b8c636ab3188c97079d2217e67cd8c848",
+      "geometry_scope_sha256": "45794bcd668e191b1316e0cc68bc554d736d6badcc25b9154dc1b70d6fc42e4e",
+      "appearance_scope_sha256": "26984ad1f2b5a770b274f4a74ac79cfa3ac29dba69b3f2936e17bcd3ec130cd2",
+      "normal_texture_path": "textures/shampoo_normal.png",
+      "normal_texture_sha256": "12cbb811fb320a657423413ec0f92dc04c0b2784f5945f4de7785bd9d90e4c24",
+      "roughness_texture_path": "textures/shampoo_roughness.png",
+      "roughness_texture_sha256": "c2aff2f67fb026e1d1f1eef582d8be53a273e0ec6e58f0df036c38c72e570d60"
+    },
+    {
+      "asset_key": "tuna_can",
+      "category": "cans",
+      "usd_path": "usd/tuna_can.usda",
+      "texture_path": "textures/tuna_can.png",
+      "dimensions_m": [
+        0.095,
+        0.095,
+        0.045
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "short_can",
+      "product_name": "OCEAN TUNA",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "short_can",
+      "assembly_parts": [
+        "short_can",
+        "double_rim",
+        "pull_tab"
+      ],
+      "geometry_signature": "22273c620c18cfa701d7b41183c691f86aad70ccfb2dd85605a7989fe8f1af53",
+      "material_classes": [
+        "printed_label",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "7f1c5f71c46dff4629954ad5c97b91723ac6aefb9ca212264cfb2761b35155a1",
+      "texture_sha256": "281b779b7e0b28febf4a0272a9f50649371a9bebbb8d18003f2b873cc2be3db0",
+      "geometry_scope_sha256": "04810f010ec1ba48b558cc8dc2680eade1d2ce7da992e5e0af1ff19af5f47611",
+      "appearance_scope_sha256": "88574ccb167e01e2c3fbceda6453a67edd47eedac042ba072f25e957dd04a636",
+      "normal_texture_path": "textures/tuna_can_normal.png",
+      "normal_texture_sha256": "9d410aa79d9eaceb165df024cce29a44139ab3dc669aa8af868a48532dbc4488",
+      "roughness_texture_path": "textures/tuna_can_roughness.png",
+      "roughness_texture_sha256": "aa76e885ef377becb95187b36ec5ee2342d8d0f37521de11a6703512fd984afd"
+    },
+    {
+      "asset_key": "coffee_canister",
+      "category": "cans",
+      "usd_path": "usd/coffee_canister.usda",
+      "texture_path": "textures/coffee_canister.png",
+      "dimensions_m": [
+        0.13,
+        0.13,
+        0.19
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "canister",
+      "product_name": "ROAST COFFEE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "canister",
+      "assembly_parts": [
+        "wide_canister",
+        "rolled_base",
+        "overcap",
+        "grip_ribs"
+      ],
+      "geometry_signature": "7970685e7316cbdd35e9e05a7ce7b4a96bff66976b4bd31b5bb42e464975dfe9",
+      "material_classes": [
+        "printed_label",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "5d3e581abb778d2deeae4beb6815c8e387fea225ea85f65d11fa1eb11b2486cb",
+      "texture_sha256": "8f2c01fc63926385beeba529b6cff64a3e9c887ff16e97519b8c7ef8d4321765",
+      "geometry_scope_sha256": "1b7e930e7edf4a1a4e35d2d9e1336e544fef96ee8de04ba0344f0fca4c082bfd",
+      "appearance_scope_sha256": "b6db90916d959613c7b05af2a5bbb7b84438d192673939d3406988e8d8678af6",
+      "normal_texture_path": "textures/coffee_canister_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/coffee_canister_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
+    },
+    {
+      "asset_key": "sardine_tin",
+      "category": "cans",
+      "usd_path": "usd/sardine_tin.usda",
+      "texture_path": "textures/sardine_tin.png",
+      "dimensions_m": [
+        0.115,
+        0.075,
+        0.035
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "rectangular_tin",
+      "product_name": "COAST SARDINES",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "rectangular_tin",
+      "assembly_parts": [
+        "rounded_tin",
+        "rolled_seam",
+        "key_tab"
+      ],
+      "geometry_signature": "e71b808b3a25a91a78981a8913dbdc2dff35e8936b5e4b70c2fc58cd6add40dd",
+      "material_classes": [
+        "printed_label",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "7ac2c7b8d06de0f553f5f3049a849e5f03e42b49180a2db39fc9b32e8e721935",
+      "texture_sha256": "910650b9ae2ac6ca29c4e18e68fb8e2c690e6097ea03fbea50acdab135187aca",
+      "geometry_scope_sha256": "f7e0604daa76a433b0e8dc071862f3057d48ab9fd460f347ff3364c8f67d3fce",
+      "appearance_scope_sha256": "65b0fa7fdda88242c76e1e9f2dacef303425d1e94068f986f24afa3b3f800dd9",
+      "normal_texture_path": "textures/sardine_tin_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/sardine_tin_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
+    },
+    {
+      "asset_key": "tea_box",
+      "category": "pantry_box",
+      "usd_path": "usd/tea_box.usda",
+      "texture_path": "textures/tea_box.png",
+      "dimensions_m": [
+        0.145,
+        0.075,
+        0.095
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "hinged_box",
+      "product_name": "GARDEN TEA",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "hinged_box",
+      "assembly_parts": [
+        "low_box",
+        "hinged_lid",
+        "front_flap"
+      ],
+      "geometry_signature": "fafde322d4f86268377a224715ebf9e2a3bcb316508b6dab12225350223a3072",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "5fdc83aa6563430cbc5bb875376c6f4678e4a8fbfc1042a2e235d8545828e184",
+      "texture_sha256": "751a8f813037f8eb583f6492cf2a8b633dca87c33a663e526f838c00b31bc866",
+      "geometry_scope_sha256": "bb60867be1fff53f2ecdf694e438cf4f9581204d4183c72e40a27fedd4e7fb84",
+      "appearance_scope_sha256": "5ba469d9a332cbf653562e88b39673a7f6721a3875f5ca3be4c8745f675d7522",
+      "normal_texture_path": "textures/tea_box_normal.png",
+      "normal_texture_sha256": "5d18a0d3ecf8a45f49944ee00ce2a693fd68fea7ade6756386b38ef25b5dd783",
+      "roughness_texture_path": "textures/tea_box_roughness.png",
+      "roughness_texture_sha256": "60130ed5de68b57366551612f8a8a61466716fe8a3e20ff422ed02e524142eff"
+    },
+    {
+      "asset_key": "pasta_box",
+      "category": "pantry_box",
+      "usd_path": "usd/pasta_box.usda",
+      "texture_path": "textures/pasta_box.png",
+      "dimensions_m": [
+        0.085,
+        0.06,
+        0.275
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "window_box",
+      "product_name": "BRONZE PASTA",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "window_box",
+      "assembly_parts": [
+        "tall_carton",
+        "cellophane_window",
+        "top_flaps"
+      ],
+      "geometry_signature": "1cac90c7b3d4e0b421bb7e2e6328c734c7a62c70e39bc28b540a551b07aead00",
+      "material_classes": [
+        "printed_paperboard",
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "6496dc3549383c12a8920968a2c124553cbbce9af3756b86ad8591d432f3addd",
+      "texture_sha256": "ff91cf7ac70294405673bc88d9051ee65a2b62bd0bec4ffca7e446c1e5bcefdc",
+      "geometry_scope_sha256": "a2dd4b5652ae753ad4dd5b493ba61c5c44dd1d0d609f471b49550655d93d2449",
+      "appearance_scope_sha256": "7d6784c0eae5253e5c02b2c65edb49fe909f460ad4dd16fa20e20119aae43e0b",
+      "normal_texture_path": "textures/pasta_box_normal.png",
+      "normal_texture_sha256": "b093adf5ef7757f3e63c3ab935e79f67bfa23c02c7af898035e42981e8504a3f",
+      "roughness_texture_path": "textures/pasta_box_roughness.png",
+      "roughness_texture_sha256": "4061fd44185d104ea2b694f4dfebaa71e461c51fb775d6cac1d9954323952d11"
+    },
+    {
+      "asset_key": "rice_bag",
+      "category": "bagged_goods",
+      "usd_path": "usd/rice_bag.usda",
+      "texture_path": "textures/rice_bag.png",
+      "dimensions_m": [
+        0.145,
+        0.085,
+        0.25
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "gusset_bag",
+      "product_name": "LONG GRAIN RICE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "gusset_bag",
+      "assembly_parts": [
+        "gusseted_sack",
+        "folded_base",
+        "sealed_top",
+        "side_panels"
+      ],
+      "geometry_signature": "110740117b123699a9d4f1489dfce1c21c95c2d1e11d3e1fd209f0450541f1fc",
+      "material_classes": [
+        "printed_film",
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "4231a17bc339ef190e6b44e50498b4a41ae45a0b49ea5caafd5a5365d63a017a",
+      "texture_sha256": "2bbd9b08966c425a07920e53c564cde13a9e537e907ff992d653fade620d3f23",
+      "geometry_scope_sha256": "762ed463582b55b9395dae2d64ad166b5eaa40a218b03bebbec5764a27e764c9",
+      "appearance_scope_sha256": "58183c1b4b1c4d111959dc9d1073f3fdccaea26ed20cb5f88e4a00c6286bc82b",
+      "normal_texture_path": "textures/rice_bag_normal.png",
+      "normal_texture_sha256": "9f216cdeb7f7e2a4d56548a160983133bdd034472fe0710a25b3869d62758649",
+      "roughness_texture_path": "textures/rice_bag_roughness.png",
+      "roughness_texture_sha256": "484040c8012e8c5bd283ee0eddf594db545a35b021ed69a659ff3287680f3263"
+    },
+    {
+      "asset_key": "coffee_bag",
+      "category": "bagged_goods",
+      "usd_path": "usd/coffee_bag.usda",
+      "texture_path": "textures/coffee_bag.png",
+      "dimensions_m": [
+        0.135,
+        0.08,
+        0.235
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "valve_bag",
+      "product_name": "HOUSE COFFEE",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "valve_bag",
+      "assembly_parts": [
+        "flat_bottom_pouch",
+        "sealed_top",
+        "degassing_valve"
+      ],
+      "geometry_signature": "aed7f4a22557afe2464a09549d0101a9cbe21f0fcd057bd72777a0ed231a3737",
+      "material_classes": [
+        "printed_film",
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "594db77c4df4f279f2b0037a95a04c466fce1ad60c8c2c9bf49b27aced54c041",
+      "texture_sha256": "4fb50fdd5ce5b40903bf13e692299061dc0bb7f0b303a1f25e67a654af5de94e",
+      "geometry_scope_sha256": "7f6172ba23c70a7db24e44e1bd31033be73d33d6a2cb82afb6dadb5f583bcf0e",
+      "appearance_scope_sha256": "0d1f8550f8a13715b5a627fcfe6eb59d905d15b2d88cb296fd888b4298eb563c",
+      "normal_texture_path": "textures/coffee_bag_normal.png",
+      "normal_texture_sha256": "9acbe0171f7cb8e47a3a2680a24ef169f2e64d765599f361f53bd6fbc6d75ee3",
+      "roughness_texture_path": "textures/coffee_bag_roughness.png",
+      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514",
+      "source_food_path": "source_food/roasted_coffee_scoop_v1.png",
+      "source_food_sha256": "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56"
+    },
+    {
+      "asset_key": "flour_sack",
+      "category": "bagged_goods",
+      "usd_path": "usd/flour_sack.usda",
+      "texture_path": "textures/flour_sack.png",
+      "dimensions_m": [
+        0.14,
+        0.085,
+        0.235
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "paper_sack",
+      "product_name": "BAKER FLOUR",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "paper_sack",
+      "assembly_parts": [
+        "paper_sack",
+        "pinched_top",
+        "folded_base",
+        "side_gussets"
+      ],
+      "geometry_signature": "59b961aa200c98481902c90421483100ed13c3236ee145d79147fc014c52d16c",
+      "material_classes": [
+        "printed_film",
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "a3bc902c3d6e8e7dbf8c51c20471be63d8519a8e6fd6c2a25be70e00d770cdb1",
+      "texture_sha256": "d00eea1f46a5128387157411349b82ee32756a6a4fda5f36f7fdde776a57c874",
+      "geometry_scope_sha256": "9dc584f6c9ad3361f06140133060bf843c96d45ac98776cbc744d08abae35d08",
+      "appearance_scope_sha256": "7a2e026956db97f1da7ad4168c5422439cc03bac7d6d47a30f27df8ab77a1f28",
+      "normal_texture_path": "textures/flour_sack_normal.png",
+      "normal_texture_sha256": "0dc9da97abd7da43a3eb7ce49c5f64d3619b60ccbc8decd2f9bc44fd5b104b88",
+      "roughness_texture_path": "textures/flour_sack_roughness.png",
+      "roughness_texture_sha256": "29084b9249d44584dd2a8c6b805c61fa8a47d76c36a7e70b288d7783d16e29ff"
+    },
+    {
+      "asset_key": "bread_loaf",
+      "category": "bakery",
+      "usd_path": "usd/bread_loaf.usda",
+      "texture_path": "textures/bread_loaf.png",
+      "dimensions_m": [
+        0.24,
+        0.105,
+        0.13
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bread_bag",
+      "product_name": "GRAIN LOAF",
+      "department": "bakery",
+      "intended_support": "shelf",
+      "assembly_profile": "bread_bag",
+      "assembly_parts": [
+        "continuous_scored_loaf",
+        "clear_sleeve",
+        "bottom_seal",
+        "twisted_neck",
+        "closure"
+      ],
+      "geometry_signature": "50b1634aed445f1c4845a9915823054b9bacf6267af81a7c9809f87ff26c8d33",
+      "material_classes": [
+        "printed_film",
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "5a657284ce4889cca63a84c0f8441ec4e10b2f33702681a111152386f8e31669",
+      "texture_sha256": "6315abe5b24d8cfd73a3f4473a8fae4e68ad7b6edf6d5a5b5d3a6d1166227cab",
+      "geometry_scope_sha256": "fa0b61284d344834c71de92ee491826507c259c84bf45e1a107b957a2bff9c71",
+      "appearance_scope_sha256": "8f31764cf84f9cd0ba5798f1d7718db22ec9a1ebd21a8823a3aea6a425ef8286",
+      "normal_texture_path": "textures/bread_loaf_normal.png",
+      "normal_texture_sha256": "a18aa561160342eac532db4873636e498a386b905ac414b115df5486aad81902",
+      "roughness_texture_path": "textures/bread_loaf_roughness.png",
+      "roughness_texture_sha256": "6d690f96f082b406ab7ae87d5f960e9d121f31f8583a0e5aaf2a59ae0bd6aae8"
+    },
+    {
+      "asset_key": "chips_bag",
+      "category": "snack_bag",
+      "usd_path": "usd/chips_bag.usda",
+      "texture_path": "textures/chips_bag.png",
+      "dimensions_m": [
+        0.155,
+        0.07,
+        0.255
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "pillow_bag",
+      "product_name": "KETTLE CHIPS",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "pillow_bag",
+      "assembly_parts": [
+        "inflated_pouch",
+        "top_crimp",
+        "bottom_crimp",
+        "side_seams"
+      ],
+      "geometry_signature": "254b0d9f95f74c377a53d3630de81b4ccff624b279bfbf4822089cabb3509aef",
+      "material_classes": [
+        "printed_film",
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "61fada9178c4520e8fd038a936b85473db0f898afa06e56f441a812e25c3c555",
+      "texture_sha256": "6976f6e499e57bf0127ebcb1e0fc60c94ed999c002a15e650c2ac6e11a7ade65",
+      "geometry_scope_sha256": "a59b0aa52e71dfd4a5da5290b5d31f794a59b48897314df3fb715e01e24d2f4c",
+      "appearance_scope_sha256": "d72450b7c74d38525c700b88c7715204c3c89e3a08010c12790d213ad4dd73e5",
+      "normal_texture_path": "textures/chips_bag_normal.png",
+      "normal_texture_sha256": "8a067aafe78714d3a012a4693ccc98fac265b266eaba52d76e0e8f1599439924",
+      "roughness_texture_path": "textures/chips_bag_roughness.png",
+      "roughness_texture_sha256": "ef4f904359b0008cb02cd0b325b85045ff8cf1ca138c80b5f1b6b8161922b706"
+    },
+    {
+      "asset_key": "banana_bunch",
+      "category": "fresh_produce",
+      "usd_path": "usd/banana_bunch.usda",
+      "texture_path": "textures/banana_bunch.png",
+      "dimensions_m": [
+        0.19,
+        0.105,
+        0.105
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "banana_bunch",
+      "product_name": "BANANA BUNCH",
+      "department": "produce",
+      "intended_support": "shelf",
+      "assembly_profile": "banana_bunch",
+      "assembly_parts": [
+        "five_continuous_tapered_fingers",
+        "crown",
+        "stem"
+      ],
+      "geometry_signature": "189720c02bb696b8b501f73f69eaeee664df5b990c270a7cba2a9e036bd6b6d2",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "10e120123da33862515bf917fafb4a5823f01907618fa4f9e16c2ad1d6b2917c",
+      "texture_sha256": "5dcd997ddd71dda5757021ce3a775d022f4e1bbfedecb360edf1a69925deca9b",
+      "geometry_scope_sha256": "cea649c3807903e9835406b7dd8e80bdf53c3216e9efe5c753a48fd40b327e2d",
+      "appearance_scope_sha256": "a146531bc4ff92731970bde23c5274022bc7c0bf858ede68d4c7f8f033364013"
+    },
+    {
+      "asset_key": "pear",
+      "category": "fresh_produce",
+      "usd_path": "usd/pear.usda",
+      "texture_path": "textures/pear.png",
+      "dimensions_m": [
+        0.095,
+        0.09,
+        0.13
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "pear",
+      "product_name": "GREEN PEAR",
+      "department": "produce",
+      "intended_support": "shelf",
+      "assembly_profile": "pear",
+      "assembly_parts": [
+        "bulb",
+        "tapered_top",
+        "stem",
+        "leaf"
+      ],
+      "geometry_signature": "c7ca050b833802e832b63cc8c8c74719a043a09f830f6a124d2e2498b77f00cf",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "e6fddf0d380d9f760d4b551c8ed649feb9e5cc80c9027deb873dfa82e8e4fa9a",
+      "texture_sha256": "6e066efca2961901ae767ccc494312d73a9ba395baa8029995b1e153ed843684",
+      "geometry_scope_sha256": "07aa68d69d525d9dba3713ece9d2d1e730c61937e33b9a970051539745ed5627",
+      "appearance_scope_sha256": "ec34df2a46deb69d65634293a05d6d48fc5bbb0b0fd7395d0d3ffb7a1cb2ec0f"
+    },
+    {
+      "asset_key": "broccoli",
+      "category": "fresh_produce",
+      "usd_path": "usd/broccoli.usda",
+      "texture_path": "textures/broccoli.png",
+      "dimensions_m": [
+        0.14,
+        0.12,
+        0.15
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "broccoli",
+      "product_name": "BROCCOLI",
+      "department": "produce",
+      "intended_support": "shelf",
+      "assembly_profile": "broccoli",
+      "assembly_parts": [
+        "stalk",
+        "five_tapered_branches",
+        "fifteen_irregular_floret_meshes"
+      ],
+      "geometry_signature": "aac00cebc3c23b5bd027d31f704f1853550802baa1107ed8a0a1dc53aadc1a1b",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "0380706d81f2d5ab2aa7e7a1ca155208af71288e52da30e348b91651c58fdebc",
+      "texture_sha256": "3c674bddedbef014d83f0b5a35cfda9fc98c8ab15d117781453f504eea784bac",
+      "geometry_scope_sha256": "024c6990fabe9f16d3d18b02b7a8da0af52f97743c81a136e00db52a4b9355c2",
+      "appearance_scope_sha256": "b1920518fe169ecbbf683465371db8afc7f414d81a684120d24c2cdbf5daf80b"
+    },
+    {
+      "asset_key": "carrot_bunch",
+      "category": "fresh_produce",
+      "usd_path": "usd/carrot_bunch.usda",
+      "texture_path": "textures/carrot_bunch.png",
+      "dimensions_m": [
+        0.14,
+        0.08,
+        0.22
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "carrot_bunch",
+      "product_name": "CARROT BUNCH",
+      "department": "produce",
+      "intended_support": "shelf",
+      "assembly_profile": "carrot_bunch",
+      "assembly_parts": [
+        "three_tapered_roots",
+        "binding_band",
+        "leaf_cluster"
+      ],
+      "geometry_signature": "16da6670a68722aa9c3d32e7072326d9dc6b37fc8410173548b81608e580cc11",
+      "material_classes": [
+        "produce_skin",
+        "plant_stem"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "064760b8188faa99968a830755af922677eb5cf78318512f2e420108639965b4",
+      "texture_sha256": "eda00e2d20d27d67eb3dd72585f1f2d951145b44458a11df48bdeb05f6c75545",
+      "geometry_scope_sha256": "1d288696e6f31cd46b588712fbbc1d9da855e1d5907041b92d850e79c132eeba",
+      "appearance_scope_sha256": "3dfebc438221bef56ff20b82f7373272bd87a08f224b53c6724f41e09c99c0c5"
+    },
+    {
+      "asset_key": "jam_jar",
+      "category": "jars",
+      "usd_path": "usd/jam_jar.usda",
+      "texture_path": "textures/jam_jar.png",
+      "dimensions_m": [
+        0.085,
+        0.085,
+        0.12
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "jam_jar",
+      "product_name": "BERRY JAM",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "jam_jar",
+      "assembly_parts": [
+        "faceted_glass",
+        "fruit_fill",
+        "twist_lid",
+        "neck_label"
+      ],
+      "geometry_signature": "67a6bb22be03610fd5f6657d2f5f8f11d74dbaf4ae6782572d2e0b2e46d36a06",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "4ea64e93c9055eb1ab24f0ea05cfe1bcd20b7a8df15879587198f99254028cb0",
+      "texture_sha256": "f90374ee00682c978d70c990cc2d9b1d14a0244256f5296e794af83e3e4d2a83",
+      "geometry_scope_sha256": "0d3849e60deb855d55e29802848221dc9c172031591165c9c52c66f9fb57de2f",
+      "appearance_scope_sha256": "626f45e35d306ac321155c5fe5df20e3d91a47e416529c6e81235e022230a098",
+      "normal_texture_path": "textures/jam_jar_normal.png",
+      "normal_texture_sha256": "9d410aa79d9eaceb165df024cce29a44139ab3dc669aa8af868a48532dbc4488",
+      "roughness_texture_path": "textures/jam_jar_roughness.png",
+      "roughness_texture_sha256": "aa76e885ef377becb95187b36ec5ee2342d8d0f37521de11a6703512fd984afd"
+    },
+    {
+      "asset_key": "spice_jar",
+      "category": "jars",
+      "usd_path": "usd/spice_jar.usda",
+      "texture_path": "textures/spice_jar.png",
+      "dimensions_m": [
+        0.055,
+        0.055,
+        0.12
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "spice_jar",
+      "product_name": "SMOKED PAPRIKA",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "spice_jar",
+      "assembly_parts": [
+        "small_jar",
+        "shaker_insert",
+        "ribbed_cap"
+      ],
+      "geometry_signature": "ed69fb3f5121af66709c91ec829724d4f2210bd3602f56b55d9d40c7772c705d",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "ce078c599b56c187f9f3643d1d92625c520ad3755debcbcf9fa0540db4d47cb7",
+      "texture_sha256": "a716755d2998ddf837de0cdae9f2632566ac7e6a1b286e72f16c37926dff0577",
+      "geometry_scope_sha256": "9445521754b61847d4173f7ab59641c4fb20b9992a0bf7abb567d9ffeb68c32a",
+      "appearance_scope_sha256": "8079baa2742c30aee95ec2acf8efc0732b4d37b658bcbd3a27c256992c086daa",
+      "normal_texture_path": "textures/spice_jar_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/spice_jar_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
+    },
+    {
+      "asset_key": "peanut_jar",
+      "category": "jars",
+      "usd_path": "usd/peanut_jar.usda",
+      "texture_path": "textures/peanut_jar.png",
+      "dimensions_m": [
+        0.12,
+        0.1,
+        0.16
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "wide_jar",
+      "product_name": "PEANUT SPREAD",
+      "department": "pantry",
+      "intended_support": "shelf",
+      "assembly_profile": "wide_jar",
+      "assembly_parts": [
+        "wide_body",
+        "shoulder",
+        "recessed_grips",
+        "broad_lid"
+      ],
+      "geometry_signature": "1cc0fe64d378f58e8aefd4b7fd636a9e4116b18eb825c519b7d09784e76880a0",
+      "material_classes": [
+        "printed_label",
+        "glass",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "397588c0960e9fa7ac95465138f257f67ec47dee8c380cc1cdc6da6a0c4f4526",
+      "texture_sha256": "78cfe6db74a1fe5a25f823acb6d48e3eab371a7af04086fb1c97c52ab1b2afc8",
+      "geometry_scope_sha256": "c1d125b817e4b0cc2daadae638dc97acc79e2524d500b8420d16f23b7bb5e11c",
+      "appearance_scope_sha256": "3c87c411078b1ce0f889a20381925d3b9ad6c0137f605a57bfad62b231390651",
+      "normal_texture_path": "textures/peanut_jar_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/peanut_jar_roughness.png",
+      "roughness_texture_sha256": "49e91e38d67fb27ff30f9b6add834015b69e0991ec0ab184bef131c5f2ab36ac"
+    },
+    {
+      "asset_key": "paper_towel",
+      "category": "household",
+      "usd_path": "usd/paper_towel.usda",
+      "texture_path": "textures/paper_towel.png",
+      "dimensions_m": [
+        0.145,
+        0.145,
+        0.28
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "paper_roll",
+      "product_name": "PAPER TOWELS",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "paper_roll",
+      "assembly_parts": [
+        "paper_cylinder",
+        "cardboard_core",
+        "embossed_bands",
+        "wrapper"
+      ],
+      "geometry_signature": "c6ed490a2d45e5c8e06e7422ab5e95b9317aed6876677eda63978befe655a032",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "8774403bcdbf00cfcd702483a82d0d04d6b3df07ab5524137ed88b1c7cd580f0",
+      "texture_sha256": "f35c251a7f650cce7cb0d0442f319c6d7bd85b37fcffaea6532745821b008cf5",
+      "geometry_scope_sha256": "0c51838912f3bbd43078e5002273a120c10fd874e899ef383b2b67e2cdbe968b",
+      "appearance_scope_sha256": "2c6870429b12b14eb39c32760f8abec759c7dff9b0e3c4363bc0e96e72332c3c",
+      "normal_texture_path": "textures/paper_towel_normal.png",
+      "normal_texture_sha256": "04bd85467313ecd99f22c4d0d386c90469a3ef701b03689ad8a62bf0a657cc8c",
+      "roughness_texture_path": "textures/paper_towel_roughness.png",
+      "roughness_texture_sha256": "58d77687a4c45d10e58f352485f1d71941c81c85f90f7cefcb5b644d3d1156e9"
+    },
+    {
+      "asset_key": "tissue_box",
+      "category": "household",
+      "usd_path": "usd/tissue_box.usda",
+      "texture_path": "textures/tissue_box.png",
+      "dimensions_m": [
+        0.225,
+        0.115,
+        0.095
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "tissue_box",
+      "product_name": "SOFT TISSUES",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "tissue_box",
+      "assembly_parts": [
+        "carton",
+        "oval_opening",
+        "raised_tissue"
+      ],
+      "geometry_signature": "36dc26530b75c534beb5a74d15cfb71aabb5b06b467caad5194f3d8e04acde33",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "f1582411ea947fd925685e89c6ecbd59c08805785429fc6633a9d904c8bd86bc",
+      "texture_sha256": "aee360af284e9e13564d98eb7fdc6785819d29c65ddf9c7b6fd78bcd4e8a1cfd",
+      "geometry_scope_sha256": "6bc85ab37ddce94817744d721ef35e453d98639c24891e461845779119dbabc8",
+      "appearance_scope_sha256": "2bba2beebfaf1be2973ceae3ede50b1bfed66f9a8fb156fb15bec4014148da8d",
+      "normal_texture_path": "textures/tissue_box_normal.png",
+      "normal_texture_sha256": "12782b770d8e65ecdc390637fb674b172a84eb2a4d3ea6004378a004e5bbe3dc",
+      "roughness_texture_path": "textures/tissue_box_roughness.png",
+      "roughness_texture_sha256": "39c92f74e43c2b4c40add13ac34d52057f2645ce1fc35094fe50554c22d8efb2"
+    },
+    {
+      "asset_key": "foil_box",
+      "category": "household",
+      "usd_path": "usd/foil_box.usda",
+      "texture_path": "textures/foil_box.png",
+      "dimensions_m": [
+        0.31,
+        0.055,
+        0.055
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "long_box",
+      "product_name": "KITCHEN FOIL",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "long_box",
+      "assembly_parts": [
+        "long_carton",
+        "hinged_flap",
+        "serrated_edge",
+        "foil_roll"
+      ],
+      "geometry_signature": "5e2f6fa70c601f4bf3c8d9ad553e305115fb72aa0da01e731da922adc6ca05fb",
+      "material_classes": [
+        "printed_label",
+        "metal",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "e6400a32edf43946487d58f6d5c062ac9e038eb6b438b9b7cd8f7e63ce10cdf0",
+      "texture_sha256": "74c12de3bae0100d9cc3a60cfe2f8fdfe57ad61a94fb204800e8de31946a4f85",
+      "geometry_scope_sha256": "89b3e9e99cacafde5161107b2144c2d62946278fbabf0349e6fc647e00ca05f0",
+      "appearance_scope_sha256": "6c62006785697be4231e610208078e4628ae59876bd5403b7d4fc360c94d291c",
+      "normal_texture_path": "textures/foil_box_normal.png",
+      "normal_texture_sha256": "d691056c3f6b4def0840f7beb6e573dfd2ec4a41c7aecd71dc9b615a21afd90e",
+      "roughness_texture_path": "textures/foil_box_roughness.png",
+      "roughness_texture_sha256": "9e8f907154ab9e83a4aaa4b1288a4ccdd8cb14ee4ba42987be2c8abef16821f5"
+    },
+    {
+      "asset_key": "sponge_pack",
+      "category": "household",
+      "usd_path": "usd/sponge_pack.usda",
+      "texture_path": "textures/sponge_pack.png",
+      "dimensions_m": [
+        0.15,
+        0.045,
+        0.19
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "blister_pack",
+      "product_name": "SCRUB SPONGES",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "blister_pack",
+      "assembly_parts": [
+        "card_backer",
+        "clear_blister",
+        "two_sponges",
+        "hang_slot"
+      ],
+      "geometry_signature": "de5527081ecc62cf49286218f8de2f788ae3713b610a66bf1fa1327b5bc2b4d9",
+      "material_classes": [
+        "printed_film",
+        "paper_or_product",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "b7e09c0c50d4d7d32b26d86bbd5980e210946aac2077a90e77295d361c553f32",
+      "texture_sha256": "21e7913d65722d615fa9544ad6306f0333dfac2a30e3e6dd2241fd90f77bdac8",
+      "geometry_scope_sha256": "a0895b41fe14442a0131356674a347977955f94db23d760c1fb4514737c2f885",
+      "appearance_scope_sha256": "93c7c089a49dd163dc787a4a717d70ead632130c44d35508ece2f871623fb8fe",
+      "normal_texture_path": "textures/sponge_pack_normal.png",
+      "normal_texture_sha256": "ce03420b54d30b9b1801e53fc83e2a3daff61595bbcc96f5d158800c9ea079de",
+      "roughness_texture_path": "textures/sponge_pack_roughness.png",
+      "roughness_texture_sha256": "a71b49d604e3b3848e69e112cc8df0c10b81e722ea004f3ae83aa237fd2e816c"
+    },
+    {
+      "asset_key": "trash_bags",
+      "category": "household",
+      "usd_path": "usd/trash_bags.usda",
+      "texture_path": "textures/trash_bags.png",
+      "dimensions_m": [
+        0.19,
+        0.105,
+        0.22
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "handled_box",
+      "product_name": "STRONG BAGS",
+      "department": "household",
+      "intended_support": "shelf",
+      "assembly_profile": "handled_box",
+      "assembly_parts": [
+        "carton",
+        "carry_handle",
+        "dispensing_slot"
+      ],
+      "geometry_signature": "c5115d4438d69f5c258ed4bd3c8a0663e4cea59ffba842c6ef2786ff9eb80c0d",
+      "material_classes": [
+        "printed_label",
+        "molded_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "b0c9ba4ed5b0600f84edcc4f7aae4affc5b39bfaa1bded7ca087f726c504c1fe",
+      "texture_sha256": "f977165a011866828d49b1bac8fdc30df01811bc9d30a21ca7445ae4c334a241",
+      "geometry_scope_sha256": "360b3e89bb640a4430e9ff199fefe005b8d54d3d15adee67580cc759649398d6",
+      "appearance_scope_sha256": "734f316b41d00e37c04541c59548580c05279ad00b64e6b63a083202e738f28f",
+      "normal_texture_path": "textures/trash_bags_normal.png",
+      "normal_texture_sha256": "22fc19c6d6e0219ed4f5f5691981565125c1cfc11ca90d2fa6826cd34dbd6e0b",
+      "roughness_texture_path": "textures/trash_bags_roughness.png",
+      "roughness_texture_sha256": "3e81aaa8b76cac67449d0f013f50efdc0e6d9c8027a7ec85452129e2fee57a61"
+    },
+    {
+      "asset_key": "angled_produce_bin",
+      "category": "produce_fixture",
+      "usd_path": "usd/angled_produce_bin.usda",
+      "texture_path": "textures/angled_produce_bin.png",
+      "dimensions_m": [
+        0.46,
+        0.36,
+        0.24
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "angled_bin",
+      "product_name": "PRODUCE BIN",
+      "department": "produce",
+      "intended_support": "shelf",
+      "assembly_profile": "angled_bin",
+      "assembly_parts": [
+        "sloped_base",
+        "low_front",
+        "high_back",
+        "side_cheeks",
+        "rails"
+      ],
+      "geometry_signature": "f1a595da5cdc3bf6ad9b3a1813b64e31d958c1a491a3f67aadbd0eb1f9b665cd",
+      "material_classes": [
+        "fixture_body",
+        "metal_or_clear_plastic"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "64831fe7647b011ec1afdddd1c0f44eb12facf6a55f45c75ede2a40129a2a8e2",
+      "texture_sha256": "983946d631fc81a0a4eb7756f6986dfc1c63806d0daa3312966da4067cd4e18a",
+      "geometry_scope_sha256": "e5852d4c6f29bdc42710548211b2a29d19474d699cdcef04612d647879beaeed",
+      "appearance_scope_sha256": "60d7b993c0bbd3eac08a6f7094e4c524beb1823d998b497e13aab24f1f4185fd"
+    },
+    {
+      "asset_key": "wicker_basket",
+      "category": "produce_fixture",
+      "usd_path": "usd/wicker_basket.usda",
+      "texture_path": "textures/wicker_basket.png",
+      "dimensions_m": [
+        0.42,
+        0.31,
+        0.2
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "wicker_basket",
+      "product_name": "MARKET BASKET",
+      "department": "produce",
+      "intended_support": "shelf",
+      "assembly_profile": "wicker_basket",
+      "assembly_parts": [
+        "woven_base",
+        "four_posts",
+        "sixteen_extruded_diagonal_ribbons",
+        "four_cross_slats",
+        "rim"
+      ],
+      "geometry_signature": "5ed97de29158e144c0a707121cfa997ab1625a690c9c6b471a3e02851c561ea6",
+      "material_classes": [
+        "fixture_body",
+        "metal_or_clear_plastic"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "b75c401a5b8252afc3c7a2858b4016d50a700868a43cffb5b422b3c08ddfb992",
+      "texture_sha256": "2bc18985eac12614a4e3ea9017795d1cb0d88d6fdc251be129d54e10da1a13ae",
+      "geometry_scope_sha256": "d759074f9e40e8543773f938a66af903f39532c375fc9430451a0dbf9c694ed9",
+      "appearance_scope_sha256": "83dba6a600b455766482af3f806bea91b94950bb566e4305aa52a8aeb8380363"
+    },
+    {
+      "asset_key": "shelf_divider",
+      "category": "shelf_fixture",
+      "usd_path": "usd/shelf_divider.usda",
+      "texture_path": "textures/shelf_divider.png",
+      "dimensions_m": [
+        0.012,
+        0.42,
+        0.14
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "shelf_divider",
+      "product_name": "SHELF DIVIDER",
+      "department": "fixtures",
+      "intended_support": "shelf",
+      "assembly_profile": "shelf_divider",
+      "assembly_parts": [
+        "base_clip",
+        "vertical_fin",
+        "front_stop"
+      ],
+      "geometry_signature": "8bd7a677acd8a2f5eb35f31f4ff1aae19f94039aa51656ee629e4d3d0825a8e8",
+      "material_classes": [
+        "fixture_body",
+        "metal_or_clear_plastic"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "544a01201f941b4dc18a8d777193ad61b8c587f2db90ed3681bc4aaba5cd653d",
+      "texture_sha256": "674f456031c92bc5ae2ff1ac50d82bd57ae44a99429ea0c8f58183eb39b5ba78",
+      "geometry_scope_sha256": "e1fa6a7e078504dbd40f115704d388d6e40a0e11aa964e34223aebb46190f07e",
+      "appearance_scope_sha256": "187411e15686201201950a323fc09e6778414f45500e0eba8ad588416828c22c"
+    },
+    {
+      "asset_key": "bottle_rack",
+      "category": "shelf_fixture",
+      "usd_path": "usd/bottle_rack.usda",
+      "texture_path": "textures/bottle_rack.png",
+      "dimensions_m": [
+        0.34,
+        0.42,
+        0.07
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "bottle_rack",
+      "product_name": "BOTTLE RACK",
+      "department": "fixtures",
+      "intended_support": "shelf",
+      "assembly_profile": "bottle_rack",
+      "assembly_parts": [
+        "base",
+        "four_channels",
+        "front_stops",
+        "rear_stop"
+      ],
+      "geometry_signature": "794ae174b74c6bb3d70e2b2be8691e3330ad2a5dca3407b29445ab496f174d90",
+      "material_classes": [
+        "fixture_body",
+        "metal_or_clear_plastic"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "4435400dc48dbe143af156ad7b2dde0c519cb8d6b18cbb1d3f1d5fbb41557b3c",
+      "texture_sha256": "217f30f0842141c40bd2b633d9d97f9a21d2029d65bc6e3c716cb5152443ac5b",
+      "geometry_scope_sha256": "e8b54132df17f0dfe85b111b51ebf2faf9562654b15ba59273726125e89eca35",
+      "appearance_scope_sha256": "e1b707abc7c96994efbb070f8edac92ba678871a3fb8f5d0cfcba7ae6d1fd85e"
+    },
+    {
+      "asset_key": "price_display",
+      "category": "shelf_fixture",
+      "usd_path": "usd/price_display.usda",
+      "texture_path": "textures/price_display.png",
+      "dimensions_m": [
+        0.26,
+        0.018,
+        0.065
+      ],
+      "local_front_axis": "+Y",
+      "model_type": "price_display",
+      "product_name": "PRICE DISPLAY",
+      "department": "fixtures",
+      "intended_support": "shelf_edge",
+      "assembly_profile": "price_display",
+      "assembly_parts": [
+        "rail_clip",
+        "eink_panel",
+        "bezel"
+      ],
+      "geometry_signature": "457049049a1b7bbb7a7b3ba5a410b2804e2b4969e3c083b6f359f733cabc75eb",
+      "material_classes": [
+        "fixture_body",
+        "metal_or_clear_plastic",
+        "normal_map",
+        "roughness_map"
+      ],
+      "introduced_in": "G02-A",
+      "usd_sha256": "e4e572a4224915d0b51fe6470861e3deb7ba20caae000ac27a3c2afd48e781db",
+      "texture_sha256": "3785683eaa51ecb824fb936274584328a6ee7b6c132816ec50fd4a5109a12718",
+      "geometry_scope_sha256": "f13958637b27f2eedcc4aa811b3ac340f6ada085c357be7d1d797be1773659a4",
+      "appearance_scope_sha256": "51fc296751721bb4fd970b571be96edd5d7c42559859153345d974ccc5f6f74c",
+      "normal_texture_path": "textures/price_display_normal.png",
+      "normal_texture_sha256": "32ef7568ca36c8282a2c03506bc97bfe2c919954f1369589244f9e497d6f1228",
+      "roughness_texture_path": "textures/price_display_roughness.png",
+      "roughness_texture_sha256": "959f03456a2210cec28e7fba71659dcaa2367672d725ee2544a81a131d91fc7a"
     }
   ]
 }

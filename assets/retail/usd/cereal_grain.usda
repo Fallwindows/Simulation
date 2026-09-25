@@ -21,10 +21,13 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(-0.05720, 0.05200, -0.12600), (0.05720, 0.05200, -0.12600), (0.05720, 0.05200, 0.12600), (-0.05720, 0.05200, 0.12600)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
-            normal3f[] normals = [(0, 1, 0)]
-            uniform token[] normals:interpolation = ["uniform"]
-            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+            # Winding and the authored +Y normal must agree; viewed from the
+            # local front (+Y), this order faces outward and preserves upright UVs.
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(0, 1, 0)] (
+                interpolation = "uniform"
+            )
+            texCoord2f[] primvars:st = [(0.217391, 0.040000), (0.500000, 0.040000), (0.500000, 0.960000), (0.217391, 0.960000)] (
                 interpolation = "vertex"
             )
             rel material:binding = </Asset/Looks/Front>
@@ -51,6 +54,36 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Metal>
             }
         }
+        def Mesh "HeroLeftPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.06600, -0.04400, -0.12600), (-0.06600, 0.04400, -0.12600), (-0.06600, 0.04400, 0.12600), (-0.06600, -0.04400, 0.12600)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.000000, 0.040000), (0.217391, 0.040000), (0.217391, 0.960000), (0.000000, 0.960000)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Front>
+        }
+        def Mesh "HeroRightPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.06600, 0.04400, -0.12600), (0.06600, -0.04400, -0.12600), (0.06600, -0.04400, 0.12600), (0.06600, 0.04400, 0.12600)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.500000, 0.040000), (0.717391, 0.040000), (0.717391, 0.960000), (0.500000, 0.960000)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Front>
+        }
+        def Mesh "HeroBackPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.05720, -0.05100, -0.12600), (0.05720, -0.05100, -0.12600), (0.05720, -0.05100, 0.12600), (-0.05720, -0.05100, 0.12600)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(1.000000, 0.040000), (0.717391, 0.040000), (0.717391, 0.960000), (1.000000, 0.960000)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Front>
+        }
     }
     def Scope "Looks" {
         def Material "Body" {
@@ -58,7 +91,7 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.45490, 0.64314, 0.30196)
-                float inputs:roughness = 0.6200
+                float inputs:roughness = 0.7400
                 float inputs:metallic = 0.0000
                 token outputs:surface
             }
@@ -74,14 +107,32 @@ def Xform "Asset" (
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/cereal_grain.png@
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
-                token outputs:rgb
+                float3 outputs:rgb
+            }
+            def Shader "NormalTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/cereal_grain_normal.png@
+                token inputs:sourceColorSpace = "raw"
+                float4 inputs:scale = (2, 2, 2, 1)
+                float4 inputs:bias = (-1, -1, -1, 0)
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "RoughnessTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/cereal_grain_roughness.png@
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float outputs:r
             }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.92549, 0.87843, 0.62353)
-                float inputs:roughness = 0.5400
+                float inputs:roughness = 0.6400
                 float inputs:metallic = 0.0000
                 color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
+                normal3f inputs:normal.connect = </Asset/Looks/Front/NormalTexture.outputs:rgb>
+                float inputs:roughness.connect = </Asset/Looks/Front/RoughnessTexture.outputs:r>
                 token outputs:surface
             }
         }

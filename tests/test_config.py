@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from simulator.config.loader import load_contracts, load_scenario
+from simulator.config.loader import _trajectory, load_contracts, load_scenario
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,3 +48,34 @@ class ConfigTests(unittest.TestCase):
         scenario = load_scenario(ROOT / "config/scenarios/baseline_straight.yaml")
         self.assertEqual(scenario.mapping["Reg/Strategy"], 1)
         self.assertFalse(scenario.mapping["subscribe_rgb"])
+
+    def test_look_beats_must_be_ordered_non_overlapping_and_inside_duration(self):
+        base = {
+            "name": "walking",
+            "duration_s": 20.5,
+            "speed_mps": 1.0,
+            "start_position_m": [1.5, 0.0, 0.0],
+            "sample_hz": 30.0,
+        }
+        valid = dict(base, look_beats=[{
+            "center_s": 9.0,
+            "rise_s": 3.0,
+            "fall_s": 2.0,
+            "yaw_offset_deg": -23.0,
+            "pitch_offset_deg": 10.0,
+            "lateral_offset_m": -0.08,
+            "framing_target": "products_and_price_rail",
+            "allow_foreground_support_crop": True,
+        }])
+        self.assertEqual(_trajectory(valid).look_beats[0].center_s, 9.0)
+        self.assertTrue(_trajectory(valid).look_beats[0].allow_foreground_support_crop)
+        with self.assertRaisesRegex(ValueError, "fit inside"):
+            _trajectory(dict(base, look_beats=[dict(valid["look_beats"][0], center_s=1.0, rise_s=2.0)]))
+        with self.assertRaisesRegex(ValueError, "non-overlapping"):
+            _trajectory(dict(base, look_beats=[valid["look_beats"][0], {
+                "center_s": 10.0, "rise_s": 2.0, "fall_s": 1.0,
+            }]))
+        with self.assertRaisesRegex(ValueError, "framing_target"):
+            _trajectory(dict(base, look_beats=[dict(valid["look_beats"][0], framing_target="plinth-ish")]))
+        with self.assertRaisesRegex(ValueError, "must be boolean"):
+            _trajectory(dict(base, look_beats=[dict(valid["look_beats"][0], allow_foreground_support_crop=1)]))

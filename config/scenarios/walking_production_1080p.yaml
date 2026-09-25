@@ -1,0 +1,8 @@
+{
+  "name": "walking_production_1080p",
+  "environment": "../environments/baseline_aisle.yaml",
+  "sensors": "../sensors/production_rgb_lidar_1080p.yaml",
+  "trajectory": "../trajectories/walking.yaml",
+  "mapping": "../mapping/rtabmap/params.yaml",
+  "seed": 1
+}

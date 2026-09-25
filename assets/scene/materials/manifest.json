@@ -1,0 +1,381 @@
+{
+  "color_space": {
+    "albedo": "sRGB",
+    "mask": "raw",
+    "normal": "raw",
+    "roughness": "raw"
+  },
+  "files": {
+    "case_frame_albedo.png": {
+      "channel_max": [
+        46,
+        49,
+        51
+      ],
+      "channel_min": [
+        38,
+        41,
+        43
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "da591683480d5eddc1b2e26cb4a2fdd1f34288267cf181e886c9a9a3cc121f53",
+      "width_px": 512
+    },
+    "case_frame_normal.png": {
+      "channel_max": [
+        134,
+        135,
+        255
+      ],
+      "channel_min": [
+        121,
+        119,
+        254
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "86d5555725e0ceea288bf498f3a56a948e696ace7ae51ca02fe55ebec4c3f1ff",
+      "width_px": 512
+    },
+    "case_frame_roughness.png": {
+      "channel_max": 99,
+      "channel_min": 82,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "8356d2cdaaf62e6b4dc80f84d4743c4c6e217e1a2890ee807f229159cd414db6",
+      "width_px": 512
+    },
+    "case_glass_normal.png": {
+      "channel_max": [
+        127,
+        127,
+        255
+      ],
+      "channel_min": [
+        127,
+        127,
+        254
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "f4edb4a19c5440308197b408cebe4f45ceb28ee1975cf93fed24820c7dd67891",
+      "width_px": 512
+    },
+    "case_glass_roughness.png": {
+      "channel_max": 39,
+      "channel_min": 18,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "beed5adc1162ee08f1489ff23e3122a79d4a73ddd61d5251090021ef803fe5bb",
+      "width_px": 512
+    },
+    "category_detail_albedo.png": {
+      "channel_max": [
+        25,
+        61,
+        74
+      ],
+      "channel_min": [
+        19,
+        54,
+        66
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "81ec3ee6fdb8d60138a4f3faf925449b6b4c4e4c36bf1aaf8042678999e4caea",
+      "width_px": 512
+    },
+    "category_detail_normal.png": {
+      "channel_max": [
+        133,
+        133,
+        255
+      ],
+      "channel_min": [
+        121,
+        121,
+        254
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "06237f11e492c319766889b6992ccceb88e44c4f4e5153b745f1db276a49305c",
+      "width_px": 512
+    },
+    "category_detail_roughness.png": {
+      "channel_max": 147,
+      "channel_min": 131,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "de0d5de254c3038d963b6c4611e1737e4c0e9576bef3bc3620404b2f77d83f74",
+      "width_px": 512
+    },
+    "floor_wear_mask.png": {
+      "channel_max": 212,
+      "channel_min": 46,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "5785411f4165fa562c024fc3b885a430fd9376479a5060ddbd9d052f7c16c00f",
+      "width_px": 512
+    },
+    "laminate_albedo.png": {
+      "channel_max": [
+        126,
+        73,
+        41
+      ],
+      "channel_min": [
+        83,
+        50,
+        28
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "9a2e7054f26806f0f659dc2f043c6cda75ecbebea61ed09be49fb1f903cad692",
+      "width_px": 512
+    },
+    "laminate_normal.png": {
+      "channel_max": [
+        137,
+        133,
+        255
+      ],
+      "channel_min": [
+        116,
+        122,
+        254
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "c4586e9785c4579b644e513f38543b2dd103149a44e1a8710200a0c02ba34401",
+      "width_px": 512
+    },
+    "laminate_roughness.png": {
+      "channel_max": 126,
+      "channel_min": 106,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "5923ab512510eda1f733857d1df0263ca0698ea99dfd7649e426c21df627a1a4",
+      "width_px": 512
+    },
+    "material_preview.png": {
+      "channel_max": [
+        224,
+        229,
+        255
+      ],
+      "channel_min": [
+        15,
+        18,
+        18
+      ],
+      "height_px": 1590,
+      "mode": "RGB",
+      "sha256": "70366061cc18ca7ad75907c48e653de08d2cc83d0489a8cf4fb00958565528f1",
+      "width_px": 608
+    },
+    "micro_normal.png": {
+      "channel_max": [
+        168,
+        165,
+        255
+      ],
+      "channel_min": [
+        86,
+        88,
+        247
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "e431d9dbe5c2a47949fba7116d9fe53d5c3440a9523ac5b4976173c97599fa2e",
+      "width_px": 512
+    },
+    "micro_roughness.png": {
+      "channel_max": 159,
+      "channel_min": 117,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "4671232d95f6ee696f568ada48dafd6d9dd1615c852290412081100ae88d2e12",
+      "width_px": 512
+    },
+    "powdercoat_albedo.png": {
+      "channel_max": [
+        123,
+        127,
+        130
+      ],
+      "channel_min": [
+        108,
+        112,
+        115
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "d1d245317d45a9e441b3a623957c195f04305612107f3e05f665a6334135b52e",
+      "width_px": 512
+    },
+    "powdercoat_cool_albedo.png": {
+      "channel_max": [
+        117,
+        127,
+        137
+      ],
+      "channel_min": [
+        102,
+        112,
+        122
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "65ce2ae2a5af556f3ffed72a1bbd07e4498380f69dcd69a1528beeb7594c077c",
+      "width_px": 512
+    },
+    "powdercoat_warm_albedo.png": {
+      "channel_max": [
+        129,
+        128,
+        125
+      ],
+      "channel_min": [
+        114,
+        113,
+        110
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "86eee32af1eeed711c223dc8717b567121bb84a78cbc097c600b854fa68cf126",
+      "width_px": 512
+    },
+    "price_rail_albedo.png": {
+      "channel_max": [
+        35,
+        37,
+        39
+      ],
+      "channel_min": [
+        27,
+        29,
+        30
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "65b794ca37a842e8fad1d1be85c4500743ddb5c77f04d970f796b6a0fff5196e",
+      "width_px": 512
+    },
+    "price_rail_normal.png": {
+      "channel_max": [
+        131,
+        131,
+        255
+      ],
+      "channel_min": [
+        123,
+        123,
+        254
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "b1db2ec5f66397c4eef9b1c9d05a3dd582cc1aa37a9c15d9254895ed772fdb49",
+      "width_px": 512
+    },
+    "price_rail_roughness.png": {
+      "channel_max": 108,
+      "channel_min": 79,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "657944c9a13c4592810397abd57e409267fe5c5e6c3a0ef9055b6803f46f5614",
+      "width_px": 512
+    },
+    "terrazzo_albedo.png": {
+      "channel_max": [
+        200,
+        195,
+        183
+      ],
+      "channel_min": [
+        84,
+        81,
+        75
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "36ce0f21a78c2eb5b55b5e46ab8fd65a3c33ed766ba4a385500aaf541e412d56",
+      "width_px": 512
+    },
+    "terrazzo_normal.png": {
+      "channel_max": [
+        156,
+        158,
+        255
+      ],
+      "channel_min": [
+        96,
+        98,
+        250
+      ],
+      "height_px": 512,
+      "mode": "RGB",
+      "sha256": "44df8c50c2252dbfce22d47223e818fd818f2c8f1bc868678b9b357bf8edd400",
+      "width_px": 512
+    },
+    "terrazzo_roughness.png": {
+      "channel_max": 182,
+      "channel_min": 141,
+      "height_px": 512,
+      "mode": "L",
+      "sha256": "f6cbc36209fdb35fe2b259b415c43589e2e6c2cf0cbcc6e5dc1bb5d938483d36",
+      "width_px": 512
+    }
+  },
+  "generator_version": 2,
+  "material_sets": {
+    "case_frame": {
+      "albedo": "case_frame_albedo.png",
+      "intent": "dark anodized or powder-coated refrigerated-case frames",
+      "normal": "case_frame_normal.png",
+      "roughness": "case_frame_roughness.png"
+    },
+    "case_glass": {
+      "intent": "refrigerated case glazing micro-surface; color and opacity remain shader parameters",
+      "normal": "case_glass_normal.png",
+      "roughness": "case_glass_roughness.png"
+    },
+    "category_detail": {
+      "albedo": "category_detail_albedo.png",
+      "intent": "printed category-panel stock with restrained fiber and ink variation",
+      "normal": "category_detail_normal.png",
+      "roughness": "category_detail_roughness.png"
+    },
+    "display_laminate": {
+      "albedo": "laminate_albedo.png",
+      "intent": "wood-look feature display laminate",
+      "normal": "laminate_normal.png",
+      "roughness": "laminate_roughness.png"
+    },
+    "floor_terrazzo": {
+      "albedo": "terrazzo_albedo.png",
+      "intent": "polished terrazzo or resilient aggregate aisle flooring",
+      "normal": "terrazzo_normal.png",
+      "roughness": "terrazzo_roughness.png",
+      "wear_mask": "floor_wear_mask.png"
+    },
+    "price_rail": {
+      "albedo": "price_rail_albedo.png",
+      "intent": "satin extruded shelf-edge ticket rail",
+      "normal": "price_rail_normal.png",
+      "roughness": "price_rail_roughness.png"
+    },
+    "shelf_powdercoat": {
+      "albedo": "powdercoat_albedo.png",
+      "albedo_cool": "powdercoat_cool_albedo.png",
+      "albedo_warm": "powdercoat_warm_albedo.png",
+      "intent": "powder-coated shelf decks, lips, and uprights",
+      "normal": "micro_normal.png",
+      "roughness": "micro_roughness.png"
+    }
+  },
+  "normal_convention": "OpenGL tangent space (+X right, +Y up, +Z outward)",
+  "schema_version": 1,
+  "seed": 20260925,
+  "tileable": true
+}

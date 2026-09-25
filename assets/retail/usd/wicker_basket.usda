@@ -1,0 +1,354 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    kind = "component"
+) {
+    def Xform "Geometry" {
+        def Xform "WovenBase" {
+            double3 xformOp:translate = (0.00000, 0.00000, -0.08750)
+            double3 xformOp:scale = (0.21000, 0.15500, 0.01250)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Mesh "FrontWeave0" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.202000, 0.148000, -0.039920), (-0.114400, 0.148000, 0.023920), (-0.114400, 0.148000, 0.039920), (-0.202000, 0.148000, -0.023920), (-0.202000, 0.142000, -0.039920), (-0.114400, 0.142000, 0.023920), (-0.114400, 0.142000, 0.039920), (-0.202000, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave0" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.202000, -0.142000, -0.039920), (-0.114400, -0.142000, 0.023920), (-0.114400, -0.142000, 0.039920), (-0.202000, -0.142000, -0.023920), (-0.202000, -0.148000, -0.039920), (-0.114400, -0.148000, 0.023920), (-0.114400, -0.148000, 0.039920), (-0.202000, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "FrontWeave1" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.202000, 0.154000, 0.023920), (-0.060114, 0.154000, -0.039920), (-0.060114, 0.154000, -0.023920), (-0.202000, 0.154000, 0.039920), (-0.202000, 0.148000, 0.023920), (-0.060114, 0.148000, -0.039920), (-0.060114, 0.148000, -0.023920), (-0.202000, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave1" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.202000, -0.148000, 0.023920), (-0.060114, -0.148000, -0.039920), (-0.060114, -0.148000, -0.023920), (-0.202000, -0.148000, 0.039920), (-0.202000, -0.154000, 0.023920), (-0.060114, -0.154000, -0.039920), (-0.060114, -0.154000, -0.023920), (-0.202000, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "FrontWeave2" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.157029, 0.148000, -0.039920), (-0.005829, 0.148000, 0.023920), (-0.005829, 0.148000, 0.039920), (-0.157029, 0.148000, -0.023920), (-0.157029, 0.142000, -0.039920), (-0.005829, 0.142000, 0.023920), (-0.005829, 0.142000, 0.039920), (-0.157029, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave2" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.157029, -0.142000, -0.039920), (-0.005829, -0.142000, 0.023920), (-0.005829, -0.142000, 0.039920), (-0.157029, -0.142000, -0.023920), (-0.157029, -0.148000, -0.039920), (-0.005829, -0.148000, 0.023920), (-0.005829, -0.148000, 0.039920), (-0.157029, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "FrontWeave3" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.102743, 0.154000, 0.023920), (0.048457, 0.154000, -0.039920), (0.048457, 0.154000, -0.023920), (-0.102743, 0.154000, 0.039920), (-0.102743, 0.148000, 0.023920), (0.048457, 0.148000, -0.039920), (0.048457, 0.148000, -0.023920), (-0.102743, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave3" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.102743, -0.148000, 0.023920), (0.048457, -0.148000, -0.039920), (0.048457, -0.148000, -0.023920), (-0.102743, -0.148000, 0.039920), (-0.102743, -0.154000, 0.023920), (0.048457, -0.154000, -0.039920), (0.048457, -0.154000, -0.023920), (-0.102743, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "FrontWeave4" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.048457, 0.148000, -0.039920), (0.102743, 0.148000, 0.023920), (0.102743, 0.148000, 0.039920), (-0.048457, 0.148000, -0.023920), (-0.048457, 0.142000, -0.039920), (0.102743, 0.142000, 0.023920), (0.102743, 0.142000, 0.039920), (-0.048457, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave4" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.048457, -0.142000, -0.039920), (0.102743, -0.142000, 0.023920), (0.102743, -0.142000, 0.039920), (-0.048457, -0.142000, -0.023920), (-0.048457, -0.148000, -0.039920), (0.102743, -0.148000, 0.023920), (0.102743, -0.148000, 0.039920), (-0.048457, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "FrontWeave5" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.005829, 0.154000, 0.023920), (0.157029, 0.154000, -0.039920), (0.157029, 0.154000, -0.023920), (0.005829, 0.154000, 0.039920), (0.005829, 0.148000, 0.023920), (0.157029, 0.148000, -0.039920), (0.157029, 0.148000, -0.023920), (0.005829, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave5" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.005829, -0.148000, 0.023920), (0.157029, -0.148000, -0.039920), (0.157029, -0.148000, -0.023920), (0.005829, -0.148000, 0.039920), (0.005829, -0.154000, 0.023920), (0.157029, -0.154000, -0.039920), (0.157029, -0.154000, -0.023920), (0.005829, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "FrontWeave6" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.060114, 0.148000, -0.039920), (0.202000, 0.148000, 0.023920), (0.202000, 0.148000, 0.039920), (0.060114, 0.148000, -0.023920), (0.060114, 0.142000, -0.039920), (0.202000, 0.142000, 0.023920), (0.202000, 0.142000, 0.039920), (0.060114, 0.142000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "BackWeave6" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.060114, -0.142000, -0.039920), (0.202000, -0.142000, 0.023920), (0.202000, -0.142000, 0.039920), (0.060114, -0.142000, -0.023920), (0.060114, -0.148000, -0.039920), (0.202000, -0.148000, 0.023920), (0.202000, -0.148000, 0.039920), (0.060114, -0.148000, -0.023920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "FrontWeave7" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.114400, 0.154000, 0.023920), (0.202000, 0.154000, -0.039920), (0.202000, 0.154000, -0.023920), (0.114400, 0.154000, 0.039920), (0.114400, 0.148000, 0.023920), (0.202000, 0.148000, -0.039920), (0.202000, 0.148000, -0.023920), (0.114400, 0.148000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Accent>
+        }
+        def Mesh "BackWeave7" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.114400, -0.148000, 0.023920), (0.202000, -0.148000, -0.039920), (0.202000, -0.148000, -0.023920), (0.114400, -0.148000, 0.039920), (0.114400, -0.154000, 0.023920), (0.202000, -0.154000, -0.039920), (0.202000, -0.154000, -0.023920), (0.114400, -0.154000, 0.039920)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 3, 7, 4, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Xform "CornerPost00" {
+            double3 xformOp:translate = (-0.19320, -0.13950, 0.00000)
+            double3 xformOp:scale = (0.00900, 0.00900, 0.08200)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Dark>
+            }
+        }
+        def Xform "CornerPost01" {
+            double3 xformOp:translate = (-0.19320, 0.13950, 0.00000)
+            double3 xformOp:scale = (0.00900, 0.00900, 0.08200)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Dark>
+            }
+        }
+        def Xform "CornerPost10" {
+            double3 xformOp:translate = (0.19320, -0.13950, 0.00000)
+            double3 xformOp:scale = (0.00900, 0.00900, 0.08200)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Dark>
+            }
+        }
+        def Xform "CornerPost11" {
+            double3 xformOp:translate = (0.19320, 0.13950, 0.00000)
+            double3 xformOp:scale = (0.00900, 0.00900, 0.08200)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Dark>
+            }
+        }
+        def Xform "CrossSlat0" {
+            double3 xformOp:translate = (0.00000, -0.13950, -0.03600)
+            double3 xformOp:scale = (0.21000, 0.00600, 0.01000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "CrossSlat1" {
+            double3 xformOp:translate = (0.00000, -0.04650, -0.01200)
+            double3 xformOp:scale = (0.21000, 0.00600, 0.01000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "CrossSlat2" {
+            double3 xformOp:translate = (0.00000, 0.04650, 0.01200)
+            double3 xformOp:scale = (0.21000, 0.00600, 0.01000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "CrossSlat3" {
+            double3 xformOp:translate = (0.00000, 0.13950, 0.03600)
+            double3 xformOp:scale = (0.21000, 0.00600, 0.01000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Rim" {
+            double3 xformOp:translate = (0.00000, 0.00000, 0.09400)
+            double3 xformOp:scale = (0.21000, 0.15500, 0.00600)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Dark>
+            }
+        }
+    }
+    def Scope "Looks" {
+        def Material "Body" {
+            token outputs:surface.connect = </Asset/Looks/Body/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.55686, 0.39608, 0.22745)
+                float inputs:roughness = 0.8200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Front" {
+            token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74902, 0.56863, 0.31765)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Metal" {
+            token outputs:surface.connect = </Asset/Looks/Metal/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.48000, 0.52000, 0.55000)
+                float inputs:roughness = 0.2800
+                float inputs:metallic = 0.7000
+                token outputs:surface
+            }
+        }
+        def Material "Stem" {
+            token outputs:surface.connect = </Asset/Looks/Stem/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.12000, 0.23000, 0.08000)
+                float inputs:roughness = 0.7200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Glass" {
+            token outputs:surface.connect = </Asset/Looks/Glass/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.55000, 0.68000, 0.58000)
+                float inputs:roughness = 0.1600
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.7200
+                token outputs:surface
+            }
+        }
+        def Material "Paper" {
+            token outputs:surface.connect = </Asset/Looks/Paper/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.82000, 0.79000, 0.69000)
+                float inputs:roughness = 0.7800
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Clear" {
+            token outputs:surface.connect = </Asset/Looks/Clear/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74000, 0.86000, 0.91000)
+                float inputs:roughness = 0.1200
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.3800
+                token outputs:surface
+            }
+        }
+        def Material "Dark" {
+            token outputs:surface.connect = </Asset/Looks/Dark/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
+                float inputs:roughness = 0.3800
+                float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+        def Material "Accent" {
+            token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74902, 0.56863, 0.31765)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Print" {
+            token outputs:surface.connect = </Asset/Looks/Print/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74902, 0.56863, 0.31765)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+    }
+}

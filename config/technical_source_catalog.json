@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "status": "reviewed_source_catalog",
+  "current_source_compatibility": {
+    "status": "historical_paired_diagnostic_available",
+    "new_goal_delivery": "blocked_pending_fresh_G02_paired_capture",
+    "reason": "The listed RGB and raw LiDAR are exactly co-captured and support diagnostic selective rendering, but they predate the G02 scene/assets and eased production trajectory. They must not be composited over new G02 RGB or accepted as the final technical delivery."
+  },
+  "sources": [
+    {
+      "source_id": "production-20260921-053814804-v1",
+      "capture_id": "20260921-053814804",
+      "presentation_classification": {"kind": "reviewed_production"},
+      "presentation_compatibility": {
+        "status": "historical_paired_diagnostic",
+        "delivery_eligible": false,
+        "scene_generation": "pre-G02",
+        "trajectory_generation": "pre-M1-linear",
+        "required_delivery_replacement": "fresh current-goal capture containing paired RGB, PointCloud2, scene manifest, and estimated trajectory"
+      },
+      "sensor_contract": {
+        "lidar_topic": "/sim/lidar/points",
+        "camera_info_topic": "/sim/camera/rgb/camera_info",
+        "lidar_frame_id": "lidar_link",
+        "camera_frame_id": "camera_optical_frame",
+        "configured_lidar_hz": 10.0,
+        "maximum_current_age_periods": 2.0,
+        "maximum_rgb_skew_ns": 17000001
+      },
+      "run_directory_name": "20260921-053814804",
+      "capture_sha256": "ab84ccc1f71790f896bab1375062ed1db9f40bf9a1531d582f7cd0e589121eba",
+      "producer_revisions": {
+        "capture": "c9bf2be24bed11f5581dcfff448a4f15efff91b7",
+        "slam": "7183a32215f4404677c8aadbaab32421f1d4c7b6",
+        "perception": "def059bbfb06449648f5a7411e36b333823d6c7c"
+      },
+      "producer_manifests": {
+        "capture": {"path": "capture/capture_manifest.json", "sha256": "3d82955332e326376b1f3e683a34ff589e4f0324cf17015682d336f282db3599"},
+        "slam": {"path": "slam/slam_manifest.json", "sha256": "bb79ed9155f40d27621512f6b3309aabe80aed1ab88e3783478aaf518c02ed3e"},
+        "perception": {"path": "perception/perception_manifest.json", "sha256": "0fef77178e555286b2570695df2674e2b833a15592c05f735834b3571c294aab"}
+      },
+      "artifacts": {
+        "map": {
+          "path": "slam/slam_map.ply", "sha256": "587043f3f84c7dfc4449379a2bd96ca801a63f2a12b432d4d3816c73c08b0452",
+          "version": "offline-slam-map/20260921-053814804/587043f3f84c7dfc"
+        },
+        "trajectory": {
+          "path": "slam/slam_poses.csv", "sha256": "46e144e0519b7320096ba2735cca1395068c116124e4ca58f5f750cd58205160",
+          "version": "offline-slam-trajectory/20260921-053814804/46e144e0519b7320"
+        },
+        "inventory": {
+          "path": "perception/estimated_inventory.csv", "sha256": "3247c4d5dbcab08f166c8da495243aca8723725bc89b457bfedc6e0948bb8cbe",
+          "version": "estimated-object-state/20260921-053814804/3247c4d5dbcab08f"
+        },
+        "raw_lidar_bag": {
+          "path": "capture/sensors_bag/sensors_bag_0.db3", "sha256": "722f92986b302bdf86399a3416f2d5a9582a7c6d119c330d6a93e10eaa7e565d",
+          "size_bytes": 15822295040, "version": "raw-lidar-bag/20260921-053814804/722f92986b302bdf"
+        },
+        "bag_metadata": {
+          "path": "capture/bag_metadata.json", "sha256": "e1021a49f40bbbfb1c803a4d14d2cd59be04c7d3522cc2f9acac924da7117eb9",
+          "size_bytes": 13491, "version": "bag-index/20260921-053814804/e1021a49f40bbbfb"
+        },
+        "camera_info": {
+          "path": "capture/camera_info.json", "sha256": "e877d381131fe2f03893d746af454f101911f606a4c3d06faced151609966158",
+          "size_bytes": 334, "version": "camera-info/20260921-053814804/e877d381131fe2f0"
+        },
+        "sensor_transforms": {
+          "path": "capture/sensor_transforms.json", "sha256": "b925f05007126b4a755ba6659ba2b8756247d1069feb67276fbe265baa2b430f",
+          "size_bytes": 1158, "version": "sensor-transforms/20260921-053814804/b925f05007126b4a"
+        },
+        "effective_config": {
+          "path": "capture/effective_config.json", "sha256": "7b79086ba036b99c754c5ee1e83627fa30b9ed18efdc14714c2c56e4c2889644",
+          "size_bytes": 2057, "version": "capture-config/20260921-053814804/7b79086ba036b99c"
+        },
+        "scene_manifest": {
+          "path": "capture/scene_manifest.json", "sha256": "72a52b8a0bd19e713c2b356e9b15ac4399b76cfbedca2b8aafa785c72fddd266",
+          "size_bytes": 586240, "version": "scene-manifest/20260921-053814804/72a52b8a0bd19e71"
+        },
+        "rgb_video": {
+          "path": "capture/rgb_camera.mp4", "sha256": "c453b46e40acd06928b384fd13a5a7822c16f46ca5f30b79fc829d1d8e05c703",
+          "size_bytes": 66163302, "version": "rgb-video/20260921-053814804/c453b46e40acd069"
+        },
+        "rgb_frames": {
+          "path": "capture/rgb_frames.jsonl", "sha256": "539977f7498135b5cfd06d36de7841aff932dc1e66511303f764b4e42306d0ea",
+          "size_bytes": 72887, "version": "rgb-frame-index/20260921-053814804/539977f7498135b5"
+        },
+        "frame_annotations": {
+          "path": "perception/frame_annotations.jsonl", "sha256": "daf86228830661854a342dde894cbbad9bf34c4141aacede16fc8298ea43c1c8",
+          "size_bytes": 22671888, "version": "estimated-regions/20260921-053814804/daf8622883066185"
+        }
+      },
+      "simulation_time": {"source": "slam/slam_poses.csv:timestamp_s", "start_s": 0.2, "end_s": 18.6},
+      "perception_contract": {
+        "allowed_depth_sources": ["lidar_projected_with_slam_pose"],
+        "estimated_inventory": "estimated_inventory.csv",
+        "slam_trajectory": "../slam/slam_poses.csv",
+        "legacy_capture_id_omitted": false,
+        "legacy_capture_manifest_v0": true,
+        "ground_truth_consumed": false
+      }
+    }
+  ]
+}

@@ -23,8 +23,8 @@ def Xform "Asset" (
         ) {
             int vertices = 12
             double radius = 0.01155
-            double height = 0.04200
-            double3 xformOp:translate = (0, 0, 0.11760)
+            double height = 0.02100
+            double3 xformOp:translate = (0, 0, 0.09450)
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/Stem>
         }
@@ -51,7 +51,7 @@ def Xform "Asset" (
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/orange.png@
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
-                token outputs:rgb
+                float3 outputs:rgb
             }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"

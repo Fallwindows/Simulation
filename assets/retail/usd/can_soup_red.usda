@@ -22,7 +22,7 @@ def Xform "Asset" (
             int vertices = 40
             double radius = 0.05335
             double height = 0.00455
-            double3 xformOp:translate = (0, 0, 0.06695)
+            double3 xformOp:translate = (0, 0, 0.06273)
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/Metal>
         }
@@ -32,7 +32,7 @@ def Xform "Asset" (
             int vertices = 40
             double radius = 0.05335
             double height = 0.00325
-            double3 xformOp:translate = (0, 0, -0.06695)
+            double3 xformOp:translate = (0, 0, -0.06338)
             uniform token[] xformOpOrder = ["xformOp:translate"]
             rel material:binding = </Asset/Looks/Metal>
         }
@@ -41,9 +41,12 @@ def Xform "Asset" (
         ) {
             point3f[] points = [(-0.04840, 0.05700, -0.03549), (0.04840, 0.05700, -0.03549), (0.04840, 0.05700, 0.03549), (-0.04840, 0.05700, 0.03549)]
             int[] faceVertexCounts = [4]
-            int[] faceVertexIndices = [0, 1, 2, 3]
-            normal3f[] normals = [(0, 1, 0)]
-            uniform token[] normals:interpolation = ["uniform"]
+            # Winding and the authored +Y normal must agree; viewed from the
+            # local front (+Y), this order faces outward and preserves upright UVs.
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(0, 1, 0)] (
+                interpolation = "uniform"
+            )
             texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
                 interpolation = "vertex"
             )
@@ -72,7 +75,7 @@ def Xform "Asset" (
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/can_soup_red.png@
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
-                token outputs:rgb
+                float3 outputs:rgb
             }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"

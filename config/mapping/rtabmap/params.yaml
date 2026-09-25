@@ -3,6 +3,7 @@
   "frame_id": "sensor_rig",
   "odom_frame_id": "odom",
   "map_frame_id": "map",
+  "slam_latch": false,
   "subscribe_scan_cloud": true,
   "subscribe_rgb": false,
   "subscribe_depth": false,

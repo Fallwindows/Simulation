@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import time
@@ -15,7 +16,170 @@ from pathlib import Path
 
 
 def _stamp(stamp) -> float:
+    if isinstance(stamp, (int, float)):
+        return float(stamp)
     return float(stamp.sec) + float(stamp.nanosec) / 1_000_000_000.0
+
+
+def _quat_normalize(q: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    norm = math.sqrt(sum(value * value for value in q))
+    if not math.isfinite(norm) or norm <= 1e-12:
+        raise ValueError("invalid transform quaternion")
+    return tuple(value / norm for value in q)
+
+
+def _quat_multiply(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return _quat_normalize((aw * bx + ax * bw + ay * bz - az * by,
+                           aw * by - ax * bz + ay * bw + az * bx,
+                           aw * bz + ax * by - ay * bx + az * bw,
+                           aw * bw - ax * bx - ay * by - az * bz))
+
+
+def _quat_rotate(q: tuple[float, float, float, float], p: tuple[float, float, float]) -> tuple[float, float, float]:
+    x, y, z, w = _quat_normalize(q)
+    px, py, pz = p
+    tx = 2.0 * (y * pz - z * py)
+    ty = 2.0 * (z * px - x * pz)
+    tz = 2.0 * (x * py - y * px)
+    return (px + w * tx + y * tz - z * ty,
+            py + w * ty + z * tx - x * tz,
+            pz + w * tz + x * ty - y * tx)
+
+
+def _quat_slerp(a: tuple[float, float, float, float], b: tuple[float, float, float, float], fraction: float) -> tuple[float, float, float, float]:
+    qa = _quat_normalize(a)
+    qb = _quat_normalize(b)
+    dot = sum(left * right for left, right in zip(qa, qb))
+    if dot < 0.0:
+        qb = tuple(-value for value in qb)
+        dot = -dot
+    dot = min(1.0, max(-1.0, dot))
+    if dot > 0.9995:
+        return _quat_normalize(tuple(left + fraction * (right - left) for left, right in zip(qa, qb)))
+    angle = math.acos(dot)
+    sine = math.sin(angle)
+    left_scale = math.sin((1.0 - fraction) * angle) / sine
+    right_scale = math.sin(fraction * angle) / sine
+    return _quat_normalize(tuple(left_scale * left + right_scale * right for left, right in zip(qa, qb)))
+
+
+def _interpolate_map_to_odom(rows: list[dict[str, object]], stamp_s: float) -> dict[str, object] | None:
+    if not math.isfinite(stamp_s):
+        return None
+    valid_rows = [
+        row for row in rows
+        if all(math.isfinite(float(row[key])) for key in ("timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw"))
+    ]
+    ordered = sorted(valid_rows, key=lambda row: float(row["timestamp_s"]))
+    for row in ordered:
+        if abs(float(row["timestamp_s"]) - stamp_s) <= 1e-9:
+            return row
+    before = next((row for row in reversed(ordered) if float(row["timestamp_s"]) < stamp_s), None)
+    after = next((row for row in ordered if float(row["timestamp_s"]) > stamp_s), None)
+    if before is None or after is None:
+        return None
+    t0, t1 = float(before["timestamp_s"]), float(after["timestamp_s"])
+    fraction = (stamp_s - t0) / (t1 - t0)
+    q = _quat_slerp(
+        tuple(float(before[key]) for key in ("qx", "qy", "qz", "qw")),
+        tuple(float(after[key]) for key in ("qx", "qy", "qz", "qw")),
+        fraction,
+    )
+    return {
+        "timestamp_s": stamp_s,
+        "x_m": float(before["x_m"]) + fraction * (float(after["x_m"]) - float(before["x_m"])),
+        "y_m": float(before["y_m"]) + fraction * (float(after["y_m"]) - float(before["y_m"])),
+        "z_m": float(before["z_m"]) + fraction * (float(after["z_m"]) - float(before["z_m"])),
+        "qx": q[0], "qy": q[1], "qz": q[2], "qw": q[3],
+        "parent_frame_id": "map", "child_frame_id": "odom",
+    }
+
+
+def _correct_odom_pose(odom: dict[str, float], transform: dict[str, object]) -> dict[str, object]:
+    if not all(math.isfinite(float(odom[key])) for key in ("timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw")):
+        raise ValueError("non-finite odometry pose")
+    if not all(math.isfinite(float(transform[key])) for key in ("timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw")):
+        raise ValueError("non-finite map-to-odom transform")
+    q_mo = _quat_normalize(tuple(float(transform[key]) for key in ("qx", "qy", "qz", "qw")))
+    q_odom = _quat_normalize(tuple(float(odom[key]) for key in ("qx", "qy", "qz", "qw")))
+    rotated = _quat_rotate(q_mo, (odom["x_m"], odom["y_m"], odom["z_m"]))
+    q_map_pose = _quat_multiply(q_mo, q_odom)
+    mapped_position = (float(transform["x_m"]) + rotated[0], float(transform["y_m"]) + rotated[1], float(transform["z_m"]) + rotated[2])
+    if not all(math.isfinite(value) for value in (*mapped_position, *q_map_pose)):
+        raise ValueError("map-frame odometry correction produced non-finite values")
+    return {
+        "timestamp_s": odom["timestamp_s"],
+        "x_m": mapped_position[0],
+        "y_m": mapped_position[1],
+        "z_m": mapped_position[2],
+        "qx": q_map_pose[0], "qy": q_map_pose[1], "qz": q_map_pose[2], "qw": q_map_pose[3],
+        "frame_id": "map",
+    }
+
+
+def _map_to_odom_from_node(odom_pose: dict[str, float], map_pose: dict[str, float]) -> dict[str, object]:
+    """Derive T_map_odom from same-node odom and optimized map poses."""
+    if not all(math.isfinite(float(pose[key])) for pose in (odom_pose, map_pose) for key in ("timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw")):
+        raise ValueError("non-finite node pose cannot define map-to-odom correction")
+    q_odom = _quat_normalize(tuple(float(odom_pose[key]) for key in ("qx", "qy", "qz", "qw")))
+    q_map = _quat_normalize(tuple(float(map_pose[key]) for key in ("qx", "qy", "qz", "qw")))
+    q_odom_inverse = (-q_odom[0], -q_odom[1], -q_odom[2], q_odom[3])
+    q_correction = _quat_multiply(q_map, q_odom_inverse)
+    rotated = _quat_rotate(q_correction, (float(odom_pose["x_m"]), float(odom_pose["y_m"]), float(odom_pose["z_m"])))
+    return {
+        "timestamp_s": float(odom_pose["timestamp_s"]),
+        "x_m": float(map_pose["x_m"]) - rotated[0],
+        "y_m": float(map_pose["y_m"]) - rotated[1],
+        "z_m": float(map_pose["z_m"]) - rotated[2],
+        "qx": q_correction[0], "qy": q_correction[1], "qz": q_correction[2], "qw": q_correction[3],
+        "parent_frame_id": "map", "child_frame_id": "odom",
+    }
+
+
+def _optimized_graph_version(data) -> str:
+    """Hash the optimized graph state independent of the publication stamp."""
+    from simulator.capture.manifest import sha256_json
+
+    graph = data.graph
+    ids = list(graph.poses_id)
+    poses = list(graph.poses)
+    nodes_by_id = {int(node.id): node for node in data.nodes}
+    if not ids or len(ids) != len(poses) or len(nodes_by_id) != len(data.nodes) or len(set(map(int, ids))) != len(ids) or any(int(node_id) not in nodes_by_id for node_id in ids):
+        raise ValueError("optimized graph has no one-to-one timestamped node set")
+    pose_rows = []
+    for node_id, pose in zip(ids, poses):
+        key = int(node_id)
+        node = nodes_by_id[key]
+        stamp = _stamp(node.stamp)
+        op, oq = pose.position, pose.orientation
+        np, nq = node.pose.position, node.pose.orientation
+        values = (stamp, float(op.x), float(op.y), float(op.z), float(oq.x), float(oq.y), float(oq.z), float(oq.w), float(np.x), float(np.y), float(np.z), float(nq.x), float(nq.y), float(nq.z), float(nq.w))
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("optimized graph version contains non-finite node values")
+        pose_rows.append({"node_id": key, "timestamp_s": stamp, "optimized_pose": list(values[1:8]), "odom_pose": list(values[8:])})
+    pose_rows.sort(key=lambda row: row["node_id"])
+    trans, rot = graph.map_to_odom.translation, graph.map_to_odom.rotation
+    transform = [float(trans.x), float(trans.y), float(trans.z), float(rot.x), float(rot.y), float(rot.z), float(rot.w)]
+    if not all(math.isfinite(value) for value in transform):
+        raise ValueError("optimized graph version contains a non-finite map-to-odom transform")
+    return sha256_json({"optimized_node_poses": pose_rows, "map_to_odom": transform})
+
+
+def _map_graph_fingerprint(graph) -> str:
+    from simulator.capture.manifest import sha256_json
+
+    poses = []
+    for node_id, pose in zip(graph.poses_id, graph.poses):
+        p, q = pose.position, pose.orientation
+        poses.append({"node_id": int(node_id), "pose": [float(p.x), float(p.y), float(p.z), float(q.x), float(q.y), float(q.z), float(q.w)]})
+    trans, rot = graph.map_to_odom.translation, graph.map_to_odom.rotation
+    transform = [float(trans.x), float(trans.y), float(trans.z), float(rot.x), float(rot.y), float(rot.z), float(rot.w)]
+    if not all(math.isfinite(value) for row in poses for value in row["pose"]) or not all(math.isfinite(value) for value in transform):
+        raise ValueError("map graph fingerprint contains non-finite values")
+    poses.sort(key=lambda row: row["node_id"])
+    return sha256_json({"poses": poses, "map_to_odom": transform})
 
 
 def _write_pcd(path: Path, points: list[tuple[float, float, float]]) -> None:
@@ -34,45 +198,120 @@ def _write_ply(path: Path, points: list[tuple[float, float, float]]) -> None:
 
 
 class SlamObserver:
-    def __init__(self, output_dir: Path, duration_s: float, startup_timeout_s: float):
+    def __init__(
+        self,
+        output_dir: Path,
+        target_clock_s: float,
+        startup_timeout_s: float,
+        expected_first_clock_s: float,
+        clock_start_tolerance_s: float,
+    ):
         import rclpy
         from nav_msgs.msg import Odometry
         from rosgraph_msgs.msg import Clock
         from rclpy.node import Node
+        from rtabmap_msgs.srv import PublishMap
+        from rtabmap_msgs.msg import MapData, MapGraph
         from sensor_msgs.msg import PointCloud2
         from sensor_msgs_py import point_cloud2
+        from tf2_msgs.msg import TFMessage
 
         self.rclpy = rclpy
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.duration_s = float(duration_s)
+        self.target_clock_s = float(target_clock_s)
+        self.expected_first_clock_s = float(expected_first_clock_s)
+        self.clock_start_tolerance_s = float(clock_start_tolerance_s)
+        if not math.isfinite(self.target_clock_s) or self.target_clock_s < 0.0:
+            raise ValueError("target clock must be a finite non-negative absolute simulation time")
+        if not math.isfinite(self.expected_first_clock_s) or self.expected_first_clock_s < 0.0:
+            raise ValueError("expected first clock must be a finite non-negative simulation time")
+        if self.target_clock_s < self.expected_first_clock_s:
+            raise ValueError("target clock must not precede the expected first clock")
+        if not math.isfinite(self.clock_start_tolerance_s) or self.clock_start_tolerance_s < 0.0:
+            raise ValueError("clock start tolerance must be finite and non-negative")
+        self.replay_span_s = self.target_clock_s - self.expected_first_clock_s
         self.startup_timeout_s = float(startup_timeout_s)
         self.started_wall = time.monotonic()
         self.first_clock_s: float | None = None
         self.last_clock_s: float | None = None
-        self.target_clock_s: float | None = None
-        self.done_wall: float | None = None
+        self.clock_start_covered = False
+        self.clock_regressions = 0
+        self.clock_target_reached = False
+        self.replay_complete_signal: Path | None = None
+        self.replay_complete_signal_observed = False
+        self.drain_complete = False
+        self.callback_generation = 0
+        self.drain_quiet_polls = 0
+        self.expected_sensor_last_stamp_s: float | None = None
+        self.sensor_scan_period_s = 0.0
+        self.last_odom_stamp_s: float | None = None
+        self.replay_drained = False
+        self.publish_map_acknowledged = False
+        self.final_map_span = False
+        # SQLite persistence is verified by the launcher only after RTAB-Map
+        # has stopped and checkpointed its live transaction.
+        self.mapper_database_span: bool | None = None
+        self.database_node_count: int | None = None
+        self.database_last_stamp_s: float | None = None
+        self.database_verification_stage = "pending_post_mapper_shutdown"
+        self.map_messages_before_publish = 0
+        self.close_timeout_s = 60.0
         self.odom_rows: list[dict[str, float]] = []
+        self.map_to_odom_rows: list[dict[str, object]] = []
+        self.map_pose_rows: list[dict[str, object]] = []
+        self.optimized_keyframe_rows: list[dict[str, object]] = []
+        self.pre_publish_graph_version: str | None = None
+        self.graph_pose_version: str | None = None
+        self.dense_pose_version: str | None = None
+        self.map_version: str | None = None
+        self.optimized_graph_last_stamp_s: float | None = None
+        self.optimized_pose_graph_complete = False
+        self.map_graph_matches_final_cloud = False
+        self.final_map_graph_stamp_s: float | None = None
+        self.final_cloud_stamp_s: float | None = None
+        self.final_map_graph_frame_id: str | None = None
         self.latest_map: list[tuple[float, float, float]] = []
         self.map_stamp_s: float | None = None
         self.map_messages = 0
+        self.map_graph_messages = 0
+        self.map_data_messages = 0
+        self.map_graph_before_publish = 0
+        self.map_data_before_publish = 0
+        self.map_graph_sample: dict[str, object] | None = None
+        self.map_data_sample: dict[str, object] | None = None
+        self.map_graph_message = None
+        self.map_data_message = None
+        self.map_graph_stamp_s: float | None = None
+        self.map_data_stamp_s: float | None = None
+        self.map_cloud_frame_id: str | None = None
         self.point_cloud2 = point_cloud2
         self.node = Node("grocery_sim_offline_slam_observer")
         self.node.create_subscription(Clock, "/clock", self._on_clock, 100)
         self.node.create_subscription(Odometry, "/slam/odom", self._on_odom, 50)
+        self.node.create_subscription(TFMessage, "/tf", self._on_tf, 50)
         self.node.create_subscription(PointCloud2, "/slam/map_cloud", self._on_map, 10)
+        self.node.create_subscription(MapGraph, "/mapGraph", self._on_map_graph, 10)
+        self.node.create_subscription(MapData, "/mapData", self._on_map_data, 10)
+        self.publish_map_client = self.node.create_client(PublishMap, "/rtabmap/publish_map")
+        self.publish_map_request_factory = PublishMap.Request
 
     def _on_clock(self, message) -> None:
         stamp_s = _stamp(message.clock)
-        self.last_clock_s = stamp_s if self.last_clock_s is None else max(self.last_clock_s, stamp_s)
+        self.callback_generation += 1
+        if self.last_clock_s is not None and stamp_s < self.last_clock_s - 1e-9:
+            self.clock_regressions += 1
+        self.last_clock_s = stamp_s
         if self.first_clock_s is None:
             self.first_clock_s = stamp_s
-            self.target_clock_s = self.first_clock_s + self.duration_s
-        if self.target_clock_s is not None and stamp_s >= self.target_clock_s and self.done_wall is None:
-            self.done_wall = time.monotonic() + 3.0
+            self.clock_start_covered = stamp_s <= self.expected_first_clock_s + self.clock_start_tolerance_s + 1e-3
+        if stamp_s >= self.target_clock_s - 1e-3:
+            self.clock_target_reached = True
 
     def _on_odom(self, message) -> None:
+        self.callback_generation += 1
         stamp = _stamp(message.header.stamp)
+        self.last_odom_stamp_s = stamp if self.last_odom_stamp_s is None else max(self.last_odom_stamp_s, stamp)
         q = (
             float(message.pose.pose.orientation.x),
             float(message.pose.pose.orientation.y),
@@ -89,7 +328,29 @@ class SlamObserver:
             "quaternion_valid": 1.0 if math.isfinite(norm) and norm > 1e-12 else 0.0,
         })
 
+    def _on_tf(self, message) -> None:
+        for transform in message.transforms:
+            if transform.header.frame_id.lstrip("/") != "map" or transform.child_frame_id.lstrip("/") != "odom":
+                continue
+            stamp = _stamp(transform.header.stamp)
+            translation = transform.transform.translation
+            rotation = transform.transform.rotation
+            if not all(math.isfinite(value) for value in (stamp, float(translation.x), float(translation.y), float(translation.z))):
+                continue
+            try:
+                q = _quat_normalize((float(rotation.x), float(rotation.y), float(rotation.z), float(rotation.w)))
+            except ValueError:
+                continue
+            self.map_to_odom_rows.append({
+                "timestamp_s": stamp,
+                "x_m": float(translation.x), "y_m": float(translation.y), "z_m": float(translation.z),
+                "qx": q[0], "qy": q[1], "qz": q[2], "qw": q[3],
+                "parent_frame_id": "map", "child_frame_id": "odom",
+            })
+            self.callback_generation += 1
+
     def _on_map(self, message) -> None:
+        self.callback_generation += 1
         fields = {"x", "y", "z"}
         names = {field.name for field in message.fields}
         if not fields.issubset(names):
@@ -99,33 +360,392 @@ class SlamObserver:
             for x, y, z in self.point_cloud2.read_points(message, field_names=("x", "y", "z"), skip_nans=True)
         ]
         self.map_stamp_s = _stamp(message.header.stamp)
+        self.map_cloud_frame_id = str(message.header.frame_id).lstrip("/")
         self.map_messages += 1
 
-    def spin_until_done(self) -> None:
+    def _on_map_graph(self, message) -> None:
+        self.callback_generation += 1
+        self.map_graph_messages += 1
+        self.map_graph_message = message
+        self.map_graph_stamp_s = _stamp(message.header.stamp)
+        self.final_map_graph_frame_id = str(message.header.frame_id).lstrip("/")
+
+    def _on_map_data(self, message) -> None:
+        self.callback_generation += 1
+        self.map_data_messages += 1
+        self.map_data_message = message
+        self.map_data_stamp_s = _stamp(message.header.stamp)
+
+    def _publish_final_map(self) -> None:
+        service_deadline = time.monotonic() + self.close_timeout_s
+        while self.rclpy.ok() and not self.publish_map_client.wait_for_service(timeout_sec=0.2):
+            if time.monotonic() >= service_deadline:
+                raise RuntimeError("RTAB-Map PublishMap service did not become ready")
+        if not self.rclpy.ok():
+            raise RuntimeError("ROS shut down before final map publication")
+        if self.map_data_message is None or self.map_graph_message is None or self.map_stamp_s is None:
+            raise RuntimeError("RTAB-Map did not provide a pre-request graph/cloud baseline")
+        if not (self.map_graph_stamp_s == self.map_data_stamp_s == self.map_stamp_s):
+            raise RuntimeError("pre-request graph, map data, and cloud do not identify one publication")
+        if self.final_map_graph_frame_id != "map" or self.map_cloud_frame_id != "map":
+            raise RuntimeError("pre-request graph and cloud must use the map frame")
+        self.pre_publish_graph_version = _optimized_graph_version(self.map_data_message)
+        service_deadline = time.monotonic() + self.close_timeout_s
+        request = self.publish_map_request_factory()
+        request.global_map = True
+        request.optimized = True
+        request.graph_only = False
+        self.map_messages_before_publish = self.map_messages
+        self.map_graph_before_publish = self.map_graph_messages
+        self.map_data_before_publish = self.map_data_messages
+        future = self.publish_map_client.call_async(request)
+        while self.rclpy.ok() and not future.done():
+            if time.monotonic() >= service_deadline:
+                raise RuntimeError("RTAB-Map PublishMap response timed out")
+            self.rclpy.spin_once(self.node, timeout_sec=0.1)
+        if not self.rclpy.ok():
+            raise RuntimeError("ROS shut down while waiting for final map publication")
+        response = future.result()
+        # PublishMap.srv has an empty response. A completed, exception-free
+        # future is its acknowledgement; the generated response has no success field.
+        if response is None:
+            raise RuntimeError("RTAB-Map PublishMap returned no response")
+        self.publish_map_acknowledged = True
+
+        post_ack_deadline = time.monotonic() + self.close_timeout_s
+        quiet_since: float | None = None
+        last_generation = self.callback_generation
         while self.rclpy.ok():
             now = time.monotonic()
-            if self.done_wall is not None and now >= self.done_wall:
-                return
+            self.final_map_span = (
+                self.map_messages > self.map_messages_before_publish
+                and self.map_stamp_s is not None
+                and self.expected_sensor_last_stamp_s is not None
+                and self.map_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
+            )
+            graph_triplet_ready = (
+                self.map_graph_messages > self.map_graph_before_publish
+                and self.map_data_messages > self.map_data_before_publish
+                and self.map_graph_stamp_s is not None
+                and self.map_data_stamp_s is not None
+                and self.map_stamp_s is not None
+                and self.map_graph_stamp_s == self.map_data_stamp_s == self.map_stamp_s
+                and self.final_map_graph_frame_id == "map"
+                and self.map_cloud_frame_id == "map"
+            )
+            if self.callback_generation != last_generation:
+                quiet_since = None
+                last_generation = self.callback_generation
+            elif self.publish_map_acknowledged and self.final_map_span and graph_triplet_ready:
+                if quiet_since is None:
+                    quiet_since = now
+                elif now - quiet_since >= 1.0:
+                    self.drain_complete = True
+                    self._capture_final_optimized_graph()
+                    self.map_graph_matches_final_cloud = self.graph_pose_version == self.pre_publish_graph_version
+                    if not self.map_graph_matches_final_cloud:
+                        self.map_pose_rows = []
+                        self.optimized_pose_graph_complete = False
+                        raise RuntimeError("optimized graph changed between pre-request baseline and final map publication")
+                    return
+            if now >= post_ack_deadline:
+                raise RuntimeError("final optimized map/graph span did not settle within the bounded wait")
+            self.rclpy.spin_once(self.node, timeout_sec=0.1)
+
+    def _capture_final_optimized_graph(self) -> None:
+        data = self.map_data_message
+        graph_message = self.map_graph_message
+        if data is None or graph_message is None:
+            raise RuntimeError("RTAB-Map did not publish post-request optimized graph and map data")
+        if self.map_graph_stamp_s != self.map_data_stamp_s or self.map_graph_stamp_s != self.map_stamp_s:
+            raise RuntimeError("RTAB-Map graph, map data, and cloud stamps do not identify one publication")
+        if str(getattr(data.header, "frame_id", "")).lstrip("/") != "map" or str(getattr(graph_message.header, "frame_id", "")).lstrip("/") != "map" or self.map_cloud_frame_id != "map":
+            raise RuntimeError("RTAB-Map graph, map data, and cloud must use the map frame")
+        if not self.latest_map or not math.isfinite(float(self.map_stamp_s)) or any(not all(math.isfinite(float(value)) for value in point) for point in self.latest_map):
+            raise RuntimeError("RTAB-Map final cloud is empty or contains non-finite points")
+        graph = getattr(data, "graph", None)
+        if graph is None or _map_graph_fingerprint(graph) != _map_graph_fingerprint(graph_message):
+            raise RuntimeError("/mapGraph and /mapData graph payloads differ despite matching publication stamps")
+        ids = [] if graph is None else list(getattr(graph, "poses_id", []))
+        poses = [] if graph is None else list(getattr(graph, "poses", []))
+        nodes = list(getattr(data, "nodes", []))
+        if not ids or len(ids) != len(poses):
+            raise RuntimeError("RTAB-Map published an empty or inconsistent optimized pose graph")
+        stamp_by_id = {int(node.id): _stamp(node.stamp) for node in nodes}
+        if len(stamp_by_id) != len(nodes):
+            raise RuntimeError("RTAB-Map published duplicate node identities")
+        graph_map_to_odom = getattr(graph, "map_to_odom", None)
+        if graph_map_to_odom is None:
+            raise RuntimeError("RTAB-Map graph omitted its map-to-odom transform")
+        map_translation = graph_map_to_odom.translation
+        map_rotation = graph_map_to_odom.rotation
+        map_q = _quat_normalize((float(map_rotation.x), float(map_rotation.y), float(map_rotation.z), float(map_rotation.w)))
+        map_to_odom_record = {
+            "x_m": float(map_translation.x), "y_m": float(map_translation.y), "z_m": float(map_translation.z),
+            "qx": map_q[0], "qy": map_q[1], "qz": map_q[2], "qw": map_q[3],
+        }
+        if not all(math.isfinite(float(value)) for value in map_to_odom_record.values()):
+            raise RuntimeError("RTAB-Map graph returned a non-finite map-to-odom transform")
+        optimized_rows: list[dict[str, object]] = []
+        optimized_keyframes: list[dict[str, object]] = []
+        correction_rows: list[dict[str, object]] = []
+        version_payload: list[dict[str, object]] = []
+        nodes_by_id = {int(node.id): node for node in nodes}
+        for node_id, pose in zip(ids, poses):
+            key = int(node_id)
+            if key not in stamp_by_id:
+                raise RuntimeError(f"RTAB-Map optimized graph pose has no timestamped node: {key}")
+            node = nodes_by_id[key]
+            stamp = stamp_by_id[key]
+            position = pose.position
+            orientation = pose.orientation
+            quaternion = _quat_normalize((float(orientation.x), float(orientation.y), float(orientation.z), float(orientation.w)))
+            values = (stamp, float(position.x), float(position.y), float(position.z), *quaternion)
+            if not all(math.isfinite(value) for value in values):
+                raise RuntimeError(f"RTAB-Map optimized graph contains non-finite pose data for node {key}")
+            row = {
+                "timestamp_s": stamp,
+                "x_m": float(position.x), "y_m": float(position.y), "z_m": float(position.z),
+                "qx": quaternion[0], "qy": quaternion[1], "qz": quaternion[2], "qw": quaternion[3],
+                "frame_id": "map",
+            }
+            optimized_rows.append(row)
+            optimized_keyframes.append({"node_id": key, **row})
+            node_pose = node.pose
+            node_position = node_pose.position
+            node_orientation = node_pose.orientation
+            raw_node_pose = {
+                "timestamp_s": stamp,
+                "x_m": float(node_position.x), "y_m": float(node_position.y), "z_m": float(node_position.z),
+                "qx": float(node_orientation.x), "qy": float(node_orientation.y), "qz": float(node_orientation.z), "qw": float(node_orientation.w),
+            }
+            correction = _map_to_odom_from_node(raw_node_pose, {**row, "timestamp_s": stamp})
+            correction_rows.append(correction)
+            optimized_keyframes[-1].update({
+                "odom_x_m": raw_node_pose["x_m"], "odom_y_m": raw_node_pose["y_m"], "odom_z_m": raw_node_pose["z_m"],
+                "odom_qx": raw_node_pose["qx"], "odom_qy": raw_node_pose["qy"], "odom_qz": raw_node_pose["qz"], "odom_qw": raw_node_pose["qw"],
+                "correction_x_m": correction["x_m"], "correction_y_m": correction["y_m"], "correction_z_m": correction["z_m"],
+                "correction_qx": correction["qx"], "correction_qy": correction["qy"], "correction_qz": correction["qz"], "correction_qw": correction["qw"],
+            })
+            version_payload.append({"node_id": key, **row})
+        optimized_rows.sort(key=lambda row: float(row["timestamp_s"]))
+        optimized_keyframes.sort(key=lambda row: float(row["timestamp_s"]))
+        correction_rows.sort(key=lambda row: float(row["timestamp_s"]))
+        if len({float(row["timestamp_s"]) for row in optimized_rows}) != len(optimized_rows):
+            raise RuntimeError("RTAB-Map optimized graph has duplicate node timestamps")
+        dense_map_rows: list[dict[str, object]] = []
+        ordered_odom_rows = sorted(self.odom_rows, key=lambda row: float(row["timestamp_s"]))
+        odom_stamps = [float(row["timestamp_s"]) for row in ordered_odom_rows]
+        if len(odom_stamps) != len(set(odom_stamps)):
+            raise RuntimeError("raw odometry contains duplicate timestamps")
+        for odom in ordered_odom_rows:
+            correction = _interpolate_map_to_odom(correction_rows, float(odom["timestamp_s"]))
+            if correction is None:
+                raise RuntimeError("final optimized graph does not bracket every raw odometry timestamp")
+            dense_map_rows.append(_correct_odom_pose(odom, correction))
+        if not dense_map_rows:
+            raise RuntimeError("final optimized graph cannot export an empty corrected odometry stream")
+        self.map_pose_rows = dense_map_rows
+        self.optimized_keyframe_rows = optimized_keyframes
+        version_payload.sort(key=lambda row: int(row["node_id"]))
+        self.graph_pose_version = _optimized_graph_version(data)
+        from simulator.capture.manifest import sha256_json
+        self.dense_pose_version = sha256_json({
+            "graph_pose_version": self.graph_pose_version,
+            "raw_odom_poses": [{**row, "frame_id": "odom"} for row in ordered_odom_rows],
+            "dense_map_poses": dense_map_rows,
+            "correction_policy": "derive optimized_node_pose * inverse(raw_node_odom_pose); linear translation + quaternion slerp between node timestamps; no extrapolation",
+        })
+        self.map_version = sha256_json({
+            "graph_pose_version": self.graph_pose_version,
+            "dense_pose_version": self.dense_pose_version,
+            "cloud_frame_id": self.map_cloud_frame_id,
+            "cloud_points": self.latest_map,
+        })
+        self.final_map_graph_stamp_s = self.map_graph_stamp_s
+        self.final_cloud_stamp_s = self.map_stamp_s
+        self.final_map_graph_frame_id = "map"
+        self.optimized_graph_last_stamp_s = max(float(row["timestamp_s"]) for row in optimized_rows)
+        self.optimized_pose_graph_complete = (
+            self.expected_sensor_last_stamp_s is not None
+            and self.optimized_graph_last_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
+        )
+        if not self.optimized_pose_graph_complete:
+            raise RuntimeError("RTAB-Map optimized graph does not cover the captured sensor input span")
+
+    def spin_until_done(self) -> None:
+        if self.replay_complete_signal is None:
+            raise RuntimeError("offline SLAM observer requires a replay-complete signal path")
+        signal_seen_wall: float | None = None
+        quiet_since: float | None = None
+        last_generation = self.callback_generation
+        wall_deadline = self.started_wall + max(60.0, self.replay_span_s * 20.0 + 30.0)
+        while self.rclpy.ok():
+            now = time.monotonic()
+            if self.replay_complete_signal.is_file():
+                if signal_seen_wall is None:
+                    signal_seen_wall = now
+                    self.replay_complete_signal_observed = True
+                if self.callback_generation == last_generation:
+                    if quiet_since is None:
+                        quiet_since = now
+                    self.drain_quiet_polls += 1
+                else:
+                    quiet_since = None
+                    self.drain_quiet_polls = 0
+                    last_generation = self.callback_generation
+                if now - signal_seen_wall >= 60.0:
+                    raise RuntimeError("offline replay callbacks did not settle within the bounded wait")
+                if quiet_since is not None and now - quiet_since >= 1.0:
+                    if not self.clock_start_covered:
+                        raise RuntimeError(
+                            f"bag replay observer missed the beginning of /clock: first {self.first_clock_s}, "
+                            f"expected no later than {self.expected_first_clock_s + self.clock_start_tolerance_s}"
+                        )
+                    if not self.clock_target_reached:
+                        raise RuntimeError(
+                            f"bag replay exited before /clock reached target {self.target_clock_s}; last clock was {self.last_clock_s}"
+                        )
+                    if self.clock_regressions:
+                        raise RuntimeError(f"bag replay /clock moved backwards {self.clock_regressions} time(s)")
+                    if (
+                        self.expected_sensor_last_stamp_s is None
+                        or self.last_odom_stamp_s is None
+                        or self.last_odom_stamp_s < self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
+                    ):
+                        raise RuntimeError(
+                            f"SLAM odometry did not process the captured sensor span: "
+                            f"last {self.last_odom_stamp_s}, expected {self.expected_sensor_last_stamp_s}"
+                        )
+                    self.replay_drained = True
+                    self._publish_final_map()
+                    return
             if self.first_clock_s is None and now - self.started_wall >= self.startup_timeout_s:
                 raise RuntimeError("offline SLAM observer did not observe /clock")
+            if now >= wall_deadline:
+                raise RuntimeError("offline SLAM replay did not complete within the bounded wall-time guard")
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def close(self) -> dict[str, object]:
-        with (self.output_dir / "slam_poses.csv").open("w", newline="", encoding="utf-8") as handle:
-            fields = ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "quaternion_valid"]
-            writer = csv.DictWriter(handle, fieldnames=fields)
+        odom_fields = ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "quaternion_valid", "frame_id"]
+        raw_rows = [{**row, "frame_id": "odom"} for row in sorted(self.odom_rows, key=lambda row: float(row["timestamp_s"]))]
+        with (self.output_dir / "slam_odom_poses.csv").open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=odom_fields)
             writer.writeheader()
-            writer.writerows(self.odom_rows)
+            writer.writerows(raw_rows)
+
+        transform_fields = ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "parent_frame_id", "child_frame_id"]
+        with (self.output_dir / "map_to_odom.csv").open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=transform_fields)
+            writer.writeheader()
+            writer.writerows(sorted(self.map_to_odom_rows, key=lambda row: float(row["timestamp_s"])))
+
+        map_fields = ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "frame_id"]
+        for filename in ("slam_map_poses.csv", "slam_poses.csv"):
+            with (self.output_dir / filename).open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=map_fields)
+                writer.writeheader()
+                writer.writerows(sorted(self.map_pose_rows, key=lambda row: float(row["timestamp_s"])))
+
+        keyframe_fields = [
+            "node_id", "timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "frame_id",
+            "odom_x_m", "odom_y_m", "odom_z_m", "odom_qx", "odom_qy", "odom_qz", "odom_qw",
+            "correction_x_m", "correction_y_m", "correction_z_m", "correction_qx", "correction_qy", "correction_qz", "correction_qw",
+        ]
+        with (self.output_dir / "slam_map_keyframes.csv").open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=keyframe_fields)
+            writer.writeheader()
+            writer.writerows(getattr(self, "optimized_keyframe_rows", []))
+
         _write_pcd(self.output_dir / "slam_map.pcd", self.latest_map)
         _write_ply(self.output_dir / "slam_map.ply", self.latest_map)
+        map_pose_correction_complete = bool(self.map_pose_rows) and self.optimized_pose_graph_complete
+        files = []
+        map_version = getattr(self, "map_version", None) if self.map_graph_matches_final_cloud else None
+        metadata = {
+            "slam_map_poses.csv": ("dense_corrected_trajectory", "map", True),
+            "slam_map_keyframes.csv": ("optimized_graph_keyframes", "map", True),
+            "slam_poses.csv": ("legacy_map_trajectory", "map", True),
+            "slam_odom_poses.csv": ("raw_odometry_diagnostic", "odom", False),
+            "map_to_odom.csv": ("incremental_tf_diagnostic", "map->odom", False),
+            "slam_map.pcd": ("final_optimized_cloud", "map", True),
+            "slam_map.ply": ("final_optimized_cloud", "map", True),
+        }
+        for name in metadata:
+            path = self.output_dir / name
+            role, frame_id, optimized = metadata[name]
+            files.append({
+                "path": name,
+                "role": role,
+                "size_bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "frame_id": frame_id,
+                "optimized": optimized,
+                "map_version": map_version if optimized else None,
+                "dense_pose_version": getattr(self, "dense_pose_version", None) if name == "slam_map_poses.csv" else None,
+                "schema_version": 2 if name == "slam_map_keyframes.csv" else 1,
+                "correction_policy": "derive optimized_node_pose * inverse(raw_node_odom_pose); linear translation + quaternion slerp between node timestamps; no extrapolation" if name in ("slam_map_poses.csv", "slam_map_keyframes.csv") else None,
+            })
+        processed_sensor_span = (
+            self.expected_sensor_last_stamp_s is not None
+            and self.last_odom_stamp_s is not None
+            and self.last_odom_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
+        )
+        live_complete = bool(
+            self.odom_rows and self.latest_map and self.replay_complete_signal_observed
+            and self.clock_start_covered and self.clock_target_reached and self.replay_drained
+            and self.publish_map_acknowledged and self.drain_complete and not self.clock_regressions
+            and processed_sensor_span and self.final_map_span and map_pose_correction_complete
+            and self.map_graph_matches_final_cloud
+        )
         result = {
-            "status": "complete" if self.odom_rows and self.latest_map else "incomplete",
+            "status": "pending_database_validation" if live_complete else "incomplete",
             "odom_sample_count": len(self.odom_rows),
+            "map_pose_frame_id": "map",
+            "raw_odom_frame_id": "odom",
+            "map_pose_sample_count": len(self.map_pose_rows),
+            "map_pose_correction_complete": map_pose_correction_complete,
+            "optimized_pose_graph_complete": self.optimized_pose_graph_complete,
+            "map_graph_matches_final_cloud": self.map_graph_matches_final_cloud,
+            "pre_publish_graph_version": getattr(self, "pre_publish_graph_version", None),
+            "pre_publish_graph_version_source": "paired pre-request /mapData graph after replay callback drain and before post-shutdown database validation",
+            "pose_source": "rtabmap_optimized_graph",
+            "graph_pose_version": self.graph_pose_version,
+            "dense_pose_version": getattr(self, "dense_pose_version", None),
+            "map_version": map_version,
+            "final_map_graph_stamp_s": getattr(self, "final_map_graph_stamp_s", None),
+            "final_cloud_stamp_s": getattr(self, "final_cloud_stamp_s", None),
+            "final_map_graph_frame_id": getattr(self, "final_map_graph_frame_id", None),
+            "optimized_graph_last_stamp_s": self.optimized_graph_last_stamp_s,
+            "map_to_odom_sample_count": len(self.map_to_odom_rows),
+            "files": files,
             "map_message_count": self.map_messages,
             "map_point_count": len(self.latest_map),
             "first_clock_s": self.first_clock_s,
             "last_clock_s": self.last_clock_s,
+            "target_clock_s": self.target_clock_s,
+            "replay_span_s": self.replay_span_s,
+            "expected_first_clock_s": self.expected_first_clock_s,
+            "clock_start_tolerance_s": self.clock_start_tolerance_s,
+            "clock_start_covered": self.clock_start_covered,
+            "clock_target_reached": self.clock_target_reached,
+            "clock_regressions": self.clock_regressions,
+            "replay_complete_signal_observed": self.replay_complete_signal_observed,
+            "drain_complete": self.drain_complete,
+            "drain_quiet_polls": self.drain_quiet_polls,
+            "replay_drained": self.replay_drained,
+            "publish_map_acknowledged": self.publish_map_acknowledged,
+            "map_messages_before_publish": self.map_messages_before_publish,
+            "final_map_span": self.final_map_span,
+            "mapper_database_span": self.mapper_database_span,
+            "database_node_count": self.database_node_count,
+            "database_last_stamp_s": self.database_last_stamp_s,
+            "database_verification_stage": self.database_verification_stage,
             "last_map_stamp_s": self.map_stamp_s,
+            "last_odom_stamp_s": self.last_odom_stamp_s,
+            "expected_sensor_last_stamp_s": self.expected_sensor_last_stamp_s,
+            "sensor_scan_period_s": self.sensor_scan_period_s,
+            "processed_sensor_span": processed_sensor_span,
             "fresh_odom": bool(self.odom_rows),
             "fresh_map": bool(self.latest_map),
             "ground_truth_subscribed": False,
@@ -138,22 +758,49 @@ class SlamObserver:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--duration-seconds", required=True, type=float)
+    parser.add_argument("--target-clock-seconds", required=True, type=float)
+    parser.add_argument("--expected-first-clock-seconds", required=True, type=float)
+    parser.add_argument("--clock-start-tolerance-seconds", required=True, type=float)
     parser.add_argument("--startup-timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--replay-complete-signal", required=True)
+    parser.add_argument("--expected-sensor-last-stamp-seconds", required=True, type=float)
+    parser.add_argument("--sensor-scan-period-seconds", required=True, type=float)
     args = parser.parse_args()
     import rclpy
 
     rclpy.init()
-    observer = SlamObserver(Path(args.output_dir), args.duration_seconds, args.startup_timeout_seconds)
+    observer = SlamObserver(
+        Path(args.output_dir),
+        args.target_clock_seconds,
+        args.startup_timeout_seconds,
+        args.expected_first_clock_seconds,
+        args.clock_start_tolerance_seconds,
+    )
+    observer.replay_complete_signal = Path(args.replay_complete_signal)
+    observer.expected_sensor_last_stamp_s = args.expected_sensor_last_stamp_seconds
+    observer.sensor_scan_period_s = args.sensor_scan_period_seconds
+    error: BaseException | None = None
+    result: dict[str, object] | None = None
     try:
         observer.spin_until_done()
-        result = observer.close()
-        print(json.dumps(result, indent=2))
-        if result["status"] != "complete":
-            raise RuntimeError(f"offline SLAM did not publish fresh odometry and map: {result}")
+    except BaseException as exc:
+        error = exc
     finally:
+        try:
+            result = observer.close()
+        except BaseException as exc:
+            if error is None:
+                error = exc
+            elif hasattr(error, "add_note"):
+                error.add_note(f"Offline observer close also failed: {exc}")
         if rclpy.ok():
             rclpy.shutdown()
+    if result is not None:
+        print(json.dumps(result, indent=2))
+    if error is not None:
+        raise error
+    if result is None or result["status"] != "pending_database_validation":
+        raise RuntimeError(f"offline SLAM did not complete replay, clock drain, odometry and map capture: {result}")
 
 
 if __name__ == "__main__":
