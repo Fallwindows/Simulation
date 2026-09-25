@@ -69,6 +69,7 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertEqual(len([name for name in names if name.startswith("end_case_stock_")]), 72)
         self.assertEqual(len([name for name in names if name.startswith("hero_stock_")]), 18)
         self.assertEqual(len([name for name in names if name.startswith("hero_focus_stock_")]), 4)
+        self.assertEqual(len([name for name in names if name.startswith("late_focus_stock_")]), 4)
         self.assertEqual(len([name for name in names if name.startswith("store_use_basket_")]), 2)
         self.assertIn("promo_market_sign", keys)
         self.assertIn("price_display", keys)
@@ -125,7 +126,7 @@ class SceneLookdevTests(unittest.TestCase):
                     return False
             return True
 
-        for prefix in ("hero_focus_stock_", "store_use_basket_"):
+        for prefix in ("hero_focus_stock_", "late_focus_stock_", "store_use_basket_"):
             group = [reference for reference in references if reference["name"].startswith(prefix)]
             for index, first in enumerate(group):
                 for second in group[index + 1 :]:
@@ -139,6 +140,7 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertGreaterEqual(len(references), 200)
         self.assertGreaterEqual(sum(reference["asset_key"] == "price_display" for reference in references), 30)
+        self.assertGreaterEqual(len({reference["asset_key"] for reference in references}), 35)
         self.assertTrue(all(reference["support_z_m"] > 0.0 for reference in references))
         self.assertTrue(all(reference["asset_key"] != "promo_market_sign" for reference in references))
 
@@ -184,25 +186,50 @@ class SceneLookdevTests(unittest.TestCase):
                 support_z + record.dimensions_m[2] * abs(scale[2]),
             )
 
-        box_obbs = []
+        context_box_obbs = []
         for box in spec["boxes"]:
             x, y, z = box["center_m"]
             width, depth, height = box["size_m"]
-            box_obbs.append(obb(box["name"], (x, y), width, depth, 0.0, z - height / 2.0, z + height / 2.0))
+            context_box_obbs.append(
+                obb(box["name"], (x, y), width, depth, 0.0, z - height / 2.0, z + height / 2.0)
+            )
+        box_obbs = list(context_box_obbs)
+        for primitive in layout.primitives:
+            x, y, z = primitive.center_m
+            width, depth, height = primitive.size_m
+            box_obbs.append(
+                obb(
+                    f"layout/{primitive.name}",
+                    (x, y),
+                    width,
+                    depth,
+                    0.0,
+                    z - height / 2.0,
+                    z + height / 2.0,
+                )
+            )
         for reference in spec["asset_references"]:
-            if not reference["name"].startswith(("hero_focus_", "store_use_basket_")):
+            if not reference["name"].startswith(("hero_focus_", "late_focus_", "store_use_basket_")):
                 continue
             candidate = reference_obb(reference)
             collisions = [box[0] for box in box_obbs if intersects(candidate, box)]
             self.assertEqual(collisions, [], f"{reference['name']} penetrates structural boxes {collisions}")
+            if reference["name"].startswith(("hero_focus_", "late_focus_")):
+                aisleward_edge_y = max(point[1] for point in candidate[2])
+                self.assertLessEqual(
+                    aisleward_edge_y,
+                    -0.42,
+                    f"{reference['name']} leaves insufficient clearance from the M1 center path",
+                )
 
         dense = runtime_dense_stock_references(layout, scenario.environment)
-        shelf_lights = [box for box in box_obbs if box[0].startswith("shelf_strip_")]
         for reference in dense:
             candidate = reference_obb(reference)
-            self.assertFalse(
-                any(intersects(candidate, light) for light in shelf_lights),
-                f"{reference['name']} penetrates a shelf light",
+            collisions = [box[0] for box in context_box_obbs if intersects(candidate, box)]
+            self.assertEqual(
+                collisions,
+                [],
+                f"{reference['name']} penetrates authored context boxes {collisions}",
             )
 
         existing_price_obbs = []
