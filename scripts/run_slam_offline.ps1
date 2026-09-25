@@ -17,11 +17,41 @@ if (-not $CaptureDir) { $CaptureDir = Join-Path (Resolve-Path $RunDir).Path "cap
 $captureDir = (Resolve-Path -LiteralPath $CaptureDir).Path
 if (-not $RunDir) { $RunDir = Split-Path -Parent $captureDir }
 $runDir = (Resolve-Path -LiteralPath $RunDir).Path
+function Assert-NoReparseDirectory {
+  param([string]$Path, [string]$Label)
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  $item = Get-Item -LiteralPath $Path -Force
+  if (-not $item.PSIsContainer) { throw "$Label is not a directory: $Path" }
+  if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw "$Label must not be a junction, symbolic link, or other reparse point: $Path"
+  }
+}
+function Assert-SafeDirectoryChain {
+  param([string]$RootDirectory, [string]$TargetDirectory)
+  $root = [System.IO.Path]::GetFullPath($RootDirectory).TrimEnd([char]92,[char]47)
+  $target = [System.IO.Path]::GetFullPath($TargetDirectory).TrimEnd([char]92,[char]47)
+  $relative = [System.IO.Path]::GetRelativePath($root, $target)
+  if (
+    [System.IO.Path]::IsPathRooted($relative) -or
+    $relative -eq ".." -or
+    $relative.StartsWith("..\", [System.StringComparison]::Ordinal) -or
+    $relative.StartsWith("../", [System.StringComparison]::Ordinal)
+  ) { throw "Resolved output directory escapes its intended root: $target" }
+  Assert-NoReparseDirectory -Path $root -Label "Run directory"
+  $current = $root
+  if ($relative -ne ".") {
+    foreach ($segment in @($relative -split '[\\/]' | Where-Object { $_ })) {
+      $current = Join-Path $current $segment
+      Assert-NoReparseDirectory -Path $current -Label "SLAM output path component"
+    }
+  }
+}
 function Resolve-SafeSlamDirectory {
   param([string]$RunDirectory, [string]$RequestedExperimentName)
   if ([string]::IsNullOrWhiteSpace($RequestedExperimentName)) { throw "ExperimentName must be a non-empty safe path segment." }
   $slamRoot = [System.IO.Path]::GetFullPath((Join-Path $RunDirectory "slam"))
   if ($RequestedExperimentName -ieq "offline_slam") {
+    Assert-SafeDirectoryChain -RootDirectory $RunDirectory -TargetDirectory $slamRoot
     return [pscustomobject]@{slam_root=$slamRoot; slam_directory=$slamRoot; experiment_name="offline_slam"}
   }
   if (
@@ -39,18 +69,22 @@ function Resolve-SafeSlamDirectory {
   if (-not $actualParent.Equals($expectedParent, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Resolved experiment directory escapes the intended run/slam root: $candidate"
   }
+  Assert-SafeDirectoryChain -RootDirectory $RunDirectory -TargetDirectory $candidate
   return [pscustomobject]@{slam_root=$slamRoot; slam_directory=$candidate; experiment_name=$RequestedExperimentName}
 }
 $slamSelection = Resolve-SafeSlamDirectory -RunDirectory $runDir -RequestedExperimentName $ExperimentName
 $slamDir = [string]$slamSelection.slam_directory
 $logsDir = Join-Path $runDir "logs"
 function Start-SlamAttempt {
-  param([string]$SlamDirectory)
+  param([string]$SlamDirectory, [string]$ContainmentRoot)
+  Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $SlamDirectory
   $attemptId = ([DateTime]::UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + [Guid]::NewGuid().ToString("N"))
   $attemptsDirectory = Join-Path $SlamDirectory "attempts"
   $attemptDirectory = Join-Path $attemptsDirectory $attemptId
   $priorDirectory = Join-Path $attemptDirectory "prior"
+  Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $attemptsDirectory
   New-Item -ItemType Directory -Force -Path $priorDirectory | Out-Null
+  Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $priorDirectory
 
   # Invalidate the old authority first. A failed rerun must never leave a
   # canonical complete manifest that describes an earlier attempt.
@@ -82,8 +116,11 @@ function Start-SlamAttempt {
     rotated_prior_artifacts=@($rotated)
   }
 }
+Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $logsDir
 New-Item -ItemType Directory -Force -Path $slamDir,$logsDir | Out-Null
-$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir
+Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $slamDir
+Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $logsDir
+$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir -ContainmentRoot $runDir
 
 $manifestPath = Join-Path $captureDir "capture_manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Capture manifest not found: $manifestPath" }

@@ -55,9 +55,12 @@ $arguments = @("-NoProfile","-File",$workerArgument)
 $deadline = if ($Mode -eq "ready") { [DateTime]::UtcNow.AddSeconds(2) } else { [DateTime]::UtcNow.AddSeconds(3) }
 $perProbeMs = if ($Mode -eq "ready") { 1000 } else { 2500 }
 $status = Wait-ForRosNodes -ExecutablePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList $arguments -RequiredNodeNames @("/icp_odometry","/rtabmap") -DeadlineUtc $deadline -PerProbeTimeoutMilliseconds $perProbeMs -PollIntervalMilliseconds 0 -DiagnosticLogPath $DiagnosticPath -Phase $Mode
-Start-Sleep -Milliseconds 300
 $recordedPids = if (Test-Path -LiteralPath $ChildPidPath) { @(Get-Content -LiteralPath $ChildPidPath | ForEach-Object { [int]$_ }) } else { @() }
-$leakedPids = @($recordedPids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+$cleanupDeadline = [DateTime]::UtcNow.AddSeconds(2)
+do {
+  $leakedPids = @($recordedPids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+  if ($leakedPids.Count -gt 0) { Start-Sleep -Milliseconds 100 }
+} while ($leakedPids.Count -gt 0 -and [DateTime]::UtcNow -lt $cleanupDeadline)
 [ordered]@{
   ready=$status.ready
   attempts=$status.attempts
@@ -113,12 +116,12 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
-foreach ($functionName in @("Start-SlamAttempt")) {
+foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Start-SlamAttempt")) {
   $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
   if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
   Invoke-Expression $definition[0].Extent.Text
 }
-$attempt = Start-SlamAttempt -SlamDirectory $SlamDirectory
+$attempt = Start-SlamAttempt -SlamDirectory $SlamDirectory -ContainmentRoot $SlamDirectory
 [ordered]@{
   attempt_id=$attempt.attempt_id
   attempt_directory=$attempt.attempt_directory
@@ -242,7 +245,7 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
-foreach ($functionName in @("Resolve-SafeSlamDirectory","Start-SlamAttempt")) {
+foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Resolve-SafeSlamDirectory","Start-SlamAttempt")) {
   $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
   if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
   Invoke-Expression $definition[0].Extent.Text
@@ -253,7 +256,7 @@ $failure = $null
 try {
   $selection = Resolve-SafeSlamDirectory -RunDirectory $RunDirectory -RequestedExperimentName $ExperimentName
   New-Item -ItemType Directory -Force -Path $selection.slam_directory | Out-Null
-  $attempt = Start-SlamAttempt -SlamDirectory $selection.slam_directory
+  $attempt = Start-SlamAttempt -SlamDirectory $selection.slam_directory -ContainmentRoot $RunDirectory
 } catch {
   $failure = $_.Exception.Message
 }
@@ -320,7 +323,7 @@ Wait-Process -Id $child.Id
             "hang",
         )
         self.assertFalse(result["ready"], "partial stdout from a timed-out probe must not satisfy readiness")
-        self.assertLess(elapsed, 5.0, "the absolute readiness deadline must bound a hanging probe")
+        self.assertLess(elapsed, 7.0, "the absolute readiness deadline and cleanup wait must bound a hanging probe")
         self.assertGreaterEqual(len(result["recorded_child_pids"]), 1, "fixture must spawn a real child")
         self.assertEqual(result["leaked_child_pids"], [])
         self.assertGreaterEqual(result["attempts"], 1)
@@ -494,6 +497,64 @@ Wait-Process -Id $child.Id
             self.assertIsNone(named["failure"])
             self.assertEqual(Path(named["slam_directory"]), (run / "slam" / "named experiment").resolve())
             self.assertIsNotNone(named["attempt_id"])
+
+    def test_reparse_redirects_are_rejected_before_attempt_writes(self):
+        for location in ("slam_root", "selected_experiment", "attempts_directory"):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                run = root / "run"
+                run.mkdir()
+                outside = root / f"outside-{location}"
+                outside.mkdir()
+                manifest = outside / "slam_manifest.json"
+                database = outside / "rtabmap.db"
+                manifest.write_text(json.dumps({"status": "complete", "sentinel": location}), encoding="utf-8")
+                database.write_bytes((location + "-database").encode("utf-8"))
+                sentinel_state = {
+                    path: (hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_mtime_ns)
+                    for path in (manifest, database)
+                }
+
+                if location == "slam_root":
+                    junction = run / "slam"
+                    experiment = "offline_slam"
+                elif location == "selected_experiment":
+                    (run / "slam").mkdir()
+                    junction = run / "slam" / "named"
+                    experiment = "named"
+                else:
+                    (run / "slam").mkdir()
+                    junction = run / "slam" / "attempts"
+                    experiment = "offline_slam"
+                environment = os.environ.copy()
+                environment["SLAM_TEST_JUNCTION"] = str(junction)
+                environment["SLAM_TEST_JUNCTION_TARGET"] = str(outside)
+                created = subprocess.run(
+                    [
+                        self.pwsh,
+                        "-NoProfile",
+                        "-Command",
+                        "New-Item -ItemType Junction -Path $env:SLAM_TEST_JUNCTION -Target $env:SLAM_TEST_JUNCTION_TARGET | Out-Null",
+                    ],
+                    cwd=ROOT,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+                self.assertTrue(os.path.isjunction(junction), "fixture must create a real Windows junction")
+                try:
+                    result = self._run_experiment_path_harness(run, experiment)
+                    self.assertIsNotNone(result["failure"])
+                    self.assertIn("reparse point", result["failure"])
+                    self.assertIsNone(result["attempt_id"])
+                    for path, (expected_hash, expected_mtime) in sentinel_state.items():
+                        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected_hash)
+                        self.assertEqual(path.stat().st_mtime_ns, expected_mtime)
+                    self.assertFalse((outside / "attempts").exists())
+                finally:
+                    os.rmdir(junction)
 
 
 if __name__ == "__main__":

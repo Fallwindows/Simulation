@@ -394,7 +394,7 @@ class CaptureArchitectureTests(unittest.TestCase):
         mapping = (ROOT / "scripts/run_slam_offline.ps1").read_text(encoding="utf-8")
         path_resolution = mapping.index("$slamSelection = Resolve-SafeSlamDirectory")
         directory_creation = mapping.index("New-Item -ItemType Directory -Force -Path $slamDir,$logsDir")
-        attempt_start = mapping.index("$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir")
+        attempt_start = mapping.index("$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir -ContainmentRoot $runDir")
         mapping_preflight = mapping.index("--validate-for-slam $captureDir")
         mapping_config_read = mapping.index('"bag_metadata.json"')
         self.assertLess(path_resolution, directory_creation)
