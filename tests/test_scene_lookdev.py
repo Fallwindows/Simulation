@@ -95,6 +95,8 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertEqual(len([name for name in names if name.startswith("hero_stock_")]), 18)
         self.assertEqual(len([name for name in names if name.startswith("hero_focus_stock_")]), 4)
         self.assertEqual(len([name for name in names if name.startswith("late_focus_stock_")]), 4)
+        self.assertEqual(len([name for name in names if name.startswith("hero_focus_price_")]), 4)
+        self.assertEqual(len([name for name in names if name.startswith("late_focus_price_")]), 4)
         self.assertEqual(len([name for name in names if name.startswith("store_use_basket_")]), 2)
         self.assertIn("promo_market_sign", keys)
         self.assertIn("price_display", keys)
@@ -107,6 +109,34 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertTrue(all(reference["scale_xyz"][0] < 0.0 for reference in signs))
         hero_stock = [reference for reference in references if reference["name"].startswith("hero_stock_")]
         self.assertGreaterEqual(min(reference["position_xy_m"][0] for reference in hero_stock), 12.7)
+        focus_stock = [
+            reference for reference in references if reference["name"].startswith("hero_focus_stock_")
+        ]
+        late_stock = [
+            reference for reference in references if reference["name"].startswith("late_focus_stock_")
+        ]
+        self.assertEqual(
+            {reference["asset_key"] for reference in focus_stock},
+            {"cereal_sunrise", "cereal_harvest", "cereal_grain", "cereal_berry"},
+        )
+        self.assertEqual(
+            {reference["asset_key"] for reference in late_stock},
+            {"coffee_bag", "tea_box", "coffee_canister", "snack_wafer"},
+        )
+        box_names = {box["name"] for box in boxes}
+        self.assertTrue({"hero_focus_price_rail", "late_focus_price_rail"} <= box_names)
+        for prefix in ("hero_focus", "late_focus"):
+            stock_y = sorted(
+                reference["position_xy_m"][1]
+                for reference in references
+                if reference["name"].startswith(f"{prefix}_stock_")
+            )
+            price_y = sorted(
+                reference["position_xy_m"][1]
+                for reference in references
+                if reference["name"].startswith(f"{prefix}_price_")
+            )
+            self.assertEqual(stock_y, price_y)
 
     def test_hero_focus_and_store_baskets_have_positive_3d_clearance(self):
         scenario = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
