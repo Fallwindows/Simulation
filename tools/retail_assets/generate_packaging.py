@@ -238,7 +238,7 @@ ITEM_ART_DIRECTIONS: dict[str, tuple[str, str, int]] = {
 }
 
 
-# These eight packages dominate the representative 9 s/17 s RGB views. They
+# These eleven packages dominate the representative 9 s/17 s RGB views. They
 # use a complete fictional wrap rather than a repeated square label: side copy,
 # a distinct back panel, and the food illustration all remain deterministic and
 # project-authored. The tuple is brand, flavor/variety copy, factual secondary
@@ -252,6 +252,9 @@ HERO_ART_DIRECTIONS: dict[str, tuple[str, str, str, str]] = {
     "cereal_morning": ("FIRST LIGHT", "FRUIT + GRAIN MIX", "RAISINS • OATS • SEEDS", "muesli"),
     "juice_citrus": ("SUN ORCHARD", "ORANGE + TANGERINE", "NOT FROM CONCENTRATE • 1 L", "citrus"),
     "coffee_bag": ("NIGHT OWL", "SUMATRA DARK ROAST", "WHOLE BEAN • ROAST 04", "coffee"),
+    "tea_box": ("GREENHOUSE TEA", "AMBER BREAKFAST TEA", "20 PYRAMID SACHETS • BLACK TEA", "tea"),
+    "coffee_canister": ("MORNING FORGE", "CLASSIC ESPRESSO", "ARABICA BLEND • ROAST 05", "coffee"),
+    "snack_wafer": ("CRISP HARBOR", "VANILLA CREAM WAFERS", "LIGHT + LAYERED • 6 PACKS", "wafer"),
 }
 
 HERO_FOOD_SOURCES: dict[str, tuple[str, str]] = {
@@ -268,8 +271,20 @@ HERO_FOOD_SOURCES: dict[str, tuple[str, str]] = {
         "ba636324e9fff4e56cc35738206fcb72f8f54e5d0ec76827ebafaf03cf1df86b",
     ),
     "coffee_bag": (
-        "roasted_coffee_scoop_v1.png",
-        "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56",
+        "coffee_scoop_beans_v2.png",
+        "cedf0147e54e312d083a9f3ddcbc4c90bcb429e6e60edb21129902e86ee11aeb",
+    ),
+    "tea_box": (
+        "black_tea_cup_leaves_v1.png",
+        "383a7daad52c141b1e7f8dea49a0379a9f78ad51904f1349389e2da0435d5b5f",
+    ),
+    "coffee_canister": (
+        "espresso_cherries_v1.png",
+        "dafa50aa3d242cd3036a92f19efd8b854bcaf620e4589630cf3268d6cb7ab239",
+    ),
+    "snack_wafer": (
+        "vanilla_wafer_stack_v1.png",
+        "0b41cfc9e5dce27ec8e468f1af3c13191fc31da35f3e641dfa754d3b894d8c42",
     ),
 }
 
@@ -2035,6 +2050,10 @@ def generate_library(root: Path | None = None) -> Path:
             "zlib_version": REQUIRED_ZLIB_VERSION,
             "font_sha256": {str(path): digest for path, digest in REQUIRED_FONTS.values()},
             "geometry_signature_excludes": ["asset_key", "product_name", "color", "accent", "texture"],
+        },
+        "source_food_provenance": {
+            "path": "source_food/hero_r4_provenance.json",
+            "sha256": _sha256(asset_root / "source_food" / "hero_r4_provenance.json"),
         },
         "assets": entries,
     }
