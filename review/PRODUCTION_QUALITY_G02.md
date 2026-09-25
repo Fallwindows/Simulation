@@ -2,6 +2,8 @@
 
 Status on 2026-09-25: **in progress**. This is a source and visual evidence checkpoint, not final goal acceptance. The owner goal requires at least 30 genuinely distinct new store items, materially more realistic RGB in actual video camera shots, selective and spatially correct LiDAR views, smooth motion throughout, preserved technical clarity, and rendered visual inspection.
 
+The later owner-requested `master` review checkpoint combines the isolated G02 trial with unfinished M5 camera capture validation, dynamic camera technical-consumer, SLAM replay-safety, and Hero R4 packaging commits plus Scene R13 and the standalone cart asset. Those WIP commits have not received fresh exact independent approval as an integrated source. The historical approved-source identity below remains evidence for its earlier scope; it does not approve the new master tree. No current-scene paired capture or final film has been delivered.
+
 ## Current approved source
 
 The independently approved combined source is now `1b2e1399ded4a59c4f9e54039167f15c272a2a05` (tree `c6449d439662096ffd2e0c5d722a0b19d3baebb8`) on the isolated `codex/production-quality-upgrade` branch. It combines motion M1, presentation port P1, historical scan diagnostic L1, retail assets R5, selective-LiDAR source P2 R4, film transitions P3, moving RGB post-roll P3 R4, and an independently approved earlier-sensor-replay disclosure. The prior c70 combined review passed **106 tests with two documented pinned-zlib skips**; the replay candidate had separate exact review and a fast-forward integration. The user's main checkout is untouched.

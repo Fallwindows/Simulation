@@ -1,11 +1,17 @@
 # Review index
 
+## Master review checkpoint (2026-09-25)
+
+- The owner requested a reviewable Git checkpoint on `master`. It combines the G02 trial, Scene R13, the standalone cart asset, and clearly labeled WIP checkpoints for M5 camera capture validation, the dynamic camera technical consumer, SLAM replay safety, and Hero R4 artwork.
+- The WIP checkpoints were interrupted before independent review and final integration validation. Their presence on `master` is for review, not acceptance.
+- The full current-scene RGB/LiDAR capture, completed offline SLAM and perception, seven technical clips, and 1,350-frame final film remain open. Generated runs and temporary review scratch are kept out of Git.
+
 ## Production-quality grocery demo (G02, in progress)
 
 - [Current G02 checkpoint](PRODUCTION_QUALITY_G02.md)
 - Authoritative progress ledger: [implementation journal](../IMPLEMENTATION_JOURNAL.md)
 - The isolated integration source has accepted asset, motion, scan-diagnostic, presentation-port, and transition slices. Scene visual realism and final selective-LiDAR delivery remain open.
-- No G02 production film, paired final sensor capture, merge to the user's main checkout, or release is claimed at this checkpoint.
+- This section records the earlier isolated checkpoint. No G02 production film, paired final sensor capture, or release is claimed.
 
 ## Forensic repair checkpoint
 
