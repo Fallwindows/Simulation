@@ -367,6 +367,34 @@ def capture_hash(manifest_without_hash: dict[str, Any]) -> str:
     return sha256_json(payload)
 
 
+def seal_capture_manifest(path: str | Path) -> dict[str, Any]:
+    """Seal a capture manifest with the validator's canonical hash routine."""
+
+    target = Path(path)
+    data = json.loads(target.read_text(encoding="utf-8-sig"))
+    if not isinstance(data, dict):
+        raise ValueError("capture manifest must contain a JSON object")
+    data["capture_sha256"] = capture_hash(data)
+    target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return data
+
+
+def _validate_capture_seal(data: dict[str, Any]) -> None:
+    declared = data.get("capture_sha256")
+    if not isinstance(declared, str) or not re.fullmatch(r"[0-9a-f]{64}", declared):
+        raise ValueError("capture manifest lacks a valid canonical capture_sha256 seal")
+    if capture_hash(data) != declared:
+        raise ValueError("capture manifest canonical capture_sha256 seal mismatch")
+
+
+def _is_json_number(value: Any) -> bool:
+    return type(value) in (int, float) and math.isfinite(float(value))
+
+
+def _is_json_int(value: Any) -> bool:
+    return type(value) is int
+
+
 def _load_manifest(capture_dir: Path, manifest: dict[str, Any] | None) -> dict[str, Any]:
     path = capture_dir / "capture_manifest.json"
     return manifest if manifest is not None else json.loads(path.read_text(encoding="utf-8-sig"))
@@ -396,11 +424,13 @@ def _verify_manifest_files(root: Path, data: dict[str, Any], required_paths: set
         if not path.is_file():
             raise ValueError(f"capture sensor input is missing: {relative}")
         entry = entries[relative]
-        try:
-            expected_size = int(entry["size_bytes"])
-            expected_sha256 = str(entry["sha256"]).lower()
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"capture sensor input checksum entry is invalid: {relative}") from exc
+        expected_size = entry.get("size_bytes")
+        expected_sha256 = entry.get("sha256")
+        if not _is_json_int(expected_size) or expected_size < 0 or not isinstance(expected_sha256, str):
+            raise ValueError(f"capture sensor input checksum entry is invalid: {relative}")
+        expected_sha256 = expected_sha256.lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise ValueError(f"capture sensor input checksum entry is invalid: {relative}")
         if path.stat().st_size != expected_size:
             raise ValueError(f"capture sensor input size mismatch: {relative}")
         if sha256_file(path) != expected_sha256:
@@ -438,13 +468,35 @@ def _load_json_object(path: Path, label: str) -> dict[str, Any]:
 def _dynamic_transform_descriptors(root: Path) -> list[tuple[dict[str, Any], str, Path]]:
     sensor_transforms = _load_json_object(root / "sensor_transforms.json", "sensor_transforms.json")
     raw_descriptors = sensor_transforms.get("dynamic_transform_artifacts")
-    if raw_descriptors is None:
-        return []
-    if not isinstance(raw_descriptors, list) or not raw_descriptors:
-        raise ValueError("sensor_transforms dynamic_transform_artifacts must be a non-empty list")
     static_transforms = sensor_transforms.get("transforms")
     if not isinstance(static_transforms, list):
         raise ValueError("sensor_transforms transforms must be a list")
+    static_edges = {
+        (item.get("parent"), item.get("child"))
+        for item in static_transforms
+        if isinstance(item, dict)
+    }
+    legacy_children = {
+        item.get("child")
+        for item in static_transforms
+        if isinstance(item, dict) and item.get("parent") is None
+    }
+    has_static_camera_route = (
+        ("sensor_rig", "camera_optical_frame") in static_edges
+        or (
+            ("sensor_rig", "camera_link") in static_edges
+            and ("camera_link", "camera_optical_frame") in static_edges
+        )
+        or "camera_link" in legacy_children
+    )
+    if raw_descriptors is None:
+        if not has_static_camera_route:
+            raise ValueError(
+                "sensor transforms lack both a complete static camera route and a dynamic camera descriptor"
+            )
+        return []
+    if not isinstance(raw_descriptors, list) or not raw_descriptors:
+        raise ValueError("sensor_transforms dynamic_transform_artifacts must be a non-empty list")
     if any(
         isinstance(item, dict)
         and item.get("parent") == "sensor_rig"
@@ -469,13 +521,17 @@ def _dynamic_transform_descriptors(root: Path) -> list[tuple[dict[str, Any], str
         relative, path = _canonical_capture_path(root, item.get("path"), f"{label}.path")
         if relative in seen_paths:
             raise ValueError(f"{label} duplicates a dynamic transform artifact path")
-        try:
-            size_bytes = int(item["size_bytes"])
-            sha256 = str(item["sha256"]).lower()
-            schema_version = int(item["schema_version"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"{label} has invalid size/hash/schema binding") from exc
-        if size_bytes < 1 or not re.fullmatch(r"[0-9a-f]{64}", sha256) or schema_version != 1:
+        size_bytes = item.get("size_bytes")
+        sha256 = item.get("sha256")
+        schema_version = item.get("schema_version")
+        if (
+            not _is_json_int(size_bytes)
+            or size_bytes < 1
+            or not isinstance(sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", sha256)
+            or not _is_json_int(schema_version)
+            or schema_version != 1
+        ):
             raise ValueError(f"{label} has invalid size/hash/schema binding")
         seen_edges.add(edge)
         seen_paths.add(relative)
@@ -485,8 +541,11 @@ def _dynamic_transform_descriptors(root: Path) -> list[tuple[dict[str, Any], str
 
 def _validate_camera_head_artifact(
     descriptor: dict[str, Any],
+    relative_path: str,
     path: Path,
-    rgb_frames_path: Path,
+    manifest: dict[str, Any],
+    effective_config: dict[str, Any],
+    rgb_stamps: list[float],
 ) -> dict[str, Any]:
     label = "camera head transform artifact"
     if path.stat().st_size != int(descriptor["size_bytes"]):
@@ -494,7 +553,11 @@ def _validate_camera_head_artifact(
     if sha256_file(path) != str(descriptor["sha256"]).lower():
         raise ValueError(f"{label} descriptor checksum mismatch")
     artifact = _load_json_object(path, label)
-    if artifact.get("schema") != "grocery.camera_head_transforms" or int(artifact.get("version", -1)) != 1:
+    if (
+        artifact.get("schema") != "grocery.camera_head_transforms"
+        or not _is_json_int(artifact.get("version"))
+        or artifact["version"] != 1
+    ):
         raise ValueError(f"{label} schema/version is invalid")
     if artifact.get("frames") != {
         "parent": "sensor_rig",
@@ -529,18 +592,49 @@ def _validate_camera_head_artifact(
         not isinstance(trajectory_source, dict)
         or not isinstance(trajectory_source.get("path"), str)
         or not trajectory_source["path"]
-        or not re.fullmatch(r"[0-9a-f]{64}", str(trajectory_source.get("sha256", "")))
-        or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_commit", "")))
-        or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_tree", "")))
+        or not isinstance(trajectory_source.get("sha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", trajectory_source["sha256"])
+        or not isinstance(source.get("trajectory_effective_sha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", source["trajectory_effective_sha256"])
+        or not isinstance(source.get("git_commit"), str)
+        or not re.fullmatch(r"[0-9a-f]{40}", source["git_commit"])
+        or not isinstance(source.get("git_tree"), str)
+        or not re.fullmatch(r"[0-9a-f]{40}", source["git_tree"])
     ):
         raise ValueError(f"{label} source header is invalid")
-    try:
-        sample_hz = float(artifact["sample_hz"])
-        duration_s = float(artifact["duration_s"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"{label} sampling header is invalid") from exc
-    if not math.isfinite(sample_hz) or sample_hz <= 0.0 or not math.isfinite(duration_s) or duration_s <= 0.0:
+    sample_hz = artifact.get("sample_hz")
+    duration_s = artifact.get("duration_s")
+    if not _is_json_number(sample_hz) or sample_hz <= 0.0 or not _is_json_number(duration_s) or duration_s <= 0.0:
         raise ValueError(f"{label} sampling header is invalid")
+    trajectory = effective_config.get("trajectory")
+    camera = effective_config.get("camera")
+    bindings = effective_config.get("source_bindings")
+    pose = camera.get("pose_in_rig") if isinstance(camera, dict) else None
+    calibrated_translation = pose.get("position_m") if isinstance(pose, dict) else None
+    if (
+        not isinstance(trajectory, dict)
+        or not isinstance(bindings, dict)
+        or not isinstance(calibrated_translation, list)
+        or len(calibrated_translation) != 3
+        or not all(_is_json_number(value) for value in calibrated_translation)
+    ):
+        raise ValueError(f"{label} effective configuration binding is invalid")
+    effective_sha = sha256_json(trajectory)
+    if (
+        source["trajectory_effective_sha256"] != effective_sha
+        or bindings.get("trajectory_effective_sha256") != effective_sha
+        or bindings.get("trajectory_config_sha256") != trajectory_source["sha256"]
+        or bindings.get("git_commit") != source["git_commit"]
+        or bindings.get("git_tree") != source["git_tree"]
+        or manifest.get("git_sha") != source["git_commit"]
+        or manifest.get("git_tree") != source["git_tree"]
+        or trajectory.get("sample_hz") != sample_hz
+        or trajectory.get("duration_s") != duration_s
+    ):
+        raise ValueError(f"{label} source/effective capture binding mismatch")
+    hashes = manifest.get("hashes")
+    if isinstance(hashes, dict) and hashes.get("git_sha") not in (None, source["git_commit"]):
+        raise ValueError(f"{label} source/effective capture binding mismatch")
     samples = artifact.get("samples")
     if not isinstance(samples, list) or not samples:
         raise ValueError(f"{label} samples are missing")
@@ -553,48 +647,138 @@ def _validate_camera_head_artifact(
     for index, (sample, expected_timestamp) in enumerate(zip(samples, expected_timestamps, strict=True)):
         if not isinstance(sample, dict):
             raise ValueError(f"{label} sample {index} is invalid")
-        try:
-            timestamp = float(sample["timestamp_s"])
-            translation = tuple(float(value) for value in sample["translation_m"])
-            rotation = tuple(float(value) for value in sample["rotation_xyzw"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"{label} sample {index} is invalid") from exc
+        timestamp = sample.get("timestamp_s")
+        translation_raw = sample.get("translation_m")
+        rotation_raw = sample.get("rotation_xyzw")
         if (
-            not math.isfinite(timestamp)
+            not _is_json_number(timestamp)
             or abs(timestamp - expected_timestamp) > 1e-9
-            or len(translation) != 3
-            or len(rotation) != 4
-            or not all(math.isfinite(value) for value in (*translation, *rotation))
-            or abs(math.hypot(*rotation) - 1.0) > 1e-6
+            or not isinstance(translation_raw, list)
+            or len(translation_raw) != 3
+            or not isinstance(rotation_raw, list)
+            or len(rotation_raw) != 4
+            or not all(_is_json_number(value) for value in (*translation_raw, *rotation_raw))
+            or any(abs(float(value) - float(expected)) > 1e-12 for value, expected in zip(translation_raw, calibrated_translation, strict=True))
+            or abs(math.hypot(*rotation_raw) - 1.0) > 1e-6
         ):
             raise ValueError(f"{label} sample {index} is invalid")
-        timestamps.append(timestamp)
-    rgb_stamps = []
-    try:
-        for line in rgb_frames_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            stamp = float(row["stamp_s"])
-            if not math.isfinite(stamp):
-                raise ValueError
-            rgb_stamps.append(stamp)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise ValueError("rgb_frames.jsonl has invalid timestamp rows") from exc
-    if not rgb_stamps:
-        raise ValueError("rgb_frames.jsonl has no observed timestamps")
+        timestamps.append(float(timestamp))
     deltas = [min(abs(stamp - sample_stamp) for sample_stamp in timestamps) for stamp in rgb_stamps]
     max_delta = max(deltas)
     if max_delta > 1e-6:
         raise ValueError("observed RGB timestamp has no exact validated camera head sample")
     return {
-        "artifact_path": path.name,
+        "artifact_path": relative_path,
         "artifact_sha256": sha256_file(path),
         "sample_count": len(samples),
         "observed_rgb_stamps": len(rgb_stamps),
         "matched_rgb_stamps": sum(delta <= 1e-6 for delta in deltas),
         "max_abs_delta_s": max_delta,
     }
+
+
+def _validate_rgb_index(root: Path, manifest: dict[str, Any], effective_config: dict[str, Any]) -> list[float]:
+    """Validate the observed RGB timeline before binding head poses to it."""
+
+    path = root / "rgb_frames.jsonl"
+    rows: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    raise ValueError
+                rows.append(row)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("rgb_frames.jsonl has invalid rows") from exc
+    if not rows:
+        raise ValueError("rgb_frames.jsonl has no observed timestamps")
+    stamps: list[float] = []
+    dimensions: tuple[int, int] | None = None
+    for expected_index, row in enumerate(rows):
+        index = row.get("frame_index")
+        stamp = row.get("stamp_s")
+        width = row.get("width")
+        height = row.get("height")
+        if (
+            not _is_json_int(index)
+            or index != expected_index
+            or not _is_json_number(stamp)
+            or not _is_json_int(width)
+            or width <= 0
+            or not _is_json_int(height)
+            or height <= 0
+            or row.get("frame_id", "camera_optical_frame") != "camera_optical_frame"
+        ):
+            raise ValueError(f"rgb_frames.jsonl row {expected_index} is invalid")
+        if stamps and float(stamp) <= stamps[-1]:
+            raise ValueError("rgb_frames.jsonl timestamps must be strictly increasing")
+        if dimensions is None:
+            dimensions = (width, height)
+        elif dimensions != (width, height):
+            raise ValueError("rgb_frames.jsonl dimensions are not constant")
+        stamps.append(float(stamp))
+
+    rgb = manifest.get("rgb")
+    if not isinstance(rgb, dict):
+        raise ValueError("capture manifest RGB receipt is missing")
+    for field, expected in (("frame_count", len(rows)), ("width_px", dimensions[0]), ("height_px", dimensions[1])):
+        if not _is_json_int(rgb.get(field)) or rgb[field] != expected:
+            raise ValueError(f"capture manifest RGB {field} does not match observed frames")
+    for field, expected in (("first_stamp_s", stamps[0]), ("last_stamp_s", stamps[-1])):
+        if not _is_json_number(rgb.get(field)) or abs(float(rgb[field]) - expected) > 1e-9:
+            raise ValueError(f"capture manifest RGB {field} does not match observed frames")
+    if not _is_json_number(rgb.get("fps")) or rgb["fps"] <= 0:
+        raise ValueError("capture manifest RGB fps is invalid")
+    if {
+        "video": rgb.get("video"),
+        "timestamp_index": rgb.get("timestamp_index"),
+        "camera_info": rgb.get("camera_info"),
+        "metadata": rgb.get("metadata"),
+    } != {
+        "video": "rgb_camera.mp4",
+        "timestamp_index": "rgb_frames.jsonl",
+        "camera_info": "camera_info.json",
+        "metadata": "rgb_video.json",
+    }:
+        raise ValueError("capture manifest RGB artifact paths are invalid")
+
+    video = _load_json_object(root / "rgb_video.json", "rgb_video.json")
+    camera_info = _load_json_object(root / "camera_info.json", "camera_info.json")
+    if video.get("status") != "complete":
+        raise ValueError("rgb_video.json is not complete")
+    for field, expected in (("frame_count", len(rows)), ("width", dimensions[0]), ("height", dimensions[1])):
+        if not _is_json_int(video.get(field)) or video[field] != expected:
+            raise ValueError(f"rgb_video.json {field} does not match observed frames")
+    if not _is_json_int(video.get("camera_info_count")) or video["camera_info_count"] != len(rows):
+        raise ValueError("rgb_video.json camera_info_count does not match observed frames")
+    for field, expected in (("width", dimensions[0]), ("height", dimensions[1])):
+        if not _is_json_int(camera_info.get(field)) or camera_info[field] != expected:
+            raise ValueError(f"camera_info.json {field} does not match observed frames")
+    if camera_info.get("frame_id") != "camera_optical_frame":
+        raise ValueError("camera_info.json frame_id is invalid")
+
+    camera = effective_config.get("camera")
+    if isinstance(camera, dict):
+        for field, expected in (("width_px", dimensions[0]), ("height_px", dimensions[1])):
+            if not _is_json_int(camera.get(field)) or camera[field] != expected:
+                raise ValueError(f"effective camera {field} does not match observed frames")
+    bag = manifest.get("bag")
+    counts = bag.get("counts") if isinstance(bag, dict) else None
+    if isinstance(counts, dict):
+        for topic in ("/sim/camera/rgb/image_raw", "/sim/camera/rgb/camera_info"):
+            if not _is_json_int(counts.get(topic)) or counts[topic] != len(rows):
+                raise ValueError(f"capture bag count does not match observed RGB frames: {topic}")
+    reconciliation = bag.get("rgb_reconciliation") if isinstance(bag, dict) else None
+    if isinstance(reconciliation, dict):
+        from simulator.capture.stamp_digest import stamp_sequence_sha256
+
+        for field in ("raw_count", "camera_info_count", "video_count"):
+            if not _is_json_int(reconciliation.get(field)) or reconciliation[field] != len(rows):
+                raise ValueError(f"capture RGB reconciliation {field} mismatch")
+        if reconciliation.get("stamp_sha256") != stamp_sequence_sha256(stamps):
+            raise ValueError("capture RGB reconciliation stamp hash mismatch")
+    return stamps
 
 
 def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -606,9 +790,10 @@ def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] 
 
     root = Path(capture_dir).resolve()
     data = _load_manifest(root, manifest)
+    _validate_capture_seal(data)
     if data.get("status") != "complete":
         raise ValueError("capture manifest is not complete")
-    if int(data.get("manifest_version", -1)) != CAPTURE_MANIFEST_VERSION:
+    if not _is_json_int(data.get("manifest_version")) or data["manifest_version"] != CAPTURE_MANIFEST_VERSION:
         raise ValueError("unsupported capture manifest version")
     missing = [topic for topic in REQUIRED_CAPTURE_TOPICS if topic not in data.get("bag", {}).get("topics", [])]
     if missing:
@@ -622,10 +807,12 @@ def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] 
         raise ValueError(f"capture bag does not exist: {bag_uri}")
     bag_metadata_relative = (bag_uri / "metadata.yaml").relative_to(root).as_posix()
     required_paths = {
-        "rgb_camera.mp4", "rgb_frames.jsonl", "camera_info.json", "sensor_transforms.json",
+        "rgb_camera.mp4", "rgb_frames.jsonl", "rgb_video.json", "camera_info.json", "sensor_transforms.json",
         "bag_metadata.json", "effective_config.json", bag_metadata_relative,
     }
     _verify_manifest_files(root, data, required_paths)
+    effective_config = _load_json_object(root / "effective_config.json", "effective_config.json")
+    rgb_stamps = _validate_rgb_index(root, data, effective_config)
     dynamic_descriptors = _dynamic_transform_descriptors(root)
     required_paths.update(relative for _descriptor, relative, _path in dynamic_descriptors)
     bag_metadata = bag_uri / "metadata.yaml"
@@ -642,12 +829,12 @@ def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] 
         path.relative_to(root).as_posix() for path in bag_uri.rglob("*") if path.is_file()
     }
     required_paths.update(present_bag_payload)
-    if not (required_paths - {"rgb_camera.mp4", "rgb_frames.jsonl", "camera_info.json", "sensor_transforms.json", "bag_metadata.json", "effective_config.json", bag_metadata_relative}):
+    if not (required_paths - {"rgb_camera.mp4", "rgb_frames.jsonl", "rgb_video.json", "camera_info.json", "sensor_transforms.json", "bag_metadata.json", "effective_config.json", bag_metadata_relative}):
         raise ValueError("capture bag metadata does not declare any data files")
     _verify_manifest_files(root, data, required_paths)
     dynamic_transform_validation = [
-        _validate_camera_head_artifact(descriptor, path, root / "rgb_frames.jsonl")
-        for descriptor, _relative, path in dynamic_descriptors
+        _validate_camera_head_artifact(descriptor, relative, path, data, effective_config, rgb_stamps)
+        for descriptor, relative, path in dynamic_descriptors
     ]
     return {
         "status": "valid",
@@ -694,10 +881,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Validate sensor inputs or the full capture archive")
     parser.add_argument("--validate-for-slam", metavar="CAPTURE_DIR")
     parser.add_argument("--validate-archive", metavar="CAPTURE_DIR")
+    parser.add_argument("--seal-manifest", metavar="MANIFEST_PATH")
     args = parser.parse_args()
-    if bool(args.validate_for_slam) == bool(args.validate_archive):
+    if sum(bool(value) for value in (args.validate_for_slam, args.validate_archive, args.seal_manifest)) != 1:
         parser.error("choose exactly one validation mode")
-    result = validate_capture_for_slam(args.validate_for_slam) if args.validate_for_slam else validate_capture_archive(args.validate_archive)
+    if args.seal_manifest:
+        sealed = seal_capture_manifest(args.seal_manifest)
+        result = {"status": "sealed", "capture_sha256": sealed["capture_sha256"]}
+    else:
+        result = validate_capture_for_slam(args.validate_for_slam) if args.validate_for_slam else validate_capture_archive(args.validate_archive)
     print(json.dumps(result, sort_keys=True))
 
 

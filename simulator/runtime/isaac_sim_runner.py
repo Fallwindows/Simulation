@@ -10,6 +10,7 @@ ground-truth pose topic, which is intentionally separate from SLAM odometry.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import math
@@ -277,6 +278,10 @@ def write_camera_head_transforms(
     output_path = Path(path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     trajectory_path = Path(trajectory_config_path).resolve()
+    from simulator.capture.manifest import sha256_json
+
+    trajectory_config_sha256 = _sha256_path(trajectory_path)
+    trajectory_effective_sha256 = sha256_json(dataclasses.asdict(scenario.trajectory))
     revision = subprocess.run(
         ["git", "rev-parse", "HEAD", "HEAD^{tree}"],
         cwd=REPO_ROOT,
@@ -308,8 +313,9 @@ def write_camera_head_transforms(
         "source": {
             "trajectory_config": {
                 "path": str(trajectory_path),
-                "sha256": _sha256_path(trajectory_path),
+                "sha256": trajectory_config_sha256,
             },
+            "trajectory_effective_sha256": trajectory_effective_sha256,
             "git_commit": revision[0],
             "git_tree": revision[1],
         },
@@ -334,6 +340,7 @@ def write_camera_head_transforms(
         "sha256": _sha256_path(output_path),
         "schema": contract["schema"],
         "version": contract["version"],
+        "source": contract["source"],
     }
 
 

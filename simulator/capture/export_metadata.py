@@ -80,6 +80,12 @@ def export_metadata(scenario_path: str | Path, capture_dir: str | Path, repo_roo
         "trajectory": dataclasses.asdict(scenario.trajectory),
         "mapping": scenario.mapping,
         "sensor_overrides": scenario.sensor_overrides,
+        "source_bindings": {
+            "trajectory_config_sha256": head_artifact["source"]["trajectory_config"]["sha256"],
+            "trajectory_effective_sha256": head_artifact["source"]["trajectory_effective_sha256"],
+            "git_commit": head_artifact["source"]["git_commit"],
+            "git_tree": head_artifact["source"]["git_tree"],
+        },
     }
     write_json(target / "scene_manifest.json", scene)
     write_json(target / "sensor_transforms.json", transforms)
