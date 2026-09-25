@@ -48,7 +48,8 @@ IMPLEMENTATION_SOURCES = (
 )
 CAMERA_TRACE_BASIS = (
     "shots 6-7 audit direct recorded camera_optical poses without applying a presentation guide; "
-    "shots 8-12 apply a C3 presentation guide fit to the disclosed estimated-trajectory dependency; "
+    "shots 8-12 apply a C3 presentation guide fit to the declared sampling interval; "
+    "exact interpolation-knot dependencies are derived from the hash-bound trajectory; "
     "both remain independent of rendered scan cutoff"
 )
 CAMERA_TRACE_POSITION_DECIMALS = 9
@@ -100,7 +101,7 @@ class ViewSpec:
     history_stride_scans: int
     camera_motion_role: str
     camera_guide_timestamp_window_s: tuple[float, float]
-    camera_pose_dependency_window_s: tuple[float, float]
+    camera_pose_sampling_window_s: tuple[float, float]
     final_hold_frames: int
 
 
@@ -269,7 +270,7 @@ class TechnicalCameraPath:
     Shots 6-7 report the direct recorded optical pose but do not apply it as a
     presentation camera. ``EstimatedTrajectory`` intentionally interpolates its
     source samples piecewise. The map camera samples only that trajectory,
-    builds a smooth Bezier guide from the disclosed global dependency, and
+    builds a smooth Bezier guide over the declared global sampling interval, and
     evaluates it on a C3 timestamp schedule. It does not replace scan
     projection or alter any measured point.
     """
@@ -318,38 +319,38 @@ class TechnicalCameraPath:
         dependency_window = getattr(trajectory, "interpolation_dependency_window_s", None)
         if not callable(dependency_window):
             raise ValueError("technical camera trajectory cannot disclose interpolation dependencies")
+        self._camera_pose_dependency_windows_s: dict[str, tuple[float, float]] = {}
         for view in views:
             if view.camera_motion_role != "recorded_camera_optical":
                 continue
-            actual_dependency = dependency_window(*view.camera_guide_timestamp_window_s)
-            if not all(
-                math.isclose(actual, declared, abs_tol=1e-9)
-                for actual, declared in zip(actual_dependency, view.camera_pose_dependency_window_s)
-            ):
-                raise ValueError(
-                    f"technical view {view.id} camera pose dependency window does not match "
-                    f"trajectory interpolation support {actual_dependency}"
-                )
-        map_dependency_windows = {view.camera_pose_dependency_window_s for view in self.map_views}
-        if len(map_dependency_windows) != 1:
-            raise ValueError("map camera views must disclose one shared smooth-fit dependency window")
-        map_fit_window = (knot_times[0], knot_times[-1])
-        actual_map_dependency = dependency_window(*map_fit_window)
-        declared_map_dependency = next(iter(map_dependency_windows))
-        if not all(
-            math.isclose(actual, declared, abs_tol=1e-9)
-            for actual, declared in zip(actual_map_dependency, declared_map_dependency)
-        ):
-            raise ValueError(
-                "map camera pose dependency window does not match trajectory interpolation "
-                f"support {actual_map_dependency}"
+            self._camera_pose_dependency_windows_s[view.id] = dependency_window(
+                *view.camera_pose_sampling_window_s
             )
+        map_sampling_windows = {view.camera_pose_sampling_window_s for view in self.map_views}
+        if len(map_sampling_windows) != 1:
+            raise ValueError("map camera views must declare one shared smooth-fit sampling window")
+        map_fit_window = next(iter(map_sampling_windows))
+        actual_map_dependency = dependency_window(*map_fit_window)
+        for view in self.map_views:
+            self._camera_pose_dependency_windows_s[view.id] = actual_map_dependency
         self._pose_guide = _EstimatedPoseGuide(
             trajectory,
             self.rig_from_optical,
             map_fit_window[0],
             map_fit_window[1],
         )
+
+    def camera_pose_dependency_window_s(self, spec: ViewSpec) -> tuple[float, float]:
+        try:
+            return self._camera_pose_dependency_windows_s[spec.id]
+        except KeyError as exc:
+            raise ValueError(f"unknown technical camera view: {spec.id}") from exc
+
+    def camera_pose_dependency_windows_receipt(self) -> dict[str, list[float]]:
+        return {
+            view.id: list(self.camera_pose_dependency_window_s(view))
+            for view in self.views
+        }
 
     def _direct_recorded_camera_pose(self, timestamp_s: float, phase: float) -> CameraPose:
         map_from_rig = self.trajectory.map_from_sensor_rig(timestamp_s)
@@ -474,6 +475,7 @@ def camera_motion_receipt(
     spec: ViewSpec,
     rows: Iterable[dict[str, object]],
     focus_inventory: object,
+    camera_path: TechnicalCameraPath,
 ) -> dict[str, object]:
     values = tuple(rows)
     if len(values) != spec.frames:
@@ -495,7 +497,8 @@ def camera_motion_receipt(
         ),
         "pose_time_basis": CAMERA_TRACE_BASIS,
         "camera_guide_timestamp_window_s": list(spec.camera_guide_timestamp_window_s),
-        "camera_pose_dependency_window_s": list(spec.camera_pose_dependency_window_s),
+        "camera_pose_sampling_window_s": list(spec.camera_pose_sampling_window_s),
+        "camera_pose_dependency_window_s": list(camera_path.camera_pose_dependency_window_s(spec)),
         "camera_guide_pose_timestamp_range_s": [min(timestamps), max(timestamps)],
         "rendered_data_cutoff_range_s": [min(cutoffs), max(cutoffs)],
         "trace": "technical_camera_trace.jsonl",
@@ -628,8 +631,8 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
                 "camera_guide_timestamp_window_s": tuple(
                     float(value) for value in item["camera_guide_timestamp_window_s"]
                 ),
-                "camera_pose_dependency_window_s": tuple(
-                    float(value) for value in item["camera_pose_dependency_window_s"]
+                "camera_pose_sampling_window_s": tuple(
+                    float(value) for value in item["camera_pose_sampling_window_s"]
                 ),
             }
         )
@@ -656,7 +659,7 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
         start_s, end_s = view.source_window_s
         display_start_s, display_end_s = view.display_window_s
         guide_start_s, guide_end_s = view.camera_guide_timestamp_window_s
-        dependency_start_s, dependency_end_s = view.camera_pose_dependency_window_s
+        sampling_start_s, sampling_end_s = view.camera_pose_sampling_window_s
         if not (math.isfinite(start_s) and math.isfinite(end_s) and 0.0 <= start_s <= end_s):
             raise ValueError(f"technical view {view.id} has an invalid source window")
         if not (
@@ -672,13 +675,13 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
         ):
             raise ValueError(f"technical view {view.id} has an invalid camera guide timestamp window")
         if not (
-            math.isfinite(dependency_start_s)
-            and math.isfinite(dependency_end_s)
-            and 0.0 <= dependency_start_s < dependency_end_s
-            and dependency_start_s <= guide_start_s
-            and guide_end_s <= dependency_end_s
+            math.isfinite(sampling_start_s)
+            and math.isfinite(sampling_end_s)
+            and 0.0 <= sampling_start_s < sampling_end_s
+            and sampling_start_s <= guide_start_s
+            and guide_end_s <= sampling_end_s
         ):
-            raise ValueError(f"technical view {view.id} has an invalid camera pose dependency window")
+            raise ValueError(f"technical view {view.id} has an invalid camera pose sampling window")
         if index and not math.isclose(
             views[index - 1].camera_guide_timestamp_window_s[1], guide_start_s, abs_tol=1e-9
         ):
@@ -692,6 +695,11 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
         expected_motion_role = "recorded_camera_optical" if index < 2 else "continuous_estimated_map_path"
         if view.camera_motion_role != expected_motion_role:
             raise ValueError(f"technical view {view.id} has an invalid camera motion role")
+        if expected_motion_role == "recorded_camera_optical" and not all(
+            math.isclose(sample, guide, abs_tol=1e-9)
+            for sample, guide in zip(view.camera_pose_sampling_window_s, view.camera_guide_timestamp_window_s)
+        ):
+            raise ValueError(f"technical view {view.id} must sample its complete recorded-pose window")
         expected_hold = 24 if index == len(views) - 1 else 0
         if view.final_hold_frames != expected_hold:
             raise ValueError(f"technical view {view.id} has an invalid final camera hold")
@@ -1553,7 +1561,7 @@ class TechnicalRenderer:
             },
             "camera_calibration": self.source.camera_calibration_receipt,
             "camera_motion": camera_motion_receipt(
-                spec, self._camera_trace_by_view[spec.id], self.camera_focus_inventory
+                spec, self._camera_trace_by_view[spec.id], self.camera_focus_inventory, self.camera_path
             ),
         }
         history_summary = self.source.scan_summary(scans)
@@ -1925,6 +1933,7 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
             "sha256": sha256_file(trace_path),
             "frame_count": sum(view.frames for view in views),
             "basis": CAMERA_TRACE_BASIS,
+            "camera_pose_dependency_windows_s": renderer.camera_path.camera_pose_dependency_windows_receipt(),
         },
         "camera_motion_anchor": {
             "track_id": renderer.camera_focus_inventory.track_id,

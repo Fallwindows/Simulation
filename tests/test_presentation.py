@@ -657,6 +657,15 @@ class CompletePresentationTests(unittest.TestCase):
 
     def test_technical_camera_trace_and_per_view_motion_binding_are_fail_closed(self):
         manifest = json.loads(self.fixture["technical_manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(manifest["camera_motion_trace"]["camera_pose_dependency_windows_s"], {
+            "sensor_activation": [2.0, 5.95],
+            "lidar_environment": [5.9, 8.85],
+            "persistent_map": [2.0, 18.55],
+            "object_association": [2.0, 18.55],
+            "object_detail": [2.0, 18.55],
+            "observed_aisle_overview": [2.0, 18.55],
+            "final_technical_view": [2.0, 18.55],
+        })
         manifest.pop("camera_motion_trace")
         missing = self.fixture["technical_manifest"].with_name("missing_camera_trace_manifest.json")
         missing.write_text(json.dumps(manifest), encoding="utf-8")
@@ -695,6 +704,17 @@ class CompletePresentationTests(unittest.TestCase):
         alternate_path.write_text(json.dumps(alternate_manifest), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "path is not canonical"):
             validate_technical_delivery(alternate_path, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        forged_dependencies = json.loads(self.fixture["technical_manifest"].read_text(encoding="utf-8"))
+        forged_dependencies["camera_motion_trace"]["camera_pose_dependency_windows_s"][
+            "sensor_activation"
+        ] = [2.0, 5.9]
+        forged_dependencies_path = self.fixture["technical_dir"] / "forged_camera_dependency_manifest.json"
+        forged_dependencies_path.write_text(json.dumps(forged_dependencies), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "dependency binding"):
+            validate_technical_delivery(
+                forged_dependencies_path, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+            )
 
         def translate_rows(rows, _manifest):
             for row in rows:
@@ -740,6 +760,17 @@ class CompletePresentationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "camera motion binding"):
             validate_technical_delivery(bad_receipt, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        false_dependency_receipt = self._mutated_technical_receipt(
+            "forged_camera_dependency_receipt", 0,
+            lambda receipt: receipt["derivation"]["camera_motion"].update(
+                camera_pose_dependency_window_s=[2.0, 5.9]
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "camera motion binding"):
+            validate_technical_delivery(
+                false_dependency_receipt, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+            )
 
     def test_production_catalog_rejects_unlisted_fixture_bundle_by_default(self):
         catalog = json.loads(

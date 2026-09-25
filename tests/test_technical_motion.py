@@ -78,8 +78,16 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertEqual(self.views[0].title, "EARLIER RECORDED SENSOR REPLAY")
         self.assertEqual(self.views[0].subtitle, "RECORDED t=2.0–5.9s · CO-TIMED RGB + LIDAR")
         self.assertEqual(
-            [view.camera_pose_dependency_window_s for view in self.views],
-            [(1.2, 6.8), (5.6, 9.2)] + [(1.2, 18.6)] * 5,
+            [view.camera_pose_sampling_window_s for view in self.views],
+            [(2.0, 5.9), (5.9, 8.8)] + [(2.0, 18.5)] * 5,
+        )
+        self.assertEqual(
+            self.path.camera_pose_dependency_windows_receipt(),
+            {
+                "sensor_activation": [1.2, 6.8],
+                "lidar_environment": [5.6, 9.2],
+                **{view.id: [1.2, 18.6] for view in self.views[2:]},
+            },
         )
 
     def test_camera_pose_time_and_rendered_data_cutoff_are_distinct_and_in_declared_windows(self):
@@ -90,8 +98,9 @@ class TechnicalMotionTests(unittest.TestCase):
             cutoff = row["rendered_data_cutoff_s"]
             self.assertGreaterEqual(pose_time, spec.camera_guide_timestamp_window_s[0] - 1e-9)
             self.assertLessEqual(pose_time, spec.camera_guide_timestamp_window_s[1] + 1e-9)
-            self.assertGreaterEqual(pose_time, spec.camera_pose_dependency_window_s[0] - 1e-9)
-            self.assertLessEqual(pose_time, spec.camera_pose_dependency_window_s[1] + 1e-9)
+            dependency = self.path.camera_pose_dependency_window_s(spec)
+            self.assertGreaterEqual(pose_time, dependency[0] - 1e-9)
+            self.assertLessEqual(pose_time, dependency[1] + 1e-9)
             self.assertGreaterEqual(cutoff, spec.display_window_s[0] - 1e-9)
             self.assertLessEqual(cutoff, spec.display_window_s[1] + 1e-9)
         detail = [row for row in self.trace if row["view_id"] == "object_detail"]
@@ -99,9 +108,11 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertTrue(all(row["rendered_data_cutoff_s"] == 12.8 for row in detail))
         receipt = camera_motion_receipt(self.views[0], self.trace[:120], type("Focus", (), {
             "track_id": 7, "position": (5.2, 1.4, 1.25),
-        })())
+        })(), self.path)
         self.assertEqual(receipt["render_application"], "not_applied; trace audits recorded camera pose for the timestamped sensor replay")
         self.assertIn("no presentation camera applied", receipt["path"])
+        self.assertEqual(receipt["camera_pose_sampling_window_s"], [2.0, 5.9])
+        self.assertEqual(receipt["camera_pose_dependency_window_s"], [1.2, 6.8])
 
     def test_sparse_nonaligned_knot_dependencies_are_exact_and_mutation_bound(self):
         timestamps = np.asarray([
@@ -117,16 +128,23 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertEqual(base_trajectory.interpolation_dependency_window_s(2.0, 5.9), (1.2, 6.8))
         self.assertEqual(base_trajectory.interpolation_dependency_window_s(5.9, 8.8), (5.6, 9.2))
         self.assertEqual(base_trajectory.interpolation_dependency_window_s(2.0, 18.5), (1.2, 18.6))
-        base = TechnicalCameraPath(
+        base_path = TechnicalCameraPath(
             self.views, base_trajectory,
             np.eye(4), np.asarray([5.2, 1.4, 1.25]),
-        ).trace_rows(self.fps)
-        outside_changed = TechnicalCameraPath(
+        )
+        outside_path = TechnicalCameraPath(
             self.views, outside_trajectory,
             np.eye(4), np.asarray([5.2, 1.4, 1.25]),
-        ).trace_rows(self.fps)
+        )
+        base = base_path.trace_rows(self.fps)
+        outside_changed = outside_path.trace_rows(self.fps)
         self.assertEqual(len(base), 810)
         self.assertEqual(base, outside_changed)
+        self.assertEqual(base_path.camera_pose_dependency_windows_receipt(), {
+            "sensor_activation": [1.2, 6.8],
+            "lidar_environment": [5.6, 9.2],
+            **{view.id: [1.2, 18.6] for view in self.views[2:]},
+        })
 
         support_positions = base_positions.copy()
         support_positions[timestamps == 6.8, 1] += 40.0
@@ -152,21 +170,22 @@ class TechnicalMotionTests(unittest.TestCase):
                 for left, right in zip(base[210:], map_support_changed[210:])
             ))
 
-    def test_constructor_rejects_dependency_declaration_that_omits_bracketing_knots(self):
-        timestamps = np.asarray([0.2, 1.2, 2.3, 5.6, 6.8, 9.2, 17.3, 18.6, 19.7])
+    def test_dense_canonical_producer_derives_its_own_exact_dependency_windows(self):
+        timestamps = np.round(np.arange(0.2, 20.4 + 0.025, 0.05), 9)
         positions = np.column_stack((timestamps, np.zeros_like(timestamps), np.ones_like(timestamps)))
         quaternions = np.tile(np.asarray([0.0, 0.0, 0.0, 1.0]), (len(timestamps), 1))
-        invalid_views = (
-            replace(self.views[0], camera_pose_dependency_window_s=(2.0, 5.9)),
-            *self.views[1:],
+        path = TechnicalCameraPath(
+            self.views,
+            EstimatedTrajectory(timestamps, positions, quaternions),
+            np.eye(4),
+            np.asarray([5.2, 1.4, 1.25]),
         )
-        with self.assertRaisesRegex(ValueError, "does not match trajectory interpolation support"):
-            TechnicalCameraPath(
-                invalid_views,
-                EstimatedTrajectory(timestamps, positions, quaternions),
-                np.eye(4),
-                np.asarray([5.2, 1.4, 1.25]),
-            )
+        self.assertEqual(len(path.trace_rows(self.fps)), 810)
+        self.assertEqual(path.camera_pose_dependency_windows_receipt(), {
+            "sensor_activation": [2.0, 5.95],
+            "lidar_environment": [5.9, 8.85],
+            **{view.id: [2.0, 18.55] for view in self.views[2:]},
+        })
 
     def test_camera_steps_and_velocity_stay_continuous_at_every_boundary(self):
         eyes = np.asarray([row["eye_m"] for row in self.trace], dtype=np.float64)
@@ -206,12 +225,13 @@ class TechnicalMotionTests(unittest.TestCase):
 
     def test_validator_rejects_a_self_consistent_25_frame_hold(self):
         long_hold_views = (*self.views[:-1], replace(self.views[-1], final_hold_frames=25))
-        rows = TechnicalCameraPath(
+        long_hold_path = TechnicalCameraPath(
             long_hold_views,
             _SyntheticTrajectory(),
             np.eye(4, dtype=np.float64),
             np.asarray([5.2, 1.4, 1.25], dtype=np.float64),
-        ).trace_rows(self.fps)
+        )
+        rows = long_hold_path.trace_rows(self.fps)
         plan = json.loads(PLAN.read_text(encoding="utf-8"))
         plan_views = {item["id"]: item for item in plan["views"]}
         with tempfile.TemporaryDirectory() as temporary:
@@ -226,6 +246,7 @@ class TechnicalMotionTests(unittest.TestCase):
                 "sha256": hashlib.sha256(trace.read_bytes()).hexdigest(),
                 "frame_count": 810,
                 "basis": CAMERA_TRACE_BASIS,
+                "camera_pose_dependency_windows_s": long_hold_path.camera_pose_dependency_windows_receipt(),
             }
             with self.assertRaisesRegex(ValueError, "exceeds the exact declared frame count"):
                 _validate_camera_motion_trace(
@@ -237,6 +258,7 @@ class TechnicalMotionTests(unittest.TestCase):
                     simulation_window_s=(0.2, 20.4),
                     fps=self.fps,
                     expected_rows=rows,
+                    expected_dependency_windows_s=long_hold_path.camera_pose_dependency_windows_receipt(),
                 )
 
     def test_activation_rays_fade_continuously_instead_of_integer_popping(self):

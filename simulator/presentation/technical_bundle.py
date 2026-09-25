@@ -58,7 +58,8 @@ SCAN_TIME_MODEL = {
 }
 CAMERA_TRACE_BASIS = (
     "shots 6-7 audit direct recorded camera_optical poses without applying a presentation guide; "
-    "shots 8-12 apply a C3 presentation guide fit to the disclosed estimated-trajectory dependency; "
+    "shots 8-12 apply a C3 presentation guide fit to the declared sampling interval; "
+    "exact interpolation-knot dependencies are derived from the hash-bound trajectory; "
     "both remain independent of rendered scan cutoff"
 )
 CAMERA_TRACE_FIELDS = {
@@ -270,8 +271,11 @@ def _validate_camera_motion_trace(
     simulation_window_s: tuple[float, float],
     fps: int,
     expected_rows: list[dict[str, Any]],
+    expected_dependency_windows_s: dict[str, list[float]],
 ) -> dict[str, list[dict[str, Any]]]:
-    if not isinstance(trace_info, dict) or set(trace_info) != {"path", "sha256", "frame_count", "basis"}:
+    if not isinstance(trace_info, dict) or set(trace_info) != {
+        "path", "sha256", "frame_count", "basis", "camera_pose_dependency_windows_s",
+    }:
         raise ValueError("technical delivery camera motion trace receipt is missing or malformed")
     if trace_info.get("path") != "technical_camera_trace.jsonl":
         raise ValueError("technical delivery camera motion trace path is not canonical")
@@ -280,6 +284,8 @@ def _validate_camera_motion_trace(
         raise ValueError("technical delivery camera motion trace hash mismatch")
     if trace_info.get("frame_count") != sum(expected_counts.values()) or trace_info.get("basis") != CAMERA_TRACE_BASIS:
         raise ValueError("technical delivery camera motion trace contract is invalid")
+    if trace_info.get("camera_pose_dependency_windows_s") != expected_dependency_windows_s:
+        raise ValueError("technical delivery camera motion trace dependency binding is invalid")
     rows: list[dict[str, Any]] = []
     with trace_path.open(encoding="utf-8") as handle:
         for line in handle:
@@ -310,7 +316,7 @@ def _validate_camera_motion_trace(
         plan = plan_views.get(view_id, {})
         role = plan.get("camera_motion_role")
         guide_window = plan.get("camera_guide_timestamp_window_s")
-        dependency_window = plan.get("camera_pose_dependency_window_s")
+        sampling_window = plan.get("camera_pose_sampling_window_s")
         timestamp = row.get("camera_guide_pose_timestamp_s")
         cutoff = row.get("rendered_data_cutoff_s")
         phase = row.get("motion_phase")
@@ -335,8 +341,8 @@ def _validate_camera_motion_trace(
             or row.get("camera_motion_role") != role
             or not isinstance(guide_window, list)
             or len(guide_window) != 2
-            or not isinstance(dependency_window, list)
-            or len(dependency_window) != 2
+            or not isinstance(sampling_window, list)
+            or len(sampling_window) != 2
             or not isinstance(timestamp, (int, float))
             or isinstance(timestamp, bool)
             or not math.isfinite(float(timestamp))
@@ -348,7 +354,7 @@ def _validate_camera_motion_trace(
             or isinstance(phase, bool)
             or not math.isfinite(float(phase))
             or not (float(guide_window[0]) - 1e-9 <= float(timestamp) <= float(guide_window[1]) + 1e-9)
-            or not (float(dependency_window[0]) - 1e-9 <= float(timestamp) <= float(dependency_window[1]) + 1e-9)
+            or not (float(sampling_window[0]) - 1e-9 <= float(timestamp) <= float(sampling_window[1]) + 1e-9)
             or not (simulation_window_s[0] - 1e-9 <= float(timestamp) <= simulation_window_s[1] + 1e-9)
             or float(timestamp) < previous_timestamp - 1e-9
             or float(phase) < previous_phase - 1e-9
@@ -410,6 +416,7 @@ def _expected_camera_motion(
     plan: dict[str, Any],
     rows: list[dict[str, Any]],
     focus_inventory: object,
+    dependency_window_s: tuple[float, float],
 ) -> dict[str, Any]:
     timestamps = [float(row["camera_guide_pose_timestamp_s"]) for row in rows]
     cutoffs = [float(row["rendered_data_cutoff_s"]) for row in rows]
@@ -428,7 +435,8 @@ def _expected_camera_motion(
         ),
         "pose_time_basis": CAMERA_TRACE_BASIS,
         "camera_guide_timestamp_window_s": plan.get("camera_guide_timestamp_window_s"),
-        "camera_pose_dependency_window_s": plan.get("camera_pose_dependency_window_s"),
+        "camera_pose_sampling_window_s": plan.get("camera_pose_sampling_window_s"),
+        "camera_pose_dependency_window_s": list(dependency_window_s),
         "camera_guide_pose_timestamp_range_s": [min(timestamps), max(timestamps)],
         "rendered_data_cutoff_range_s": [min(cutoffs), max(cutoffs)],
         "trace": "technical_camera_trace.jsonl",
@@ -688,26 +696,26 @@ def validate_technical_delivery(
     prior_guide_end: float | None = None
     for view_id in expected_order:
         guide_window = plan_views.get(view_id, {}).get("camera_guide_timestamp_window_s")
-        dependency_window = plan_views.get(view_id, {}).get("camera_pose_dependency_window_s")
+        sampling_window = plan_views.get(view_id, {}).get("camera_pose_sampling_window_s")
         if (
             not isinstance(guide_window, list)
             or len(guide_window) != 2
-            or not isinstance(dependency_window, list)
-            or len(dependency_window) != 2
+            or not isinstance(sampling_window, list)
+            or len(sampling_window) != 2
             or not all(
                 isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
-                for value in (*guide_window, *dependency_window)
+                for value in (*guide_window, *sampling_window)
             )
             or float(guide_window[0]) >= float(guide_window[1])
-            or float(dependency_window[0]) >= float(dependency_window[1])
-            or float(dependency_window[0]) > float(guide_window[0])
-            or float(guide_window[1]) > float(dependency_window[1])
+            or float(sampling_window[0]) >= float(sampling_window[1])
+            or float(sampling_window[0]) > float(guide_window[0])
+            or float(guide_window[1]) > float(sampling_window[1])
             or (
                 prior_guide_end is not None
                 and not math.isclose(prior_guide_end, float(guide_window[0]), abs_tol=1e-9)
             )
         ):
-            raise ValueError(f"technical plan camera guide/dependency window is invalid for {view_id}")
+            raise ValueError(f"technical plan camera guide/sampling window is invalid for {view_id}")
         prior_guide_end = float(guide_window[1])
     source = manifest.get("source")
     if not isinstance(source, dict):
@@ -742,13 +750,16 @@ def validate_technical_delivery(
         target_frame=str(frames.get("sensor_rig", "")),
     )
     _profiles, view_specs = load_plan(root / "config" / "technical_views.json")
+    view_specs_by_id = {spec.id: spec for spec in view_specs}
     focus_inventory = select_inventory(load_inventory(inventory_path))[0]
-    expected_trace_rows = TechnicalCameraPath(
+    expected_camera_path = TechnicalCameraPath(
         view_specs,
         EstimatedTrajectory.from_csv(trajectory_path),
         rig_from_optical,
         np.asarray(focus_inventory.position, dtype=np.float64),
-    ).trace_rows(30)
+    )
+    expected_trace_rows = expected_camera_path.trace_rows(30)
+    expected_dependency_windows_s = expected_camera_path.camera_pose_dependency_windows_receipt()
     expected_anchor = {
         "track_id": focus_inventory.track_id,
         "position_m": list(focus_inventory.position),
@@ -765,6 +776,7 @@ def validate_technical_delivery(
         simulation_window_s=simulation_window,
         fps=30,
         expected_rows=expected_trace_rows,
+        expected_dependency_windows_s=expected_dependency_windows_s,
     )
     manifest_derivations = manifest.get("view_derivations")
     if not isinstance(manifest_derivations, dict) or set(manifest_derivations) != set(expected_order):
@@ -850,7 +862,10 @@ def validate_technical_delivery(
         if derivation.get("display_window_s") != expected_display_window:
             raise ValueError(f"technical receipt display window is invalid for {view_id}")
         expected_camera_motion = _expected_camera_motion(
-            expected_plan, trace_by_view[view_id], focus_inventory
+            expected_plan,
+            trace_by_view[view_id],
+            focus_inventory,
+            expected_camera_path.camera_pose_dependency_window_s(view_specs_by_id[view_id]),
         )
         if derivation.get("camera_motion") != expected_camera_motion:
             raise ValueError(f"technical receipt camera motion binding is invalid for {view_id}")

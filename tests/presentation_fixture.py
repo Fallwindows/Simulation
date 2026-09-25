@@ -203,12 +203,9 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     slam.mkdir(exist_ok=True)
     perception.mkdir(exist_ok=True)
     trajectory_path = slam / "slam_map_poses.csv"
-    # Match the sparse, nonaligned knot layout whose interpolation dependency
-    # windows are declared by the technical-view plan.
-    trajectory_timestamps = np.asarray([
-        0.2, 1.2, 2.3, 3.5, 4.6, 5.6, 6.8, 8.0, 9.2,
-        10.2, 11.3, 12.5, 13.7, 14.9, 16.1, 17.3, 18.6, 20.4,
-    ])
+    # Canonical capture producers emit corrected poses at raw 20 Hz odometry
+    # timestamps; camera dependency receipts must follow this source density.
+    trajectory_timestamps = np.round(np.arange(0.2, 20.4 + 0.025, 0.05), 9)
     trajectory_path.write_text(
         "timestamp_s,x_m,y_m,z_m,qx,qy,qz,qw\n" + "".join(
             f"{timestamp:.9f},{0.38 * timestamp:.9f},{0.12 * np.sin(timestamp / 3.2):.9f},"
@@ -446,7 +443,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                     "topic": "/sim/camera/rgb/camera_info",
                 },
                 "camera_motion": camera_motion_receipt(
-                    view_spec, camera_rows_by_view[view_id], focus_inventory
+                    view_spec, camera_rows_by_view[view_id], focus_inventory, camera_path
                 ),
                 **({
                     "cotimed_rgb_pairs": {"pair_count": 1, "maximum_absolute_skew_ns": rgb_skew_ns, "pairs": [
@@ -493,6 +490,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             "sha256": sha256(camera_trace),
             "frame_count": len(camera_trace_rows),
             "basis": CAMERA_TRACE_BASIS,
+            "camera_pose_dependency_windows_s": camera_path.camera_pose_dependency_windows_receipt(),
         },
         "camera_motion_anchor": {
             "track_id": focus_inventory.track_id,
