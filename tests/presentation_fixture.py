@@ -8,6 +8,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import numpy as np
+
 from simulator.capture.manifest import capture_hash, write_json
 from simulator.presentation.complete_bundle import emit_complete_bundle
 from simulator.presentation.provenance import (
@@ -123,7 +125,10 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     })
     transforms = capture / "sensor_transforms.json"
     write_json(transforms, {
-        "units": "m", "rotation_order": "xyzw_ros", "transforms": [{"parent": "sensor_rig", "child": "camera_optical_frame"}],
+        "units": "m", "rotation_order": "xyzw_ros", "transforms": [
+            {"parent": "sensor_rig", "child": "camera_optical_frame", "translation_m": [0, 0, 0], "rotation_xyzw": [0, 0, 0, 1]},
+            {"parent": "sensor_rig", "child": "lidar_link", "translation_m": [0, 0, 0], "rotation_xyzw": [0, 0, 0, 1]},
+        ],
         "topics": {"rgb_camera_info": "/sim/camera/rgb/camera_info", "lidar_points": "/sim/lidar/points"},
         "frames": {
             "camera_optical": "camera_optical_frame", "lidar_link": "lidar_link", "sensor_rig": "sensor_rig",
@@ -209,6 +214,32 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     technical_dir = root / "technical"
     technical_dir.mkdir(exist_ok=True)
     digest = lambda text: hashlib.sha256(text.encode("utf-8")).hexdigest()
+    slam = root / "slam"
+    perception = root / "perception"
+    slam.mkdir(exist_ok=True)
+    perception.mkdir(exist_ok=True)
+    trajectory_path = slam / "slam_map_poses.csv"
+    # Canonical capture producers emit corrected poses at raw 20 Hz odometry
+    # timestamps; camera dependency receipts must follow this source density.
+    trajectory_timestamps = np.round(np.arange(0.2, 20.4 + 0.025, 0.05), 9)
+    trajectory_path.write_text(
+        "timestamp_s,x_m,y_m,z_m,qx,qy,qz,qw\n" + "".join(
+            f"{timestamp:.9f},{0.38 * timestamp:.9f},{0.12 * np.sin(timestamp / 3.2):.9f},"
+            f"{1.1 + 0.02 * np.cos(timestamp / 4.1):.9f},0,0,0,1\n"
+            for timestamp in trajectory_timestamps
+        ),
+        encoding="utf-8",
+    )
+    inventory_path = perception / "estimated_inventory.csv"
+    inventory_path.write_text(
+        "track_id,estimated_x_m,estimated_y_m,estimated_z_m,3d_observation_count,depth_source\n"
+        "7,5.2,1.4,1.25,8,lidar_projected_with_slam_pose\n",
+        encoding="utf-8",
+    )
+    (slam / "slam_map.ply").write_text("map", encoding="utf-8")
+    (slam / "slam_manifest.json").write_text("slam manifest", encoding="utf-8")
+    (perception / "perception_manifest.json").write_text("perception manifest", encoding="utf-8")
+    (perception / "frame_annotations.jsonl").write_text("annotations", encoding="utf-8")
     technical_catalog = root / "technical_catalog.json"
     technical_catalog_value = {
         "schema_version": 1, "status": "reviewed_source_catalog", "sources": [{
@@ -233,12 +264,12 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             },
             "artifacts": {
                 "map": {"path": "slam/slam_map.ply", "sha256": digest("map"), "version": "fixture-map-v1"},
-                "trajectory": {"path": "slam/slam_map_poses.csv", "sha256": digest("trajectory"), "version": "fixture-trajectory-v1"},
-                "inventory": {"path": "perception/estimated_inventory.csv", "sha256": digest("inventory"), "version": "fixture-object-v1"},
-                "raw_lidar_bag": {"path": "capture/sensors_bag/sensors_bag_0.db3", "sha256": digest("raw lidar bag"), "version": "fixture-lidar-v1"},
+                "trajectory": {"path": "slam/slam_map_poses.csv", "sha256": sha256(trajectory_path), "version": "fixture-trajectory-v1"},
+                "inventory": {"path": "perception/estimated_inventory.csv", "sha256": sha256(inventory_path), "version": "fixture-object-v1"},
+                "raw_lidar_bag": {"path": "capture/sensors_bag/capture_0.db3", "sha256": sha256(bag / "capture_0.db3"), "version": "fixture-lidar-v1"},
                 "bag_metadata": {"path": "capture/bag_metadata.json", "sha256": digest("bag metadata"), "version": "fixture-bag-index-v1"},
                 "camera_info": {"path": "capture/camera_info.json", "sha256": digest("camera info"), "version": "fixture-camera-v1"},
-                "sensor_transforms": {"path": "capture/sensor_transforms.json", "sha256": digest("sensor transforms"), "version": "fixture-transforms-v1"},
+                "sensor_transforms": {"path": "capture/sensor_transforms.json", "sha256": sha256(transforms), "version": "fixture-transforms-v1"},
                 "effective_config": {"path": "capture/effective_config.json", "sha256": digest("effective config"), "version": "fixture-config-v1"},
                 "scene_manifest": {"path": "capture/scene_manifest.json", "sha256": digest("scene manifest"), "version": "fixture-scene-v1"},
                 "rgb_video": {"path": "capture/rgb_camera.mp4", "sha256": digest("rgb video"), "version": "fixture-rgb-v1"},
@@ -257,12 +288,17 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     # text and catalog bytes while the presentation validator may read LF bytes.
     technical_catalog.write_bytes(technical_catalog.read_bytes().replace(b"\n", b"\r\n"))
     from simulator.technical_views import (
+        CAMERA_TRACE_BASIS,
         SourceBundle,
+        TechnicalCameraPath,
         _source_receipt as renderer_source_receipt,
         _write_view_receipt,
+        camera_motion_receipt,
         canonical_text_sha256,
         implementation_hashes,
+        load_inventory,
         load_plan as load_technical_plan,
+        select_inventory,
     )
     crlf_text = root / "crlf_repository_text"
     crlf_text.mkdir(exist_ok=True)
@@ -330,7 +366,27 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     source = renderer_source_receipt(renderer_bundle)
     _, technical_specs = load_technical_plan(repo_root / "config" / "technical_views.json")
     specs_by_id = {spec.id: spec for spec in technical_specs}
+    from simulator.technical_lidar import EstimatedTrajectory
+    fixture_trajectory = EstimatedTrajectory.from_csv(trajectory_path)
+    focus_inventory = select_inventory(load_inventory(inventory_path))[0]
+    camera_path = TechnicalCameraPath(
+        technical_specs,
+        fixture_trajectory,
+        np.eye(4, dtype=np.float64),
+        np.asarray(focus_inventory.position, dtype=np.float64),
+    )
+    camera_trace_rows = camera_path.trace_rows(30)
+    camera_rows_by_view = {
+        spec.id: [row for row in camera_trace_rows if row["view_id"] == spec.id]
+        for spec in technical_specs
+    }
+    camera_trace = technical_dir / "technical_camera_trace.jsonl"
+    camera_trace.write_text(
+        "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in camera_trace_rows),
+        encoding="utf-8",
+    )
     outputs = []
+    view_derivations = {}
     for view_id, role, frame_count, color in VIEWS:
         view_spec = specs_by_id[view_id]
         scan_timestamp_s = float(view_spec.display_window_s[0])
@@ -402,6 +458,9 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                     "distortion_handling": "zero_coefficients_no_rectification_required",
                     "topic": "/sim/camera/rgb/camera_info",
                 },
+                "camera_motion": camera_motion_receipt(
+                    view_spec, camera_rows_by_view[view_id], focus_inventory, camera_path
+                ),
                 **({
                     "cotimed_rgb_pairs": {"pair_count": 1, "maximum_absolute_skew_ns": rgb_skew_ns, "pairs": [
                         {"scan_timestamp_ns": scan_timestamp_ns, "rgb_frame_index": rgb_frame_index,
@@ -421,6 +480,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                 } if is_roi_view else {}),
             },
         )
+        view_derivations[view_id] = json.loads(receipt_path.read_text(encoding="utf-8"))["derivation"]
         outputs.append({
             "path": view_video.name, "sha256": video_hash, "frames": frame_count, "view_ids": [view_id],
             "presentation_role": role, "probe": probe,
@@ -441,6 +501,19 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         "storyboard_content_used": False,
         "storyboard_exclusion_basis": "generated test fixture uses only synthetic moving geometry and timestamps",
         "input_snapshot_verification": "post_render_sha256_match",
+        "camera_motion_trace": {
+            "path": camera_trace.name,
+            "sha256": sha256(camera_trace),
+            "frame_count": len(camera_trace_rows),
+            "basis": CAMERA_TRACE_BASIS,
+            "camera_pose_dependency_windows_s": camera_path.camera_pose_dependency_windows_receipt(),
+        },
+        "camera_motion_anchor": {
+            "track_id": focus_inventory.track_id,
+            "position_m": list(focus_inventory.position),
+            "source": "first deterministic selected row in hash-bound estimated inventory",
+        },
+        "view_derivations": view_derivations,
         "selective_current_scan_goal": {
             "status": "complete",
             "representation": "feature-specific selections from timestamped raw PointCloud2 returns",
