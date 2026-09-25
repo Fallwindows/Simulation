@@ -59,6 +59,19 @@ def _velocity_ramp_integral(unit_time: float) -> float:
     return u**5 * (7.0 + u * (-14.0 + u * (10.0 - 2.5 * u)))
 
 
+def _look_weight(timestamp_s: float, center_s: float, rise_s: float, fall_s: float) -> float:
+    """Return a C3-continuous 0..1..0 envelope for a composed shelf look."""
+
+    start_s, end_s = center_s - rise_s, center_s + fall_s
+    if timestamp_s <= start_s or timestamp_s >= end_s:
+        return 0.0
+    if timestamp_s < center_s:
+        return _velocity_ramp((timestamp_s - start_s) / rise_s)
+    if timestamp_s > center_s:
+        return 1.0 - _velocity_ramp((timestamp_s - center_s) / fall_s)
+    return 1.0
+
+
 def _motion_state(config: TrajectoryConfig, timestamp_s: float) -> _MotionState:
     """Return eased forward distance and speed while preserving endpoint distance."""
 
@@ -162,8 +175,17 @@ class WalkingTrajectory(StraightTrajectory):
         bob_wave = 0.5 - 0.5 * math.cos(bob_phase + 0.08 * math.sin(2.0 * bob_phase))
         pitch_wave = 0.9 * math.sin(bob_phase) + 0.1 * math.sin(2.0 * bob_phase)
 
-        y = y0 + self.config.sway_amplitude_m * gait_scale * sway_wave
+        look_y = 0.0
+        look_yaw = 0.0
+        look_pitch = 0.0
+        for beat in self.config.look_beats:
+            weight = _look_weight(t, beat.center_s, beat.rise_s, beat.fall_s)
+            look_y += weight * beat.lateral_offset_m
+            look_yaw += weight * beat.yaw_offset_deg
+            look_pitch += weight * beat.pitch_offset_deg
+
+        y = y0 + self.config.sway_amplitude_m * gait_scale * sway_wave + look_y
         z = z0 + self.config.bob_amplitude_m * gait_scale * bob_wave
-        yaw = self.config.yaw_deg + self.config.yaw_amplitude_deg * gait_scale * sway_wave
-        pitch = self.config.pitch_amplitude_deg * gait_scale * pitch_wave
+        yaw = self.config.yaw_deg + self.config.yaw_amplitude_deg * gait_scale * sway_wave + look_yaw
+        pitch = self.config.pitch_amplitude_deg * gait_scale * pitch_wave + look_pitch
         return PoseSample(t, (x, y, z), quaternion_from_rpy_deg(0.0, pitch, yaw))

@@ -25,6 +25,31 @@ from simulator.sensors.transforms import (
 )
 
 
+RIGHT_HERO_GROUPS_M = {
+    9.0: ((12.11, -0.60, 1.30), (12.15, -0.83, 1.30), (12.12, -1.02, 1.30), (12.18, -1.23, 1.30)),
+    17.0: ((21.26, -0.60, 1.30), (21.30, -0.83, 1.30), (21.27, -1.02, 1.30), (21.33, -1.23, 1.30)),
+}
+
+RIGHT_HERO_FOOTPRINTS_M = {
+    9.0: tuple((x, y, z) for x in (11.90, 12.50) for y in (-0.52, -1.38) for z in (1.08, 1.65)),
+    17.0: tuple((x, y, z) for x in (21.05, 21.65) for y in (-0.52, -1.38) for z in (1.08, 1.65)),
+}
+
+
+def _camera_projection_ndc(sample, point_m):
+    camera_mount_m = (0.35, 0.0, 1.65)
+    mount_world = rotate_vector(sample.orientation_xyzw, camera_mount_m)
+    camera_world = tuple(sample.position_m[axis] + mount_world[axis] for axis in range(3))
+    relative = tuple(point_m[axis] - camera_world[axis] for axis in range(3))
+    forward = rotate_vector(sample.orientation_xyzw, (1.0, 0.0, 0.0))
+    right = rotate_vector(sample.orientation_xyzw, (0.0, -1.0, 0.0))
+    up = rotate_vector(sample.orientation_xyzw, (0.0, 0.0, 1.0))
+    depth = sum(value * axis for value, axis in zip(relative, forward))
+    horizontal = sum(value * axis for value, axis in zip(relative, right)) / depth
+    vertical = sum(value * axis for value, axis in zip(relative, up)) / depth
+    return depth, horizontal, vertical
+
+
 class MotionTests(unittest.TestCase):
     def setUp(self):
         self.scenario = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/baseline_straight.yaml")
@@ -120,6 +145,82 @@ class MotionTests(unittest.TestCase):
             self.assertLess(max(map(magnitude, velocity)), 1.2)
             self.assertLess(max(map(magnitude, acceleration)), 2.5)
             self.assertLess(max(map(magnitude, jerk)), 35.0)
+
+    def test_configured_shelf_looks_are_c2_at_boundaries_and_peak(self):
+        walking_config = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml").trajectory
+        with_looks = WalkingTrajectory(walking_config)
+        without_looks = WalkingTrajectory(replace(walking_config, look_beats=()))
+
+        def look_delta(timestamp_s):
+            pose = with_looks.sample(timestamp_s)
+            baseline = without_looks.sample(timestamp_s)
+            pose_rpy = rpy_deg_from_quaternion(pose.orientation_xyzw)
+            baseline_rpy = rpy_deg_from_quaternion(baseline.orientation_xyzw)
+            return (
+                pose.position_m[1] - baseline.position_m[1],
+                pose_rpy[1] - baseline_rpy[1],
+                pose_rpy[2] - baseline_rpy[2],
+            )
+
+        h = 1e-4
+        for beat in walking_config.look_beats:
+            for boundary_s in (beat.center_s - beat.rise_s, beat.center_s, beat.center_s + beat.fall_s):
+                left = look_delta(boundary_s - h)
+                center = look_delta(boundary_s)
+                right = look_delta(boundary_s + h)
+                left_velocity = tuple((center[i] - left[i]) / h for i in range(3))
+                right_velocity = tuple((right[i] - center[i]) / h for i in range(3))
+                left_acceleration = tuple((center[i] - 2.0 * left[i] + look_delta(boundary_s - 2.0 * h)[i]) / (h * h) for i in range(3))
+                right_acceleration = tuple((look_delta(boundary_s + 2.0 * h)[i] - 2.0 * right[i] + center[i]) / (h * h) for i in range(3))
+                for left_value, right_value in zip(left_velocity, right_velocity):
+                    self.assertAlmostEqual(left_value, right_value, delta=2e-5)
+                for left_value, right_value in zip(left_acceleration, right_acceleration):
+                    self.assertAlmostEqual(left_value, right_value, delta=1e-3)
+
+    def test_right_shelf_look_path_clearance_and_hero_group_coverage(self):
+        walking = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
+        walking_config = walking.trajectory
+        trajectory = WalkingTrajectory(walking_config)
+        samples = trajectory.sample_many()
+        self.assertEqual(walking_config.duration_s, 20.5)
+        self.assertEqual(walking_config.sample_hz, 30.0)
+        self.assertEqual(len(samples), 616)
+
+        # The nearest right-side fixture edge is y=-0.535 m.  Keep at least a
+        # 30 cm center clearance while the shared camera/LiDAR rig passes it.
+        self.assertGreaterEqual(min(sample.position_m[1] for sample in samples), -0.235)
+        sampled_rpy = [rpy_deg_from_quaternion(sample.orientation_xyzw) for sample in samples]
+        dt = 1.0 / walking_config.sample_hz
+        yaw_velocity = [(right[2] - left[2]) / dt for left, right in zip(sampled_rpy, sampled_rpy[1:])]
+        pitch_velocity = [(right[1] - left[1]) / dt for left, right in zip(sampled_rpy, sampled_rpy[1:])]
+        yaw_acceleration = [(right - left) / dt for left, right in zip(yaw_velocity, yaw_velocity[1:])]
+        pitch_acceleration = [(right - left) / dt for left, right in zip(pitch_velocity, pitch_velocity[1:])]
+        self.assertLess(max(map(abs, yaw_velocity)), 40.0)
+        self.assertLess(max(map(abs, pitch_velocity)), 30.0)
+        self.assertLess(max(map(abs, yaw_acceleration)), 120.0)
+        self.assertLess(max(map(abs, pitch_acceleration)), 240.0)
+        for timestamp_s, group in RIGHT_HERO_GROUPS_M.items():
+            sample = trajectory.sample(timestamp_s)
+            _roll, pitch_deg, yaw_deg = rpy_deg_from_quaternion(sample.orientation_xyzw)
+            self.assertLess(yaw_deg, -20.0)
+            self.assertGreater(pitch_deg, 8.0)
+            projections = [_camera_projection_ndc(sample, point) for point in group]
+            self.assertTrue(all(depth > 0.8 for depth, _horizontal, _vertical in projections))
+            self.assertTrue(all(abs(horizontal) < 1.0 for _depth, horizontal, _vertical in projections))
+            # 16:9 vertical half-FOV is tan^-1(9/16) for the configured 90° horizontal FOV.
+            self.assertTrue(all(abs(vertical) < 9.0 / 16.0 for _depth, _horizontal, vertical in projections))
+            horizontal_span = max(horizontal for _depth, horizontal, _vertical in projections) - min(horizontal for _depth, horizontal, _vertical in projections)
+            self.assertGreater(horizontal_span, 0.25)
+            footprint = [_camera_projection_ndc(sample, point) for point in RIGHT_HERO_FOOTPRINTS_M[timestamp_s]]
+            self.assertTrue(all(abs(horizontal) < 0.8 for _depth, horizontal, _vertical in footprint))
+            self.assertTrue(all(abs(vertical) < 9.0 / 16.0 for _depth, _horizontal, vertical in footprint))
+
+            rig_world = Transform("sim_world", "sensor_rig", sample.position_m, sample.orientation_xyzw)
+            camera_world = transform_point(rig_world, walking.camera.pose_in_rig.position_m)
+            lidar_world = transform_point(rig_world, walking.lidar.pose_in_rig.position_m)
+            static_baseline = math.dist(walking.camera.pose_in_rig.position_m, walking.lidar.pose_in_rig.position_m)
+            self.assertAlmostEqual(math.dist(camera_world, lidar_world), static_baseline, places=12)
+            self.assertLess(rotate_vector(sample.orientation_xyzw, (1.0, 0.0, 0.0))[1], -0.3)
 
     def test_pose_interpolation_is_continuous_and_uses_shortest_rotation(self):
         start = PoseSample(2.0, (1.0, -2.0, 0.5), quaternion_from_rpy_deg(0.0, 0.0, 170.0))

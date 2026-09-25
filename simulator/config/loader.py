@@ -93,6 +93,16 @@ class LidarConfig:
 
 
 @dataclass(frozen=True)
+class LookBeatConfig:
+    center_s: float
+    rise_s: float
+    fall_s: float
+    yaw_offset_deg: float
+    pitch_offset_deg: float
+    lateral_offset_m: float
+
+
+@dataclass(frozen=True)
 class TrajectoryConfig:
     name: str
     duration_s: float
@@ -107,6 +117,7 @@ class TrajectoryConfig:
     yaw_amplitude_deg: float = 0.0
     pitch_amplitude_deg: float = 0.0
     speed_variation_fraction: float = 0.0
+    look_beats: tuple[LookBeatConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -224,7 +235,49 @@ def _trajectory(data: dict[str, Any]) -> TrajectoryConfig:
         key: _finite(data.get(key, 0.0), f"trajectory.{key}")
         for key in ("bob_amplitude_m", "bob_hz", "sway_amplitude_m", "sway_hz", "yaw_amplitude_deg", "pitch_amplitude_deg")
     }
-    return TrajectoryConfig(str(data["name"]), duration, speed, _tuple3(data["start_position_m"], "trajectory.start_position_m"), _finite(data.get("yaw_deg", 0.0), "trajectory.yaw_deg"), sample_hz, oscillations["bob_amplitude_m"], oscillations["bob_hz"], oscillations["sway_amplitude_m"], oscillations["sway_hz"], oscillations["yaw_amplitude_deg"], oscillations["pitch_amplitude_deg"], variation)
+    raw_look_beats = data.get("look_beats", [])
+    if not isinstance(raw_look_beats, list):
+        raise ValueError("trajectory.look_beats must be a list")
+    look_beats = []
+    previous_end_s = 0.0
+    for index, raw in enumerate(raw_look_beats):
+        if not isinstance(raw, dict):
+            raise ValueError(f"trajectory.look_beats[{index}] must be a mapping")
+        center_s = _finite(raw.get("center_s"), f"trajectory.look_beats[{index}].center_s")
+        rise_s = _positive(raw.get("rise_s"), f"trajectory.look_beats[{index}].rise_s")
+        fall_s = _positive(raw.get("fall_s"), f"trajectory.look_beats[{index}].fall_s")
+        start_s, end_s = center_s - rise_s, center_s + fall_s
+        if start_s < 0.0 or end_s > duration:
+            raise ValueError(f"trajectory.look_beats[{index}] must fit inside trajectory.duration_s")
+        if index and start_s < previous_end_s:
+            raise ValueError("trajectory.look_beats must be ordered and non-overlapping")
+        previous_end_s = end_s
+        look_beats.append(
+            LookBeatConfig(
+                center_s=center_s,
+                rise_s=rise_s,
+                fall_s=fall_s,
+                yaw_offset_deg=_finite(raw.get("yaw_offset_deg", 0.0), f"trajectory.look_beats[{index}].yaw_offset_deg"),
+                pitch_offset_deg=_finite(raw.get("pitch_offset_deg", 0.0), f"trajectory.look_beats[{index}].pitch_offset_deg"),
+                lateral_offset_m=_finite(raw.get("lateral_offset_m", 0.0), f"trajectory.look_beats[{index}].lateral_offset_m"),
+            )
+        )
+    return TrajectoryConfig(
+        str(data["name"]),
+        duration,
+        speed,
+        _tuple3(data["start_position_m"], "trajectory.start_position_m"),
+        _finite(data.get("yaw_deg", 0.0), "trajectory.yaw_deg"),
+        sample_hz,
+        oscillations["bob_amplitude_m"],
+        oscillations["bob_hz"],
+        oscillations["sway_amplitude_m"],
+        oscillations["sway_hz"],
+        oscillations["yaw_amplitude_deg"],
+        oscillations["pitch_amplitude_deg"],
+        variation,
+        tuple(look_beats),
+    )
 
 
 def load_contracts(path: str | Path) -> dict[str, Any]:
