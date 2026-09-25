@@ -1,0 +1,89 @@
+{
+  "fps": 30,
+  "new_goal_status": {
+    "selective_feature_specific_lidar": "unfinished",
+    "motion_validation": "blocked_pending_replacement_and_transition_review",
+    "known_blockers": [
+      "The retained renderer projects the complete finalized SLAM map rather than feature-specific current-scan returns.",
+      "The retained film has hard source resets at frames 540, 660, 750, 840, 960, 1080, and 1200.",
+      "The existing 1350-frame audit found the largest adjacent visual change at the RGB-to-technical boundary 539->540.",
+      "Continuous camera interpolation removes integer pose indexing in this port, but the resulting clips still require visual motion review."
+    ]
+  },
+  "profiles": {
+    "preview": {"width": 1280, "height": 720, "crf": 23, "preset": "veryfast"},
+    "delivery": {"width": 1920, "height": 1080, "crf": 18, "preset": "fast"}
+  },
+  "views": [
+    {
+      "id": "sensor_activation",
+      "presentation_role": "lidar",
+      "frames": 120,
+      "title": "SENSOR GEOMETRY",
+      "subtitle": "OFFLINE MAP-POINT RAY EXPLANATION · NOT A CURRENT SCAN",
+      "capability_focus": "sensor-ray geometry",
+      "point_source": "legacy finalized offline map points",
+      "selective_current_scan_status": "unfinished"
+    },
+    {
+      "id": "lidar_environment",
+      "presentation_role": "lidar",
+      "frames": 90,
+      "title": "AISLE GEOMETRY",
+      "subtitle": "OFFLINE LIDAR-SLAM MAP CLOUD · POINTS ONLY",
+      "capability_focus": "environment geometry",
+      "point_source": "legacy finalized offline map points",
+      "selective_current_scan_status": "unfinished"
+    },
+    {
+      "id": "persistent_map",
+      "presentation_role": "map",
+      "frames": 90,
+      "title": "PERSISTENT MAP",
+      "subtitle": "FINALIZED OFFLINE SLAM SNAPSHOT · ESTIMATED PATH",
+      "capability_focus": "persistent mapping",
+      "point_source": "legacy finalized offline map points",
+      "selective_current_scan_status": "unfinished"
+    },
+    {
+      "id": "object_association",
+      "presentation_role": "reconstruction",
+      "frames": 120,
+      "title": "OBJECT ASSOCIATION",
+      "subtitle": "ESTIMATED CENTERS · EXTENTS NOT ESTIMATED",
+      "capability_focus": "object association",
+      "point_source": "legacy finalized offline map points plus estimated centers",
+      "selective_current_scan_status": "unfinished"
+    },
+    {
+      "id": "object_detail",
+      "presentation_role": "reconstruction",
+      "frames": 120,
+      "title": "PERSISTENT ITEM RECORD",
+      "subtitle": "LIDAR-LOCALIZED CENTER · OBSERVATION SUPPORT",
+      "capability_focus": "object targeting detail",
+      "point_source": "legacy finalized offline map points plus estimated center",
+      "selective_current_scan_status": "unfinished"
+    },
+    {
+      "id": "observed_aisle_overview",
+      "presentation_role": "reconstruction",
+      "frames": 120,
+      "title": "OBSERVED AISLE",
+      "subtitle": "MAP + PATH + PERSISTENT ESTIMATED CENTERS",
+      "capability_focus": "integrated observed aisle",
+      "point_source": "legacy finalized offline map points plus estimated centers",
+      "selective_current_scan_status": "unfinished"
+    },
+    {
+      "id": "final_technical_view",
+      "presentation_role": "reconstruction",
+      "frames": 150,
+      "title": "SENSOR-DERIVED MAP",
+      "subtitle": "SIMULATED ENVIRONMENT · PERSISTENT ITEM LOCATIONS",
+      "capability_focus": "final technical summary",
+      "point_source": "legacy finalized offline map points plus estimated centers",
+      "selective_current_scan_status": "unfinished"
+    }
+  ]
+}
