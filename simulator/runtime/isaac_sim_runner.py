@@ -10,8 +10,11 @@ ground-truth pose topic, which is intentionally separate from SLAM odometry.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -24,6 +27,48 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+def _ensure_bundled_ros_environment() -> dict[str, object]:
+    """Validate and normalize Isaac's bundled ROS environment before startup.
+
+    The PowerShell launcher enters ``python.bat`` with ``ROS_DISTRO`` unset so
+    Isaac selects its bundled Jazzy distribution.  Keeping the signed library
+    and ament prefixes explicit here also supports direct runner invocation and
+    records the effective values in every runtime receipt.
+    """
+
+    isaac_root_value = os.environ.get("ISAAC_PATH")
+    isaac_root = (
+        Path(isaac_root_value).resolve()
+        if isaac_root_value
+        else Path(sys.executable).resolve().parents[2]
+    )
+    bundled_prefix = isaac_root / "exts" / "isaacsim.ros2.core" / "jazzy"
+    bundled_lib = bundled_prefix / "lib"
+    if not bundled_lib.is_dir():
+        raise FileNotFoundError(f"Isaac bundled ROS library path is missing: {bundled_lib}")
+
+    os.environ["ROS_DISTRO"] = "jazzy"
+    os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_zenoh_cpp")
+    path_entries = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if entry]
+    bundled_key = os.path.normcase(str(bundled_lib))
+    path_entries = [entry for entry in path_entries if os.path.normcase(os.path.abspath(entry)) != bundled_key]
+    os.environ["PATH"] = os.pathsep.join([str(bundled_lib), *path_entries])
+
+    ament_entries = [entry for entry in os.environ.get("AMENT_PREFIX_PATH", "").split(os.pathsep) if entry]
+    prefix_key = os.path.normcase(str(bundled_prefix))
+    if all(os.path.normcase(os.path.abspath(entry)) != prefix_key for entry in ament_entries):
+        ament_entries.append(str(bundled_prefix))
+    os.environ["AMENT_PREFIX_PATH"] = os.pathsep.join(ament_entries)
+    snapshot = {
+        "ros_distro": os.environ["ROS_DISTRO"],
+        "rmw_implementation": os.environ["RMW_IMPLEMENTATION"],
+        "ament_prefix_path": os.environ["AMENT_PREFIX_PATH"],
+        "path_prefix": os.environ["PATH"].split(os.pathsep)[0],
+    }
+    print(f"[grocery-runtime] ROS environment {json.dumps(snapshot, sort_keys=True)}", flush=True)
+    return snapshot
+
+
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the grocery aisle Isaac Sim sensor runtime")
     parser.add_argument("--scenario", default=str(REPO_ROOT / "config/scenarios/walking_baseline.yaml"))
@@ -32,7 +77,63 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--realtime", action="store_true", help="Pace the simulation at 60 Hz for external ROS/dashboard consumers")
     parser.add_argument("--renderer", default="RaytracedLighting")
     parser.add_argument("--status-path", default=str(REPO_ROOT / "runs/isaac_runtime_status.json"))
+    parser.add_argument("--capture-dir", default="", help="Empty directory for selected-pose lossless PNG output")
+    parser.add_argument("--capture-frames", default="", help="Comma-separated 60 Hz simulation frame indices")
+    parser.add_argument("--capture-width", type=int, default=1280)
+    parser.add_argument("--capture-height", type=int, default=720)
+    parser.add_argument("--capture-rt-subframes", type=int, default=4)
+    parser.add_argument(
+        "--capture-only",
+        action="store_true",
+        help="Build and drive the scene for look-development without starting ROS or RTX LiDAR",
+    )
     return parser.parse_args()
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _capture_provenance(args: argparse.Namespace, scenario) -> dict[str, object]:
+    """Bind representative pixels to source, inputs, and renderer settings."""
+
+    def git(*git_args: str) -> str:
+        completed = subprocess.run(
+            ["git", *git_args],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip()
+
+    scenario_path = Path(args.scenario).resolve()
+    config_inputs = [{"role": "scenario", "path": str(scenario_path), "sha256": _sha256_path(scenario_path)}]
+    try:
+        scenario_links = json.loads(scenario_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        scenario_links = {}
+    for role in ("environment", "sensors", "trajectory", "mapping"):
+        relative_path = scenario_links.get(role)
+        if isinstance(relative_path, str):
+            input_path = (scenario_path.parent / relative_path).resolve()
+            config_inputs.append({"role": role, "path": str(input_path), "sha256": _sha256_path(input_path)})
+    asset_manifest = Path(scenario.environment.asset_manifest_path).resolve()
+    return {
+        "git_commit": git("rev-parse", "HEAD"),
+        "git_tree": git("rev-parse", "HEAD^{tree}"),
+        "git_worktree_dirty": bool(git("status", "--porcelain")),
+        "config_inputs": config_inputs,
+        "asset_manifest": {"path": str(asset_manifest), "sha256": _sha256_path(asset_manifest)},
+        "renderer": args.renderer,
+        "headless": bool(args.headless),
+        "capture_only": bool(args.capture_only),
+        "simulation_hz": 60.0,
+    }
 
 
 def _sim_time_message(seconds: float):
@@ -53,6 +154,19 @@ def lidar_runtime_spec(lidar_config) -> dict[str, object]:
     from simulator.sensors.transforms import quaternion_from_rpy_deg, quaternion_xyzw_to_wxyz
 
     orientation_xyzw = quaternion_from_rpy_deg(*lidar_config.pose_in_rig.rpy_deg)
+    vertical_samples = int(lidar_config.vertical_samples)
+    vertical_min_deg, vertical_max_deg = (float(value) for value in lidar_config.vertical_fov_deg)
+    elevation_step_deg = (
+        0.0
+        if vertical_samples == 1
+        else (vertical_max_deg - vertical_min_deg) / float(vertical_samples - 1)
+    )
+    elevations_deg = [
+        vertical_min_deg + index * elevation_step_deg
+        for index in range(vertical_samples)
+    ]
+    horizontal_samples = int(lidar_config.horizontal_samples)
+    pattern_firing_rate_hz = int(round(float(lidar_config.hz) * horizontal_samples))
     return {
         "tick_rate_hz": float(lidar_config.hz),
         "near_range_m": float(lidar_config.min_range_m),
@@ -64,7 +178,16 @@ def lidar_runtime_spec(lidar_config) -> dict[str, object]:
         "mount_semantics": "rig_relative",
         "world_pose_semantics": "sensor_rig_world_pose_composed_with_local_mount",
         "sensor_asset": "Example_Rotary",
-        "scan_pattern_source": "Isaac Sim 6.1 Example_Rotary asset",
+        "sensor_asset_source": "locally authored OmniLidar schema; no USD reference",
+        "scan_pattern_source": "scenario-derived local rotary attributes",
+        "scan_type": "ROTARY",
+        "rotation_direction": "CW",
+        "horizontal_samples": horizontal_samples,
+        "vertical_samples": vertical_samples,
+        "vertical_fov_deg": [vertical_min_deg, vertical_max_deg],
+        "elevation_angles_deg": elevations_deg,
+        "pattern_firing_rate_hz": pattern_firing_rate_hz,
+        "expected_points_per_scan": horizontal_samples * vertical_samples,
     }
 
 
@@ -107,8 +230,252 @@ def _define_xform(stage, path: str, frame_name: str):
     return prim
 
 
-def _build_world(stage, scenario):
+def store_shell_spec(environment) -> dict[str, object]:
+    """Return deterministic store-shell geometry and motivated fixture data."""
+
+    ceiling_z = max(3.15, float(environment.shelf_height_m) + 0.95)
+    shell_start_x = -1.0
+    shell_end_x = float(environment.length_m) + 1.5
+    shell_length = shell_end_x - shell_start_x
+    shell_center_x = (shell_start_x + shell_end_x) / 2.0
+    shell_half_width = float(environment.width_m) / 2.0 + 0.95
+    boxes: list[dict[str, object]] = [
+        {
+            "name": "ceiling_slab",
+            "center_m": (shell_center_x, 0.0, ceiling_z + 0.05),
+            "size_m": (shell_length, shell_half_width * 2.0, 0.10),
+            "kind": "ceiling",
+        },
+        {
+            "name": "end_wall",
+            "center_m": (shell_end_x, 0.0, ceiling_z / 2.0),
+            "size_m": (0.14, shell_half_width * 2.0, ceiling_z),
+            "kind": "wall",
+        },
+    ]
+    for label, sign in (("left", -1.0), ("right", 1.0)):
+        wall_y = sign * shell_half_width
+        boxes.extend(
+            [
+                {
+                    "name": f"side_wall_{label}",
+                    "center_m": (shell_center_x, wall_y, ceiling_z / 2.0),
+                    "size_m": (shell_length, 0.14, ceiling_z),
+                    "kind": "wall",
+                },
+                {
+                    "name": f"baseboard_{label}",
+                    "center_m": (shell_center_x, wall_y - sign * 0.09, 0.12),
+                    "size_m": (shell_length, 0.055, 0.24),
+                    "kind": "baseboard",
+                },
+            ]
+        )
+
+    # Fine terrazzo control joints break up the broad floor plane without
+    # becoming dark lane markers.  They sit only 2 mm above the finish plane.
+    boxes.append(
+        {
+            "name": "floor_joint_longitudinal",
+            "center_m": (shell_center_x, 0.0, 0.001),
+            "size_m": (shell_length - 0.6, 0.012, 0.002),
+            "kind": "floor_inlay",
+        }
+    )
+    joint_x = shell_start_x + 1.2
+    while joint_x < shell_end_x:
+        boxes.append(
+            {
+                "name": f"floor_joint_cross_{len(boxes):03d}",
+                "center_m": (round(joint_x, 4), 0.0, 0.001),
+                "size_m": (0.012, 2.64, 0.002),
+                "kind": "floor_inlay",
+            }
+        )
+        joint_x += 1.2
+
+    # A 0.6 x 1.2 m suspended-ceiling rhythm supplies believable scale while
+    # remaining shallow enough to avoid intruding into the calibrated camera.
+    grid_z = ceiling_z - 0.065
+    grid_y = -shell_half_width + 0.30
+    while grid_y < shell_half_width:
+        boxes.append(
+            {
+                "name": f"ceiling_rail_long_{len(boxes):03d}",
+                "center_m": (shell_center_x, round(grid_y, 4), grid_z),
+                "size_m": (shell_length, 0.018, 0.022),
+                "kind": "ceiling_grid",
+            }
+        )
+        grid_y += 0.60
+    grid_x = shell_start_x + 0.60
+    while grid_x < shell_end_x:
+        boxes.append(
+            {
+                "name": f"ceiling_rail_cross_{len(boxes):03d}",
+                "center_m": (round(grid_x, 4), 0.0, grid_z),
+                "size_m": (0.018, shell_half_width * 2.0, 0.022),
+                "kind": "ceiling_grid",
+            }
+        )
+        grid_x += 1.20
+
+    lights: list[dict[str, object]] = []
+    fixture_index = 0
+    fixture_x = 1.4
+    while fixture_x <= float(environment.length_m) + 0.2:
+        for fixture_y in (-1.05, 1.05):
+            name = f"panel_{fixture_index:02d}"
+            boxes.append(
+                {
+                    "name": name,
+                    "center_m": (fixture_x, fixture_y, ceiling_z - 0.085),
+                    "size_m": (0.92, 0.34, 0.025),
+                    "kind": "light_panel",
+                }
+            )
+            lights.append(
+                {
+                    "name": name,
+                    "position_m": (fixture_x, fixture_y, ceiling_z - 0.11),
+                    "width_m": 0.86,
+                    "height_m": 0.29,
+                    # Normalized USD area lights need more authored energy than
+                    # the target illuminance value suggests.  This calibration
+                    # keeps the 450 lux scenario readable without multiplying
+                    # the number of fixtures or adding unmotivated point lights.
+                    "intensity": float(environment.lighting_lux) * 18.0,
+                    "color": (1.0, 0.96, 0.88),
+                    # Aim each broad diffuser gently toward its adjacent shelf.
+                    # The visible panel remains flush with the ceiling grid.
+                    "rotation_rpy_deg": (-32.0 if fixture_y < 0.0 else 32.0, 0.0, 0.0),
+                }
+            )
+            fixture_index += 1
+        fixture_x += 2.4
+
+    # Three shallow refrigerated bays add depth and stocked context at the
+    # terminus.  Their facings are deliberately simple, distant geometry; the
+    # reviewed retail asset library replaces foreground procedural packages.
+    end_case_x = shell_end_x - 0.13
+    product_kinds = ("end_product_red", "end_product_yellow", "end_product_blue")
+    for case_index, case_y in enumerate((-1.35, 0.0, 1.35)):
+        boxes.append(
+            {
+                "name": f"end_case_interior_{case_index}",
+                "center_m": (end_case_x, case_y, 1.25),
+                "size_m": (0.09, 1.14, 1.86),
+                "kind": "case_interior",
+            }
+        )
+        for edge_y in (-0.59, 0.59):
+            boxes.append(
+                {
+                    "name": f"end_case_frame_{case_index}_{'l' if edge_y < 0 else 'r'}",
+                    "center_m": (end_case_x - 0.052, case_y + edge_y, 1.25),
+                    "size_m": (0.055, 0.055, 1.94),
+                    "kind": "upright",
+                }
+            )
+        boxes.append(
+            {
+                "name": f"end_case_header_{case_index}",
+                "center_m": (end_case_x - 0.055, case_y, 2.20),
+                "size_m": (0.05, 1.20, 0.14),
+                "kind": "light_panel",
+            }
+        )
+        for row in range(3):
+            for column in range(4):
+                boxes.append(
+                    {
+                        "name": f"end_case_product_{case_index}_{row}_{column}",
+                        "center_m": (
+                            end_case_x - 0.061,
+                            case_y - 0.405 + column * 0.27,
+                            0.62 + row * 0.48,
+                        ),
+                        "size_m": (0.018, 0.19, 0.31),
+                        "kind": product_kinds[(case_index + row + column) % len(product_kinds)],
+                    }
+                )
+    # A suspended category blade and matching end-wall band make the aisle
+    # terminate in recognizable store architecture.  Geometric color blocks
+    # remain legible at sensor resolution without relying on raster text.
+    sign_x = shell_end_x - 1.15
+    boxes.extend(
+        [
+            {
+                "name": "overhead_category_blade",
+                "center_m": (sign_x, 0.0, ceiling_z - 0.60),
+                "size_m": (0.055, 2.45, 0.50),
+                "kind": "sign_green",
+            },
+            {
+                "name": "overhead_category_accent_left",
+                "center_m": (sign_x - 0.031, -0.47, ceiling_z - 0.60),
+                "size_m": (0.008, 0.92, 0.095),
+                "kind": "sign_cream",
+            },
+            {
+                "name": "overhead_category_accent_right",
+                "center_m": (sign_x - 0.031, 0.70, ceiling_z - 0.60),
+                "size_m": (0.008, 0.42, 0.095),
+                "kind": "sign_cream",
+            },
+            {
+                "name": "end_wall_brand_band",
+                "center_m": (shell_end_x - 0.081, 0.0, ceiling_z - 0.37),
+                "size_m": (0.036, shell_half_width * 1.62, 0.18),
+                "kind": "sign_green",
+            },
+        ]
+    )
+    return {
+        "ceiling_height_m": ceiling_z,
+        "boxes": tuple(boxes),
+        "lights": tuple(lights),
+        # A restrained cool dome represents secondary bounce from the finished
+        # store shell and prevents black shelf cavities under the area lights.
+        "ambient_intensity": float(environment.lighting_lux) * 1.2,
+    }
+
+
+def _build_store_shell(stage, environment, builder) -> int:
     from pxr import Gf, UsdGeom, UsdLux
+
+    spec = store_shell_spec(environment)
+    for box in spec["boxes"]:
+        builder.build_static_box(
+            f"/World/GroceryAisle/store_shell/{box['kind']}/{box['name']}",
+            box["center_m"],
+            box["size_m"],
+            box["kind"],
+        )
+    for light_spec in spec["lights"]:
+        light = UsdLux.RectLight.Define(
+            stage,
+            f"/World/GroceryAisle/lighting/{light_spec['name']}",
+        )
+        light.GetWidthAttr().Set(light_spec["width_m"])
+        light.GetHeightAttr().Set(light_spec["height_m"])
+        light.GetIntensityAttr().Set(light_spec["intensity"])
+        light.GetColorAttr().Set(Gf.Vec3f(*light_spec["color"]))
+        light.GetNormalizeAttr().Set(True)
+        light_api = UsdGeom.XformCommonAPI(light)
+        light_api.SetTranslate(Gf.Vec3d(*light_spec["position_m"]))
+        light_api.SetRotate(
+            Gf.Vec3f(*light_spec["rotation_rpy_deg"]),
+            UsdGeom.XformCommonAPI.RotationOrderXYZ,
+        )
+    ambient = UsdLux.DomeLight.Define(stage, "/World/GroceryAisle/lighting/ambient_bounce")
+    ambient.GetIntensityAttr().Set(spec["ambient_intensity"])
+    ambient.GetColorAttr().Set(Gf.Vec3f(0.92, 0.95, 1.0))
+    return len(spec["boxes"]) + len(spec["lights"]) + 1
+
+
+def _build_world(stage, scenario):
+    from pxr import UsdGeom
 
     from simulator.environment.aisle_builder import build_aisle_layout
     from simulator.environment.isaac_builder import IsaacAisleBuilder
@@ -121,15 +488,9 @@ def _build_world(stage, scenario):
     world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
     _set_name_override(world, "sim_world")
     layout = build_aisle_layout(scenario.environment)
-    primitive_count = IsaacAisleBuilder(stage=stage).build(layout, "/World/GroceryAisle")
-
-    dome = UsdLux.DomeLight.Define(stage, "/World/DomeLight")
-    dome.GetIntensityAttr().Set(float(scenario.environment.lighting_lux))
-    dome.GetColorAttr().Set(Gf.Vec3f(1.0, 0.96, 0.9))
-    distant = UsdLux.DistantLight.Define(stage, "/World/DistantLight")
-    distant.GetIntensityAttr().Set(2500.0)
-    distant.GetAngleAttr().Set(0.5)
-    UsdGeom.XformCommonAPI(distant).SetRotate(Gf.Vec3f(-35.0, -25.0, 25.0))
+    builder = IsaacAisleBuilder(stage=stage)
+    primitive_count = builder.build(layout, "/World/GroceryAisle")
+    primitive_count += _build_store_shell(stage, scenario.environment, builder)
 
     return layout, primitive_count
 
@@ -246,28 +607,45 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
 
 def _create_lidar(lidar_path: str, lidar_config, topic: str):
     from isaacsim.sensors.experimental.rtx import Lidar, LidarSensor
-    from pxr import Sdf
+    from pxr import Sdf, Vt
 
     spec = lidar_runtime_spec(lidar_config)
-    # Create the current native OmniLidar prim locally.  The downloadable
-    # Example_Rotary asset is optional and may not be present on a workstation;
-    # the schema-created sensor is still a real RTX LiDAR with scenario-derived
-    # scan bounds, cadence, and pose.
-    lidar = Lidar.create(
-        path=lidar_path,
-        config="Example_Rotary",
+    # Construct the native OmniLidar schema directly.  Lidar.create(config=...)
+    # resolves a downloadable reference even when all scan attributes are
+    # supplied; the direct constructor stays local and deterministic.
+    lidar = Lidar(
+        lidar_path,
         accumulate_outputs=True,
         tick_rate=spec["tick_rate_hz"],
         translations=[spec["translation_m"]],
         orientations=[spec["orientation_wxyz_isaac"]],
         attributes={
-            "omni:sensor:Core:scanRateBaseHz": spec["tick_rate_hz"],
+            "omni:sensor:Core:scanType": spec["scan_type"],
+            "omni:sensor:Core:rotationDirection": spec["rotation_direction"],
+            "omni:sensor:Core:scanRateBaseHz": int(round(spec["tick_rate_hz"])),
             "omni:sensor:Core:nearRangeM": spec["near_range_m"],
             "omni:sensor:Core:farRangeM": spec["far_range_m"],
-            "omni:sensor:Core:patternFiringRateHz": 20000,
+            "omni:sensor:Core:patternFiringRateHz": spec["pattern_firing_rate_hz"],
+            "omni:sensor:Core:numberOfChannels": spec["vertical_samples"],
+            "omni:sensor:Core:numberOfEmitters": spec["vertical_samples"],
         },
     )
     prim = lidar.prims[0]
+    # Replicator's generic attribute helper expands a Python list into the Vt
+    # array constructor as positional arguments.  Set typed USD arrays on the
+    # schema prim directly so all 32 channels reach the renderer unchanged.
+    prim.GetAttribute("omni:sensor:Core:emitterState:s001:azimuthDeg").Set(
+        Vt.FloatArray([0.0] * spec["vertical_samples"])
+    )
+    prim.GetAttribute("omni:sensor:Core:emitterState:s001:channelId").Set(
+        Vt.UIntArray(range(1, spec["vertical_samples"] + 1))
+    )
+    prim.GetAttribute("omni:sensor:Core:emitterState:s001:elevationDeg").Set(
+        Vt.FloatArray(spec["elevation_angles_deg"])
+    )
+    prim.GetAttribute("omni:sensor:Core:emitterState:s001:fireTimeNs").Set(
+        Vt.UIntArray([0] * spec["vertical_samples"])
+    )
     name_override = prim.GetAttribute("isaac:nameOverride")
     if not name_override:
         name_override = prim.CreateAttribute("isaac:nameOverride", Sdf.ValueTypeNames.String)
@@ -331,6 +709,8 @@ def _publish_static_tf(broadcaster, scenario) -> None:
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
+    ros_environment = _ensure_bundled_ros_environment()
+
     from isaacsim import SimulationApp
 
     from simulator.config.loader import load_scenario
@@ -344,6 +724,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     trajectory_cls = WalkingTrajectory if scenario.trajectory.name.lower() == "walking" else StraightTrajectory
     trajectory = trajectory_cls(scenario.trajectory)
     frames = args.frames if args.frames > 0 else max(1, math.ceil(scenario.trajectory.duration_s * 60.0))
+    from simulator.runtime.representative_capture import parse_capture_frames, validate_capture_dimensions
+
+    selected_capture_frames = parse_capture_frames(args.capture_frames, frames)
+    if bool(args.capture_dir) != bool(selected_capture_frames):
+        raise ValueError("--capture-dir and a non-empty --capture-frames list must be supplied together")
+    validate_capture_dimensions(args.capture_width, args.capture_height, args.capture_rt_subframes)
     noise_config = NoiseConfig.from_mapping(scenario.sensor_overrides.get("noise"))
 
     print("[grocery-runtime] starting SimulationApp", flush=True)
@@ -351,6 +737,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     node = None
     executor = None
     executor_thread = None
+    representative_capture = None
     runtime_ok = False
     try:
         import isaacsim.core.experimental.utils.app as app_utils
@@ -358,9 +745,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         import omni.usd
         from isaacsim.core.simulation_manager import SimulationManager
 
-        app_utils.enable_extension("isaacsim.ros2.bridge")
-        simulation_app.update()
-        print("[grocery-runtime] ROS 2 bridge loaded", flush=True)
+        if not args.capture_only:
+            app_utils.enable_extension("isaacsim.ros2.bridge")
+            simulation_app.update()
+            if not app_utils.is_extension_enabled("isaacsim.ros2.bridge"):
+                raise RuntimeError("isaacsim.ros2.bridge failed during extension startup")
+            print("[grocery-runtime] ROS 2 bridge loaded", flush=True)
         stage_utils.set_stage_units(meters_per_unit=1.0)
         omni.usd.get_context().new_stage()
         stage = omni.usd.get_context().get_stage()
@@ -369,6 +759,86 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         layout, primitive_count = _build_world(stage, scenario)
         print("[grocery-runtime] building sensor rig USD", flush=True)
         _, camera_path, lidar_path = _build_sensor_rig(stage, scenario)
+        if selected_capture_frames:
+            from simulator.runtime.representative_capture import RepresentativeFrameCapture
+
+            representative_capture = RepresentativeFrameCapture(
+                Path(args.capture_dir),
+                camera_path,
+                (args.capture_width, args.capture_height),
+                selected_capture_frames,
+                args.capture_rt_subframes,
+                seed=scenario.seed,
+                provenance=_capture_provenance(args, scenario),
+            )
+        if args.capture_only:
+            print("[grocery-runtime] initializing capture-only simulation", flush=True)
+            SimulationManager.setup_simulation(dt=1.0 / 60.0, device="cpu")
+            simulation_app.update()
+            app_utils.play()
+            from omni.timeline import get_timeline_interface
+            from pxr import Gf, UsdGeom
+            from simulator.sensors.transforms import rpy_deg_from_quaternion
+
+            timeline = get_timeline_interface()
+            rig_api = UsdGeom.XformCommonAPI(stage.GetPrimAtPath("/World/SensorRig"))
+            last_timestamp_s = None
+            render_phase_offsets_s = []
+            simulation_dt_s = 1.0 / 60.0
+            for frame in range(frames):
+                wall_start = time.perf_counter()
+                timeline_before_s = float(timeline.get_current_time())
+                commanded_timestamp_s = timeline_before_s + simulation_dt_s
+                commanded_sample = trajectory.sample(commanded_timestamp_s)
+                rig_api.SetTranslate(Gf.Vec3d(*commanded_sample.position_m))
+                rig_api.SetRotate(
+                    Gf.Vec3f(*rpy_deg_from_quaternion(commanded_sample.orientation_xyzw)),
+                    UsdGeom.XformCommonAPI.RotationOrderXYZ,
+                )
+                simulation_app.update()
+                timestamp_s = float(timeline.get_current_time())
+                if last_timestamp_s is not None and timestamp_s <= last_timestamp_s:
+                    raise RuntimeError("Isaac timeline did not advance during capture-only execution")
+                render_phase_offsets_s.append(timestamp_s - commanded_timestamp_s)
+                sample = trajectory.sample(timestamp_s)
+                if representative_capture is not None and frame in selected_capture_frames:
+                    representative_capture.capture(frame, timestamp_s, sample, timeline)
+                last_timestamp_s = timestamp_s
+                if args.realtime:
+                    time.sleep(max(0.0, simulation_dt_s - (time.perf_counter() - wall_start)))
+
+            capture_result = None
+            if representative_capture is not None:
+                capture_result = representative_capture.finalize()
+                representative_capture = None
+            result = {
+                "runtime": "isaac_sim",
+                "isaac_version": "6.1.0",
+                "mode": "representative_capture_only",
+                "scenario": scenario.name,
+                "frames_simulated": frames,
+                "primitive_count": primitive_count,
+                "product_count": len(layout.products),
+                "clock_source": "Isaac timeline current_time",
+                "representative_capture": capture_result,
+                "timestamp_phase": {
+                    "policy": "command_rig_before_update_capture_after_update",
+                    "render_phase_offset_mean_s": (
+                        None if not render_phase_offsets_s else sum(render_phase_offsets_s) / len(render_phase_offsets_s)
+                    ),
+                    "render_phase_offset_max_abs_s": (
+                        None if not render_phase_offsets_s else max(abs(value) for value in render_phase_offsets_s)
+                    ),
+                },
+                "last_rig_position_m": list(sample.position_m),
+                "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
+                "sensor_publishers_started": False,
+                "ros_environment": ros_environment,
+            }
+            Path(args.status_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.status_path).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            print("[grocery-runtime] capture-only simulation completed", flush=True)
+            return result
         print("[grocery-runtime] creating camera ROS graph", flush=True)
         camera_cadence = _create_camera_graph(camera_path, scenario.camera.width_px, scenario.camera.height_px, scenario.camera.fps)
 
@@ -469,12 +939,18 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             sample = trajectory.sample(timestamp_s)
             _publish_ground_truth(gt_pub, sample, timestamp_s)
             _publish_tf(tf_pub, sample, timestamp_s)
+            if representative_capture is not None and frame in selected_capture_frames:
+                representative_capture.capture(frame, timestamp_s, sample, timeline)
             last_timestamp_s = timestamp_s
             if args.realtime:
                 time.sleep(max(0.0, (1.0 / 60.0) - (time.perf_counter() - wall_start)))
 
         runtime_ok = True
         print("[grocery-runtime] simulation completed", flush=True)
+        capture_result = None
+        if representative_capture is not None:
+            capture_result = representative_capture.finalize()
+            representative_capture = None
         result = {
             "runtime": "isaac_sim",
             "isaac_version": "6.1.0",
@@ -494,6 +970,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "camera_cadence": camera_cadence,
             "observed_rgb_frames": len(rgb_stamps),
             "observed_rgb_hz": (len(rgb_stamps) - 1) / (rgb_stamps[-1] - rgb_stamps[0]) if len(rgb_stamps) > 1 and rgb_stamps[-1] > rgb_stamps[0] else None,
+            "observed_clock_samples": len(clock_stamps),
+            "observed_lidar_clouds": len(lidar_stamps),
             "clock_source": "Isaac timeline current_time",
             "ros_callback_service": "MultiThreadedExecutor background thread",
             "timestamp_phase": {
@@ -525,6 +1003,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "rig_orientation_source": "trajectory.sample.orientation_xyzw",
             "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
             "ground_truth_odometry_leakage": False,
+            "representative_capture": capture_result,
+            "ros_environment": ros_environment,
         }
         # Persist before SimulationApp teardown.  Isaac's shutdown sequence
         # can terminate the embedded Python process before the caller regains
@@ -540,6 +1020,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "error_type": type(exc).__name__,
             "error": str(exc),
             "traceback": traceback.format_exc(),
+            "ros_environment": ros_environment,
         }
         print(json.dumps(error, indent=2), flush=True)
         try:
@@ -549,6 +1030,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             pass
         raise
     finally:
+        if representative_capture is not None:
+            try:
+                representative_capture.close()
+            except Exception:
+                pass
         if executor is not None:
             try:
                 executor.shutdown(timeout_sec=1.0)
