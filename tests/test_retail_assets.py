@@ -19,7 +19,14 @@ from simulator.environment.aisle_builder import (
     shelf_level_counts_by_zone,
 )
 from simulator.environment.retail_catalog import load_retail_catalog
-from tools.retail_assets.generate_packaging import ASSET_SPECS, ITEM_ART_DIRECTIONS, _asset_usda, generate_library
+from tools.retail_assets.generate_packaging import (
+    ASSET_SPECS,
+    BOTTLE_LAYOUT_FIVE_TEXT_INSET_FRACTION,
+    BOTTLE_LEFT_STRIP_FRACTION,
+    ITEM_ART_DIRECTIONS,
+    _asset_usda,
+    generate_library,
+)
 import tools.retail_assets.generate_packaging as packaging_generator
 
 
@@ -568,6 +575,8 @@ class RetailAssetTests(unittest.TestCase):
         self.assertEqual(len(ITEM_ART_DIRECTIONS), 45)
         self.assertEqual(len({direction[0] for direction in ITEM_ART_DIRECTIONS.values()}), 45)
         self.assertEqual({direction[2] for direction in ITEM_ART_DIRECTIONS.values()}, set(range(6)))
+        self.assertEqual(ITEM_ART_DIRECTIONS["maple_syrup"][2], 5)
+        self.assertGreater(BOTTLE_LAYOUT_FIVE_TEXT_INSET_FRACTION, BOTTLE_LEFT_STRIP_FRACTION)
         self.assertEqual(assets_without_surface_maps, {
             "banana_bunch", "pear", "broccoli", "carrot_bunch",
             "angled_produce_bin", "wicker_basket", "shelf_divider", "bottle_rack",

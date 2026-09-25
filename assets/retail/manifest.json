@@ -1461,7 +1461,7 @@
       ],
       "introduced_in": "G02-A",
       "usd_sha256": "527959ef3375cdef1e1249a5abc1d87e839bdd5c43a96498d7581355eaa3a8fc",
-      "texture_sha256": "2663c55ff0d16d685a5daddf12b9f898f391f8355e8c37d54b70bff5731b69a1",
+      "texture_sha256": "1ddd6a93056c04fadb12b8f90aa3bec8e197b25e341c94da21945ab1994a1d69",
       "geometry_scope_sha256": "5a62151b5e7d507fa392f4f9ee4c02399180b3ebe88f13399186bb8d3d0f1055",
       "appearance_scope_sha256": "629e7fc59634d2c37ee673804099e50131f49ac9c943b95beb0626b9e496ee99",
       "normal_texture_path": "textures/maple_syrup_normal.png",

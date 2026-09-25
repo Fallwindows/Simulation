@@ -237,6 +237,9 @@ ITEM_ART_DIRECTIONS: dict[str, tuple[str, str, int]] = {
     "price_display": ("INKTAG 260", "SHELF PRICE", 5),
 }
 
+BOTTLE_LEFT_STRIP_FRACTION = 0.16
+BOTTLE_LAYOUT_FIVE_TEXT_INSET_FRACTION = 0.20
+
 
 def _png_chunk(kind: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
@@ -486,7 +489,7 @@ def _write_category_texture(path: Path, spec: AssetSpec) -> None:
             x = int(width * (.69 + offset * .075))
             draw.line((x, int(height * .55), x - int(width * .06), int(height * .69)), fill=ink, width=4)
     elif system == "bottle":
-        draw.rectangle((0, 0, int(width * .16), height), fill=ink)
+        draw.rectangle((0, 0, int(width * BOTTLE_LEFT_STRIP_FRACTION), height), fill=ink)
         draw.rectangle((int(width * .84), 0, width, height), fill=accent)
         for offset in range(4):
             y = int(height * (.45 + offset * .075))
@@ -530,7 +533,11 @@ def _write_category_texture(path: Path, spec: AssetSpec) -> None:
         text_x, title_y, anchor = width - margin, int(height * .27), "ra"
         draw.rectangle((0, int(height * .70), width, height), fill=_blend(accent, ink, .10))
     else:
-        text_x, title_y, anchor = margin, int(height * .38), "la"
+        text_x = (
+            int(width * BOTTLE_LAYOUT_FIVE_TEXT_INSET_FRACTION)
+            if system == "bottle" else margin
+        )
+        title_y, anchor = int(height * .38), "la"
         draw.polygon(((0, 0), (width, 0), (width, int(height * .24)), (int(width * .35), int(height * .34)), (0, int(height * .24))), fill=ink)
 
     if system == "fixture":
