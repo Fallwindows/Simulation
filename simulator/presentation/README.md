@@ -141,6 +141,10 @@ C:\isaacsim\python.bat -m simulator.technical_views `
   --ffprobe C:\IsaacSim-ros_workspaces\jazzy_ws\.pixi\envs\default\Library\bin\ffprobe.exe
 ```
 
+Renderer code, technical plan, and source-catalog receipt hashes canonicalize
+text line endings to LF. Producer receipts therefore validate identically from
+Windows CRLF and LF checkouts.
+
 ## Current new-goal limitations
 
 The retained technical renderer remains operational but does not satisfy the

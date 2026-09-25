@@ -15,6 +15,7 @@ from simulator.presentation.provenance import (
     PRESENTATION_TRANSFORM_NONE,
     ROLE_SPECS,
     schema_catalog,
+    sha256_path,
     source_text_sha256,
     validate_rgb_capture_acceptance,
     validate_presentation_transform,
@@ -543,6 +544,28 @@ class CompletePresentationTests(unittest.TestCase):
         self.assertEqual([item.shot.frame_count for item in segments[5:]], [120, 90, 90, 120, 120, 120, 150])
         self.assertAlmostEqual(segments[4].source_time_range_s[1], 539 / 30.0)
         self.assertEqual(len({item.video_sha256 for item in segments[5:]}), 7)
+
+    def test_real_renderer_receipts_round_trip_across_windows_crlf_checkout(self):
+        from simulator.technical_views import canonical_text_sha256
+
+        for path in (
+            self.fixture["crlf_renderer"],
+            self.fixture["crlf_plan"],
+            self.fixture["technical_catalog"],
+        ):
+            self.assertIn(b"\r\n", path.read_bytes())
+            self.assertNotEqual(sha256_path(path), canonical_text_sha256(path))
+        delivery = validate_technical_delivery(
+            self.fixture["technical_manifest"], ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+        )
+        self.assertEqual(len(delivery.shots), 7)
+        manifest = json.loads(self.fixture["technical_manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(manifest["renderer"]["sha256"], canonical_text_sha256(self.fixture["crlf_renderer"]))
+        self.assertEqual(manifest["plan"]["sha256"], canonical_text_sha256(self.fixture["crlf_plan"]))
+        self.assertEqual(
+            manifest["source"]["artifacts"]["source_catalog"]["sha256"],
+            canonical_text_sha256(self.fixture["technical_catalog"]),
+        )
 
     def test_production_catalog_rejects_unlisted_fixture_bundle_by_default(self):
         catalog = json.loads(

@@ -7,7 +7,6 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
 
 from simulator.capture.manifest import capture_hash, write_json
 from simulator.presentation.complete_bundle import emit_complete_bundle
@@ -43,11 +42,6 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def sha256_lf(path: Path) -> str:
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
 def _run(command: list[str]) -> None:
     subprocess.run(command, check=True, capture_output=True, text=True)
 
@@ -63,41 +57,6 @@ def _video(ffmpeg: str, output: Path, frames: int, color: str, *, mirrored_rgb_f
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p", "-y", str(output),
         ]
     )
-
-
-def _source_receipt(capture_id: str, revision: str, catalog: dict[str, Any], catalog_path: Path) -> dict[str, Any]:
-    source = catalog["sources"][0]
-    artifacts = source["artifacts"]
-    manifests = source["producer_manifests"]
-    return {
-        "source_id": source["source_id"],
-        "capture_id": capture_id,
-        "presentation_classification": source["presentation_classification"],
-        "producer_revisions": {"capture": revision, "slam": revision, "perception": revision},
-        "simulation_time": {"basis": "slam/slam_map_poses.csv:timestamp_s", "start_s": 0.2, "end_s": 20.4},
-        "map_state": {
-            "version": artifacts["map"]["version"], "sha256": artifacts["map"]["sha256"],
-            "producer_manifest_sha256": manifests["slam"]["sha256"], "producer_revision": revision,
-        },
-        "trajectory_state": {
-            "version": artifacts["trajectory"]["version"], "sha256": artifacts["trajectory"]["sha256"],
-            "producer_manifest_sha256": manifests["slam"]["sha256"], "producer_revision": revision,
-        },
-        "object_state": {
-            "version": artifacts["inventory"]["version"], "sha256": artifacts["inventory"]["sha256"],
-            "producer_manifest_sha256": manifests["perception"]["sha256"], "producer_revision": revision,
-            "depth_sources": ["lidar_projected_with_slam_pose"], "ground_truth_consumed": False,
-        },
-        "artifacts": {
-            "map": {"sha256": artifacts["map"]["sha256"], "semantics": "test-only map"},
-            "trajectory": {"sha256": artifacts["trajectory"]["sha256"], "semantics": "test-only trajectory"},
-            "inventory": {"sha256": artifacts["inventory"]["sha256"], "semantics": "test-only inventory"},
-            "capture_manifest": {"sha256": manifests["capture"]["sha256"]},
-            "slam_manifest": {"sha256": manifests["slam"]["sha256"]},
-            "perception_manifest": {"sha256": manifests["perception"]["sha256"]},
-            "source_catalog": {"sha256": sha256(catalog_path)},
-        },
-    }
 
 
 def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: str) -> dict[str, Path]:
@@ -233,30 +192,76 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         }],
     }
     write_json(technical_catalog, technical_catalog_value)
-    source = _source_receipt(capture_id, revision, technical_catalog_value, technical_catalog)
-    renderer_hash = sha256_lf(repo_root / "simulator" / "technical_views.py")
-    plan_hash = sha256_lf(repo_root / "config" / "technical_views.json")
+    # Exercise the Windows checkout contract: the producer reads CRLF repository
+    # text and catalog bytes while the presentation validator may read LF bytes.
+    technical_catalog.write_bytes(technical_catalog.read_bytes().replace(b"\n", b"\r\n"))
+    from simulator.technical_views import (
+        SourceBundle,
+        _source_receipt as renderer_source_receipt,
+        _write_view_receipt,
+        canonical_text_sha256,
+        load_plan as load_technical_plan,
+    )
+    crlf_text = root / "crlf_repository_text"
+    crlf_text.mkdir(exist_ok=True)
+    crlf_renderer = crlf_text / "technical_views.py"
+    crlf_plan = crlf_text / "technical_views.json"
+    for source_path, mirror_path in (
+        (repo_root / "simulator" / "technical_views.py", crlf_renderer),
+        (repo_root / "config" / "technical_views.json", crlf_plan),
+    ):
+        normalized = source_path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        mirror_path.write_bytes(normalized.replace("\n", "\r\n").encode("utf-8"))
+    renderer_hash = canonical_text_sha256(crlf_renderer)
+    plan_hash = canonical_text_sha256(crlf_plan)
+    source_entry = technical_catalog_value["sources"][0]
+    source_artifacts = source_entry["artifacts"]
+    source_manifests = source_entry["producer_manifests"]
+    renderer_bundle = SourceBundle(
+        run_root=root,
+        capture_id=capture_id,
+        source_id=source_entry["source_id"],
+        presentation_classification=source_entry["presentation_classification"],
+        capture_git_sha=revision,
+        slam_git_sha=revision,
+        perception_git_sha=revision,
+        simulation_time_start_s=0.2,
+        simulation_time_end_s=20.4,
+        map_version=source_artifacts["map"]["version"],
+        trajectory_version=source_artifacts["trajectory"]["version"],
+        object_state_version=source_artifacts["inventory"]["version"],
+        trajectory_time_basis="slam/slam_map_poses.csv:timestamp_s",
+        depth_sources=("lidar_projected_with_slam_pose",),
+        map_path=root / source_artifacts["map"]["path"],
+        trajectory_path=root / source_artifacts["trajectory"]["path"],
+        inventory_path=root / source_artifacts["inventory"]["path"],
+        capture_manifest_path=capture_manifest,
+        slam_manifest_path=root / source_manifests["slam"]["path"],
+        perception_manifest_path=root / source_manifests["perception"]["path"],
+        source_catalog_path=technical_catalog,
+        hashes={
+            "map": source_artifacts["map"]["sha256"],
+            "trajectory": source_artifacts["trajectory"]["sha256"],
+            "inventory": source_artifacts["inventory"]["sha256"],
+            "capture_manifest": source_manifests["capture"]["sha256"],
+            "slam_manifest": source_manifests["slam"]["sha256"],
+            "perception_manifest": source_manifests["perception"]["sha256"],
+            "source_catalog": canonical_text_sha256(technical_catalog),
+        },
+    )
+    source = renderer_source_receipt(renderer_bundle)
+    _, technical_specs = load_technical_plan(repo_root / "config" / "technical_views.json")
+    specs_by_id = {spec.id: spec for spec in technical_specs}
     outputs = []
     for view_id, role, frame_count, color in VIEWS:
         view_video = technical_dir / f"{view_id}_1080p.mp4"
         _video(ffmpeg, view_video, frame_count, color)
         video_hash = sha256(view_video)
         probe = {"width": 1920, "height": 1080, "fps": 30.0, "frame_count": frame_count}
-        receipt = {
-            "schema_version": 1, "artifact_type": "technical_source_view_receipt", "status": "complete",
-            "producer": {"id": "grocery_sim.technical_views.cpu.v1", "renderer_sha256": renderer_hash, "plan_sha256": plan_hash},
-            "view_id": view_id, "presentation_role": role, "source": source,
-            "video": {"path": view_video.name, "sha256": video_hash, **probe},
-            "derivation": {
-                "storyboard_pixels_consumed": False,
-                "capability_focus": view_id,
-                "point_source": "legacy finalized offline map points",
-                "selective_current_scan_status": "unfinished",
-                "new_goal_qualification": "unfinished; generated fixture preserves the legacy finalized-map path",
-            },
-        }
-        receipt_path = technical_dir / f"{view_id}_receipt.json"
-        write_json(receipt_path, receipt)
+        receipt_path = _write_view_receipt(
+            technical_dir, view_video, video_hash, probe, specs_by_id[view_id],
+            renderer_bundle, renderer_hash, plan_hash,
+        )
         outputs.append({
             "path": view_video.name, "sha256": video_hash, "frames": frame_count, "view_ids": [view_id],
             "presentation_role": role, "probe": probe,
@@ -288,6 +293,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     return {
         "capture_manifest": capture_manifest, "rgb_catalog": rgb_catalog, "rgb_bundle": rgb_bundle,
         "technical_catalog": technical_catalog, "technical_manifest": technical_manifest, "complete_inputs": complete,
+        "crlf_renderer": crlf_renderer, "crlf_plan": crlf_plan,
     }
 
 

@@ -79,6 +79,7 @@ class SourceBundle:
     run_root: Path
     capture_id: str
     source_id: str
+    presentation_classification: dict[str, str]
     capture_git_sha: str
     slam_git_sha: str
     perception_git_sha: str
@@ -105,6 +106,13 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def canonical_text_sha256(path: Path) -> str:
+    """Hash repository text independently of the checkout line-ending policy."""
+
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpec, ...]]:
@@ -390,11 +398,12 @@ def _inspect_source_bundle_with_catalog(
         raise ValueError("catalog source lacks a trajectory simulation-time binding")
     if not math.isclose(start_s, float(time_binding.get("start_s", math.nan)), abs_tol=1e-9) or not math.isclose(end_s, float(time_binding.get("end_s", math.nan)), abs_tol=1e-9):
         raise ValueError("trajectory simulation-time range does not match the reviewed source catalog")
-    hashes["source_catalog"] = sha256_file(catalog_path)
+    hashes["source_catalog"] = canonical_text_sha256(catalog_path)
     return SourceBundle(
         run_root=run,
         capture_id=capture_id,
         source_id=str(source["source_id"]),
+        presentation_classification=dict(source.get("presentation_classification", {"kind": "reviewed_production"})),
         capture_git_sha=capture_git,
         slam_git_sha=slam_git,
         perception_git_sha=perception_git,
@@ -813,6 +822,7 @@ def _source_receipt(bundle: SourceBundle) -> dict[str, object]:
     return {
         "source_id": bundle.source_id,
         "capture_id": bundle.capture_id,
+        "presentation_classification": bundle.presentation_classification,
         "producer_revisions": {
             "capture": bundle.capture_git_sha,
             "slam": bundle.slam_git_sha,
@@ -903,8 +913,8 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
     trajectory = load_trajectory(bundle.trajectory_path)
     inventory_all = load_inventory(bundle.inventory_path)
     renderer = TechnicalRenderer(profile, points, trajectory, inventory_all)
-    renderer_hash = sha256_file(Path(__file__).resolve())
-    plan_hash = sha256_file(plan_path.resolve())
+    renderer_hash = canonical_text_sha256(Path(__file__).resolve())
+    plan_hash = canonical_text_sha256(plan_path.resolve())
     started = time.perf_counter()
     outputs: list[dict[str, object]] = []
     samples: list[tuple[str, int, np.ndarray]] = []
