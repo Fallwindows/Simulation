@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import threading
 import time
 from pathlib import Path
+
+from simulator.capture.stamp_digest import stamp_sequence_sha256
 
 
 TOPIC_TYPES = {
@@ -22,11 +25,124 @@ TOPIC_TYPES = {
     "/tf": "tf2_msgs/msg/TFMessage",
     "/tf_static": "tf2_msgs/msg/TFMessage",
 }
-WRITER_CLOSE_TIMEOUT_S = 5.0
+WRITER_CLOSE_TIMEOUT_S = 30.0
 DEFAULT_PROGRESS_TIMEOUT_S = 60.0
 TARGET_TOLERANCE_S = 1e-3
 RAW_IMAGE_QOS_DEPTH = 128
 ROSBAG_CACHE_BYTES = 512 * 1024 * 1024
+WRITE_QUEUE_MAX_ITEMS = 1024
+WRITE_QUEUE_MAX_BYTES = 768 * 1024 * 1024
+
+
+class _SerializedBagWriteQueue:
+    """Move rosbag storage latency off the ROS executor callback."""
+
+    _STOP = object()
+
+    def __init__(
+        self,
+        writer,
+        max_items: int = WRITE_QUEUE_MAX_ITEMS,
+        max_bytes: int = WRITE_QUEUE_MAX_BYTES,
+    ):
+        self.writer = writer
+        self.max_bytes = int(max_bytes)
+        self.queue: queue.Queue = queue.Queue(maxsize=int(max_items))
+        self.lock = threading.Lock()
+        self.pending_bytes = 0
+        self.high_water_bytes = 0
+        self.high_water_items = 0
+        self.submitted_count = 0
+        self.written_count = 0
+        self.overflow_count = 0
+        self.error: BaseException | None = None
+        self.close_started = False
+        self.worker = threading.Thread(target=self._run, name="rosbag-serialized-writer", daemon=True)
+        self.worker.start()
+
+    def submit(self, topic: str, payload: bytes, timestamp_ns: int) -> None:
+        payload_bytes = len(payload)
+        with self.lock:
+            if self.close_started:
+                raise RuntimeError("raw bag write queue is closing")
+            if self.error is not None:
+                raise RuntimeError("raw bag writer worker failed") from self.error
+            if self.pending_bytes + payload_bytes > self.max_bytes:
+                self.overflow_count += 1
+                raise OverflowError("raw bag write queue exceeded its byte budget")
+            self.pending_bytes += payload_bytes
+            self.submitted_count += 1
+            self.high_water_bytes = max(self.high_water_bytes, self.pending_bytes)
+        try:
+            self.queue.put_nowait((topic, payload, int(timestamp_ns), payload_bytes))
+        except queue.Full as exc:
+            with self.lock:
+                self.pending_bytes -= payload_bytes
+                self.submitted_count -= 1
+                self.overflow_count += 1
+            raise OverflowError("raw bag write queue exceeded its item budget") from exc
+        with self.lock:
+            self.high_water_items = max(self.high_water_items, self.queue.qsize())
+
+    def _run(self) -> None:
+        try:
+            while True:
+                item = self.queue.get()
+                if item is self._STOP:
+                    self.queue.task_done()
+                    break
+                topic, payload, timestamp_ns, payload_bytes = item
+                try:
+                    if self.error is None:
+                        self.writer.write(topic, payload, timestamp_ns)
+                        with self.lock:
+                            self.written_count += 1
+                except BaseException as exc:
+                    with self.lock:
+                        if self.error is None:
+                            self.error = exc
+                finally:
+                    with self.lock:
+                        self.pending_bytes -= payload_bytes
+                    self.queue.task_done()
+        finally:
+            try:
+                self.writer.close()
+            except BaseException as exc:
+                with self.lock:
+                    if self.error is None:
+                        self.error = exc
+
+    def finish(self, timeout_s: float) -> BaseException | None:
+        with self.lock:
+            self.close_started = True
+        try:
+            self.queue.put(self._STOP, timeout=max(0.0, timeout_s))
+        except queue.Full:
+            return TimeoutError("raw bag write queue could not enqueue its close sentinel")
+        self.worker.join(max(0.0, timeout_s))
+        if self.worker.is_alive():
+            return TimeoutError(f"raw bag writer did not drain and close within {timeout_s:.3f}s")
+        with self.lock:
+            if self.error is not None:
+                return self.error
+            if self.pending_bytes != 0 or self.submitted_count != self.written_count:
+                return RuntimeError("raw bag write queue did not persist every submitted message")
+        return None
+
+    def receipt(self) -> dict[str, object]:
+        with self.lock:
+            return {
+                "max_items": self.queue.maxsize,
+                "max_bytes": self.max_bytes,
+                "high_water_items": self.high_water_items,
+                "high_water_bytes": self.high_water_bytes,
+                "submitted_count": self.submitted_count,
+                "written_count": self.written_count,
+                "overflow_count": self.overflow_count,
+                "drained": self.pending_bytes == 0 and self.submitted_count == self.written_count,
+                "worker_error": None if self.error is None else f"{type(self.error).__name__}: {self.error}",
+            }
 
 
 def _maximum_nearest_skew_s(reference_stamps: list[float], candidate_stamps: list[float]) -> float | None:
@@ -130,6 +246,7 @@ class RawCaptureWriter:
         self.stamp_regressions = {topic: 0 for topic in TOPIC_TYPES}
         self.stamp_nonincreasing = {topic: 0 for topic in TOPIC_TYPES}
         self.rgb_stamps_s: list[float] = []
+        self.camera_info_stamps_s: list[float] = []
         self.lidar_stamps_s: list[float] = []
         self.camera_info_frame_ids: set[str] = set()
         self.lidar_frame_ids: set[str] = set()
@@ -153,6 +270,7 @@ class RawCaptureWriter:
         )
         for topic_id, (topic, type_name) in enumerate(TOPIC_TYPES.items()):
             self.writer.create_topic(rosbag2_py.TopicMetadata(topic_id, topic, type_name, "cdr", []))
+        self.write_queue = _SerializedBagWriteQueue(self.writer)
 
         message_types = {
             "/clock": Clock,
@@ -200,7 +318,13 @@ class RawCaptureWriter:
                 if stamp_s >= self.target_clock_s - TARGET_TOLERANCE_S and self.target_wall_deadline is None:
                     self.target_wall_deadline = time.monotonic() + self.post_target_wall_s
             try:
-                self.writer.write(topic, self.serialize_message(message), int(round(stamp_s * 1_000_000_000.0)))
+                payload = self.serialize_message(message)
+                if hasattr(self, "write_queue"):
+                    self.write_queue.submit(topic, payload, int(round(stamp_s * 1_000_000_000.0)))
+                else:
+                    # Dependency-light unit fixtures created with __new__ use
+                    # the original synchronous path.
+                    self.writer.write(topic, payload, int(round(stamp_s * 1_000_000_000.0)))
             except BaseException as exc:
                 self._callback_error = exc
                 raise
@@ -221,6 +345,7 @@ class RawCaptureWriter:
             if topic == "/sim/camera/rgb/image_raw":
                 self.rgb_stamps_s.append(stamp_s)
             elif topic == "/sim/camera/rgb/camera_info":
+                self.camera_info_stamps_s.append(stamp_s)
                 self.camera_info_frame_ids.add(str(message.header.frame_id))
             elif topic == "/sim/lidar/points":
                 self.lidar_stamps_s.append(stamp_s)
@@ -232,6 +357,8 @@ class RawCaptureWriter:
     def spin_until_done(self) -> None:
         while self.rclpy.ok():
             now = time.monotonic()
+            if hasattr(self, "write_queue") and self.write_queue.error is not None:
+                raise RuntimeError("raw bag writer worker failed") from self.write_queue.error
             if self.target_wall_deadline is not None and now >= self.target_wall_deadline:
                 return
             if self.first_clock_s is None and now - self.started_wall >= self.startup_timeout_s:
@@ -259,11 +386,15 @@ class RawCaptureWriter:
         except BaseException as exc:
             node_error = exc
         writer = self.writer
-        close_error = _bounded_resource_close(writer, "close", self.close_timeout_s)
+        if hasattr(self, "write_queue"):
+            close_error = self.write_queue.finish(self.close_timeout_s)
+        else:
+            close_error = _bounded_resource_close(writer, "close", self.close_timeout_s)
         self.writer = None
         self._closed = True
-        if self._callback_error is not None or node_error is not None or close_error is not None:
-            self._close_error = self._callback_error or node_error or close_error
+        resource_error = self._callback_error or node_error or close_error
+        if resource_error is not None and not hasattr(self, "write_queue"):
+            self._close_error = resource_error
             raise RuntimeError("raw capture did not finish cleanly; writer/node was closed") from self._close_error
         target_reached = self.last_clock_s is not None and self.last_clock_s >= self.target_clock_s - TARGET_TOLERANCE_S
         maximum_skew = _maximum_nearest_skew_s(self.lidar_stamps_s, self.rgb_stamps_s)
@@ -272,13 +403,50 @@ class RawCaptureWriter:
         ordered = (
             self.clock_regressions == 0
             and self.stamp_regressions["/sim/camera/rgb/image_raw"] == 0
+            and self.stamp_regressions["/sim/camera/rgb/camera_info"] == 0
             and self.stamp_regressions["/sim/lidar/points"] == 0
             and self.stamp_nonincreasing["/sim/camera/rgb/image_raw"] == 0
+            and self.stamp_nonincreasing["/sim/camera/rgb/camera_info"] == 0
             and self.stamp_nonincreasing["/sim/lidar/points"] == 0
             and _strictly_increasing_stamps(self.rgb_stamps_s)
+            and _strictly_increasing_stamps(self.camera_info_stamps_s)
             and _strictly_increasing_stamps(self.lidar_stamps_s)
         )
-        complete = target_reached and all_topics_positive and lidar_nonempty and ordered
+        camera_pairing_exact = (
+            len(self.rgb_stamps_s) == len(self.camera_info_stamps_s)
+            and stamp_sequence_sha256(self.rgb_stamps_s) == stamp_sequence_sha256(self.camera_info_stamps_s)
+        )
+        queue_receipt = (
+            self.write_queue.receipt()
+            if hasattr(self, "write_queue")
+            else {
+                "max_items": 0,
+                "max_bytes": 0,
+                "high_water_items": 0,
+                "high_water_bytes": 0,
+                "submitted_count": sum(self.counts.values()),
+                "written_count": sum(self.counts.values()),
+                "overflow_count": 0,
+                "drained": True,
+                "worker_error": None,
+            }
+        )
+        queue_integrity = (
+            bool(queue_receipt["drained"])
+            and int(queue_receipt["overflow_count"]) == 0
+            and queue_receipt["worker_error"] is None
+            and int(queue_receipt["submitted_count"]) == sum(self.counts.values())
+            and int(queue_receipt["written_count"]) == sum(self.counts.values())
+        )
+        complete = (
+            target_reached
+            and all_topics_positive
+            and lidar_nonempty
+            and ordered
+            and camera_pairing_exact
+            and queue_integrity
+            and resource_error is None
+        )
         result = {
             "status": "complete" if complete else "failed",
             "uri": self.output.name,
@@ -290,6 +458,8 @@ class RawCaptureWriter:
                 "lidar": 32,
                 "clock_tf": 256,
             },
+            "async_write_queue": queue_receipt,
+            "async_write_queue_integrity": queue_integrity,
             "topics": list(TOPIC_TYPES),
             "counts": self.counts,
             "first_stamp_s": self.first_stamp_s,
@@ -297,6 +467,12 @@ class RawCaptureWriter:
             "max_stamp_gap_s": self.max_stamp_gap_s,
             "stamp_regressions": self.stamp_regressions,
             "stamp_nonincreasing": self.stamp_nonincreasing,
+            "stamp_sha256": {
+                "/sim/camera/rgb/image_raw": stamp_sequence_sha256(self.rgb_stamps_s),
+                "/sim/camera/rgb/camera_info": stamp_sequence_sha256(self.camera_info_stamps_s),
+                "/sim/lidar/points": stamp_sequence_sha256(self.lidar_stamps_s),
+            },
+            "camera_pairing_exact": camera_pairing_exact,
             "first_clock_s": self.first_clock_s,
             "last_clock_s": self.last_clock_s,
             "target_clock_s": self.target_clock_s,
@@ -308,8 +484,12 @@ class RawCaptureWriter:
             "lidar_point_count_min": min(self.lidar_point_counts) if self.lidar_point_counts else None,
             "lidar_point_count_max": max(self.lidar_point_counts) if self.lidar_point_counts else None,
             "max_rgb_lidar_skew_s": maximum_skew,
+            "resource_error": None if resource_error is None else f"{type(resource_error).__name__}: {resource_error}",
         }
         self._close_result = result
+        if resource_error is not None:
+            self._close_error = resource_error
+            raise RuntimeError("raw capture did not finish cleanly; writer/node was closed") from resource_error
         if not complete:
             self._close_error = RuntimeError(f"raw capture validation failed: {result}")
             raise self._close_error

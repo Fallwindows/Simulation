@@ -5,7 +5,13 @@ import subprocess
 from pathlib import Path
 
 from evaluation.rgb_video_recorder import RgbVideoRecorder
-from simulator.capture.rosbag_capture import _maximum_nearest_skew_s, _strictly_increasing_stamps
+from evaluation.rgb_video_from_bag import BagRgbVideoBuilder
+from simulator.capture.rosbag_capture import (
+    _SerializedBagWriteQueue,
+    _maximum_nearest_skew_s,
+    _strictly_increasing_stamps,
+)
+from simulator.capture.stamp_digest import stamp_sequence_sha256
 from simulator.config.loader import load_scenario
 from simulator.sensors.rig import make_camera_intrinsics
 
@@ -14,6 +20,114 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CaptureGateTests(unittest.TestCase):
+    def test_stamp_digest_is_ordered_and_nanosecond_canonical(self):
+        first = stamp_sequence_sha256([0.0, 1.0 / 30.0, 2.0 / 30.0])
+        self.assertEqual(first, stamp_sequence_sha256([0, 0.033333333333, 0.066666666667]))
+        self.assertNotEqual(first, stamp_sequence_sha256([0.0, 2.0 / 30.0, 1.0 / 30.0]))
+
+    def test_async_bag_queue_drains_and_fails_on_bounded_overflow(self):
+        class Writer:
+            def __init__(self):
+                self.writes = []
+                self.close_calls = 0
+
+            def write(self, *args):
+                self.writes.append(args)
+
+            def close(self):
+                self.close_calls += 1
+
+        writer = Writer()
+        work = _SerializedBagWriteQueue(writer, max_items=4, max_bytes=16)
+        work.submit("/first", b"1234", 1)
+        work.submit("/second", b"5678", 2)
+        self.assertIsNone(work.finish(1.0))
+        receipt = work.receipt()
+        self.assertEqual(receipt["submitted_count"], 2)
+        self.assertEqual(receipt["written_count"], 2)
+        self.assertTrue(receipt["drained"])
+        self.assertEqual(receipt["overflow_count"], 0)
+        self.assertEqual(writer.close_calls, 1)
+
+        overflow_writer = Writer()
+        overflow = _SerializedBagWriteQueue(overflow_writer, max_items=2, max_bytes=2)
+        with self.assertRaisesRegex(OverflowError, "byte budget"):
+            overflow.submit("/too-large", b"123", 3)
+        self.assertIsNone(overflow.finish(1.0))
+        self.assertEqual(overflow.receipt()["overflow_count"], 1)
+
+        class FailingWriter(Writer):
+            def write(self, *_args):
+                raise OSError("storage failed")
+
+        failing = _SerializedBagWriteQueue(FailingWriter(), max_items=2, max_bytes=16)
+        failing.submit("/failure", b"123", 4)
+        self.assertRegex(str(failing.finish(1.0)), "storage failed")
+        failure_receipt = failing.receipt()
+        self.assertFalse(failure_receipt["drained"])
+        self.assertIn("OSError", failure_receipt["worker_error"])
+
+    def test_offline_video_uses_exact_closed_bag_message_count(self):
+        fixture = ROOT / "runs/offline_rgb_builder_fixture"
+        fixture.mkdir(parents=True, exist_ok=True)
+        paths = {
+            "output": fixture / "rgb.mp4",
+            "metadata": fixture / "rgb.json",
+            "frames": fixture / "frames.jsonl",
+            "camera": fixture / "camera.json",
+        }
+        for path in paths.values():
+            path.unlink(missing_ok=True)
+
+        class Writer:
+            def __init__(self, output):
+                self.output = output
+                self.frames = 0
+
+            def write(self, _frame):
+                self.frames += 1
+                self.output.write_bytes(b"offline-video")
+
+            def release(self):
+                pass
+
+        def image(stamp_s):
+            seconds = int(stamp_s)
+            nanoseconds = int(round((stamp_s - seconds) * 1_000_000_000.0))
+            header = type("Header", (), {"stamp": type("Stamp", (), {"sec": seconds, "nanosec": nanoseconds})(), "frame_id": "camera_optical_frame"})()
+            return type("Image", (), {"header": header, "width": 2, "height": 1, "step": 6, "encoding": "rgb8", "data": bytes((10, 20, 30, 40, 50, 60))})()
+
+        def camera_info(stamp_s):
+            message = type("CameraInfo", (), {})()
+            message.header = image(stamp_s).header
+            message.width = 2
+            message.height = 1
+            message.distortion_model = "plumb_bob"
+            message.d = []
+            message.k = [1.0] * 9
+            message.r = [1.0] * 9
+            message.p = [1.0] * 12
+            return message
+
+        builder = BagRgbVideoBuilder(
+            paths["output"], paths["metadata"], paths["frames"], paths["camera"],
+            1.0 / 30.0, 2, 1, 30.0, "fixture-bag",
+        )
+        writer = Writer(paths["output"])
+        builder.writer = writer
+        builder.consume_image(image(0.0))
+        builder.consume_image(image(1.0 / 30.0))
+        builder.consume_camera_info(camera_info(0.0))
+        builder.consume_camera_info(camera_info(1.0 / 30.0))
+        metadata = builder.finalize(expected_image_count=2, expected_camera_info_count=2)
+        self.assertEqual(metadata["status"], "complete")
+        self.assertEqual(metadata["source"], "closed_rosbag2")
+        self.assertEqual(metadata["stamp_sha256"], stamp_sequence_sha256([0.0, 1.0 / 30.0]))
+        self.assertEqual(len(paths["frames"].read_text(encoding="utf-8").splitlines()), 2)
+        self.assertEqual(writer.frames, 2)
+        for path in paths.values():
+            path.unlink(missing_ok=True)
+
     def test_raw_alignment_uses_worst_nearest_rgb_sample(self):
         self.assertAlmostEqual(
             _maximum_nearest_skew_s([0.1, 0.2, 0.3], [0.083333333, 0.2, 0.316666667]),
@@ -26,6 +140,18 @@ class CaptureGateTests(unittest.TestCase):
         self.assertTrue(_strictly_increasing_stamps([0.0, 1.0 / 30.0, 2.0 / 30.0]))
         self.assertFalse(_strictly_increasing_stamps([0.0, 0.0, 1.0 / 30.0]))
         self.assertFalse(_strictly_increasing_stamps([0.0, 1.0 / 30.0, 0.02]))
+
+    def test_large_message_zenoh_and_camera_queues_are_source_controlled(self):
+        for name in ("production_zenoh_session.json5", "production_zenoh_router.json5"):
+            source = (ROOT / "config/ros2" / name).read_text(encoding="utf-8")
+            self.assertIn("data: 16,", source)
+            self.assertIn("buffer_size: 16777216,", source)
+            self.assertNotIn("data: 2,", source)
+            self.assertNotIn("buffer_size: 65535,", source)
+        runner = (ROOT / "simulator/runtime/isaac_sim_runner.py").read_text(encoding="utf-8")
+        self.assertIn('(\"Rgb.inputs:queueSize\", 128)', runner)
+        self.assertIn('(\"CameraInfo.inputs:queueSize\", 128)', runner)
+        self.assertIn('node.create_subscription(Image, TOPICS[\"rgb_image\"], _on_rgb, 128)', runner)
 
     def test_rgb_clock_target_is_absolute_scenario_horizon(self):
         recorder = RgbVideoRecorder.__new__(RgbVideoRecorder)
@@ -50,7 +176,7 @@ class CaptureGateTests(unittest.TestCase):
         self.assertIn('ProgressTimeoutSeconds = 60', source)
         self.assertIn('isaac_runtime_status.json', source)
         self.assertIn('Raw bag topic contract must contain exactly the six required topics.', source)
-        self.assertIn('Raw bag did not reach the absolute scenario horizon.', source)
+        self.assertIn('Raw bag did not reach the requested capture horizon.', source)
         self.assertIn('Raw bag RGB/LiDAR timestamp skew exceeds 17,000,001 ns.', source)
         self.assertIn('RGB video cadence is not contiguous and valid.', source)
         self.assertIn('walking_production_1080p.yaml', source)
@@ -69,6 +195,14 @@ class CaptureGateTests(unittest.TestCase):
         self.assertIn('Production capture requires -Realtime pacing for lossless ROS consumers.', source)
         self.assertIn('requested_realtime_factor=$RealtimeFactor', source)
         self.assertIn('Isaac runtime pacing receipt does not match the requested realtime factor.', source)
+        self.assertIn('evaluation.rgb_video_from_bag', source)
+        self.assertIn('Raw bag asynchronous writer did not drain losslessly.', source)
+        self.assertIn('Raw bag RGB and CameraInfo stamps are not paired exactly.', source)
+        self.assertIn('Isaac, raw RGB, CameraInfo, and offline video stamp sequences do not match exactly.', source)
+        self.assertIn('$captureHorizon', source)
+        self.assertNotIn('evaluation.rgb_video_recorder', source)
+        self.assertIn('production_zenoh_session.json5', source)
+        self.assertIn('production_zenoh_router.json5', source)
         self.assertEqual(source.count('Assert-CaptureSourceUnchanged'), 2)
         self.assertLess(source.rindex('Assert-CaptureSourceUnchanged'), source.index('CAPTURE_COMPLETE'))
         self.assertLess(source.index('RGB video cadence is not contiguous and valid.'), source.index('CAPTURE_COMPLETE'))

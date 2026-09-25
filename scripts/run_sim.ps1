@@ -38,6 +38,8 @@ $pixi = Resolve-PixiExecutable $PixiPath
 Remove-Item Env:ROS_DISTRO -ErrorAction SilentlyContinue
 $env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"
 $env:ROS_DOMAIN_ID = "0"
+$env:ZENOH_SESSION_CONFIG_URI = (Resolve-Path -LiteralPath (Join-Path $repo "config\ros2\production_zenoh_session.json5")).Path
+$env:ZENOH_ROUTER_CONFIG_URI = (Resolve-Path -LiteralPath (Join-Path $repo "config\ros2\production_zenoh_router.json5")).Path
 $env:ROS_LOG_DIR = Join-Path $repo "runs\ros_logs"
 New-Item -ItemType Directory -Force -Path $env:ROS_LOG_DIR | Out-Null
 if ($PreflightOnly) {

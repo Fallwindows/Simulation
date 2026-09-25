@@ -75,7 +75,7 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertIn("shelf_divider", keys)
         self.assertTrue({"milk_gallon", "juice_citrus", "icecream_tub"} <= keys)
         hero_references = [reference for reference in references if reference["name"].startswith("hero_")]
-        self.assertTrue(all(reference["position_xy_m"][1] <= -0.75 for reference in hero_references))
+        self.assertTrue(all(reference["position_xy_m"][1] <= -0.50 for reference in hero_references))
         signs = [reference for reference in references if reference["asset_key"] == "promo_market_sign"]
         self.assertEqual(len(signs), 3)
         self.assertTrue(all(reference["scale_xyz"][0] < 0.0 for reference in signs))
@@ -141,6 +141,93 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertGreaterEqual(sum(reference["asset_key"] == "price_display" for reference in references), 30)
         self.assertTrue(all(reference["support_z_m"] > 0.0 for reference in references))
         self.assertTrue(all(reference["asset_key"] != "promo_market_sign" for reference in references))
+
+    def test_context_and_dense_stock_do_not_penetrate_fixtures_or_existing_tags(self):
+        scenario = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
+        layout = build_aisle_layout(scenario.environment)
+        catalog = load_retail_catalog(scenario.environment.asset_manifest_path)
+        spec = store_shell_spec(scenario.environment)
+
+        def obb(name, center_xy, width, depth, yaw_deg, z_min, z_max):
+            yaw = math.radians(yaw_deg)
+            axis_x = (math.cos(yaw), math.sin(yaw))
+            axis_y = (-math.sin(yaw), math.cos(yaw))
+            corners = tuple(
+                (
+                    center_xy[0] + sx * width * axis_x[0] / 2.0 + sy * depth * axis_y[0] / 2.0,
+                    center_xy[1] + sx * width * axis_x[1] / 2.0 + sy * depth * axis_y[1] / 2.0,
+                )
+                for sx in (-1.0, 1.0)
+                for sy in (-1.0, 1.0)
+            )
+            return name, (axis_x, axis_y), corners, (z_min, z_max)
+
+        def intersects(first, second):
+            for axis in (*first[1], *second[1]):
+                first_projection = [point[0] * axis[0] + point[1] * axis[1] for point in first[2]]
+                second_projection = [point[0] * axis[0] + point[1] * axis[1] for point in second[2]]
+                if min(max(first_projection), max(second_projection)) - max(min(first_projection), min(second_projection)) <= 1e-4:
+                    return False
+            return min(first[3][1], second[3][1]) - max(first[3][0], second[3][0]) > 1e-4
+
+        def reference_obb(reference):
+            record = catalog.by_key(reference["asset_key"])
+            scale = reference["scale_xyz"]
+            support_z = reference["support_z_m"]
+            return obb(
+                reference["name"],
+                reference["position_xy_m"],
+                record.dimensions_m[0] * abs(scale[0]),
+                record.dimensions_m[1] * abs(scale[1]),
+                reference["rotation_rpy_deg"][2],
+                support_z,
+                support_z + record.dimensions_m[2] * abs(scale[2]),
+            )
+
+        box_obbs = []
+        for box in spec["boxes"]:
+            x, y, z = box["center_m"]
+            width, depth, height = box["size_m"]
+            box_obbs.append(obb(box["name"], (x, y), width, depth, 0.0, z - height / 2.0, z + height / 2.0))
+        for reference in spec["asset_references"]:
+            if not reference["name"].startswith(("hero_focus_", "store_use_basket_")):
+                continue
+            candidate = reference_obb(reference)
+            collisions = [box[0] for box in box_obbs if intersects(candidate, box)]
+            self.assertEqual(collisions, [], f"{reference['name']} penetrates structural boxes {collisions}")
+
+        dense = runtime_dense_stock_references(layout, scenario.environment)
+        shelf_lights = [box for box in box_obbs if box[0].startswith("shelf_strip_")]
+        for reference in dense:
+            candidate = reference_obb(reference)
+            self.assertFalse(
+                any(intersects(candidate, light) for light in shelf_lights),
+                f"{reference['name']} penetrates a shelf light",
+            )
+
+        existing_price_obbs = []
+        for asset in layout.assets:
+            if asset.asset_key != "price_display":
+                continue
+            record = catalog.by_key(asset.asset_key)
+            existing_price_obbs.append(
+                obb(
+                    asset.name,
+                    asset.position_m[:2],
+                    record.dimensions_m[0] * abs(asset.scale_xyz[0]),
+                    record.dimensions_m[1] * abs(asset.scale_xyz[1]),
+                    asset.rotation_rpy_deg[2],
+                    asset.position_m[2],
+                    asset.position_m[2] + record.dimensions_m[2] * abs(asset.scale_xyz[2]),
+                )
+            )
+        for reference in dense:
+            if reference["asset_key"] == "price_display":
+                candidate = reference_obb(reference)
+                self.assertFalse(
+                    any(intersects(candidate, existing) for existing in existing_price_obbs),
+                    f"{reference['name']} duplicates an existing price display",
+                )
 
     def test_realtime_factor_expands_wall_period_without_changing_simulation_dt(self):
         self.assertIsNone(_paced_wall_period_s(False, 0.25))

@@ -64,7 +64,16 @@ def _ensure_bundled_ros_environment() -> dict[str, object]:
         "rmw_implementation": os.environ["RMW_IMPLEMENTATION"],
         "ament_prefix_path": os.environ["AMENT_PREFIX_PATH"],
         "path_prefix": os.environ["PATH"].split(os.pathsep)[0],
+        "zenoh_session_config": os.environ.get("ZENOH_SESSION_CONFIG_URI"),
+        "zenoh_router_config": os.environ.get("ZENOH_ROUTER_CONFIG_URI"),
     }
+    for receipt_key in ("zenoh_session_config", "zenoh_router_config"):
+        configured_path = snapshot[receipt_key]
+        if configured_path:
+            path = Path(str(configured_path)).resolve()
+            if not path.is_file():
+                raise FileNotFoundError(f"Configured Zenoh file is missing: {path}")
+            snapshot[f"{receipt_key}_sha256"] = _sha256_path(path)
     print(f"[grocery-runtime] ROS environment {json.dumps(snapshot, sort_keys=True)}", flush=True)
     return snapshot
 
@@ -409,8 +418,10 @@ def store_shell_spec(environment) -> dict[str, object]:
     # segments with bounded output variation avoid one repeated pool pattern
     # while the emitters remain shielded behind the shelf fascia.
     strip_index = 0
-    for strip_y, strip_rotation in ((-1.43, -72.0), (1.43, 72.0)):
-        for strip_z in (0.58, 1.03, 1.48, 1.93):
+    for strip_y, strip_rotation in ((-1.50, -72.0), (1.50, 72.0)):
+        # Each emitter sits below the next shelf board rather than crossing
+        # the merchandise volume midway through a package.
+        for strip_z in (0.72, 1.18, 1.64, 2.10):
             for section_index, section_center_x in enumerate((5.75, 17.75)):
                 for segment_index, x_offset in enumerate((-4.05, -1.35, 1.35, 4.05)):
                     strip_x = section_center_x + x_offset
@@ -659,28 +670,28 @@ def store_shell_spec(environment) -> dict[str, object]:
 
     # A small oblique riser presents four package fronts at useful pixel size
     # in the unchanged 9-second camera pose.  Its aisle edge remains beyond
-    # y=-0.69 and does not cross the calibrated centre path.
+    # y=-0.51 and does not cross the calibrated centre path.
     boxes.extend(
         [
             {
                 "name": "hero_focus_plinth",
-                "center_m": (12.55, -1.115, 0.53),
+                "center_m": (12.20, -0.950, 0.53),
                 "size_m": (0.55, 0.83, 0.70),
                 "kind": "display_wood",
             },
             {
                 "name": "hero_focus_top",
-                "center_m": (12.55, -1.115, 0.895),
+                "center_m": (12.20, -0.950, 0.895),
                 "size_m": (0.59, 0.87, 0.030),
                 "kind": "shelf",
             },
         ]
     )
     focus_specs = (
-        ("cereal_sunrise", 12.46, -0.75, 74.0, 1.22, 0.915),
-        ("juice_citrus", 12.50, -0.98, 77.0, 1.32, 0.919),
-        ("coffee_bag", 12.47, -1.21, 72.0, 1.28, 0.912),
-        ("cereal_harvest", 12.53, -1.44, 76.0, 1.17, 0.917),
+        ("cereal_sunrise", 12.11, -0.60, 74.0, 1.22, 0.915),
+        ("juice_citrus", 12.15, -0.83, 77.0, 1.32, 0.919),
+        ("coffee_bag", 12.12, -1.06, 72.0, 1.28, 0.915),
+        ("cereal_harvest", 12.18, -1.29, 76.0, 1.17, 0.917),
     )
     for focus_index, (key, product_x, product_y, yaw, scale, support_z) in enumerate(focus_specs):
         asset_references.append(
@@ -696,18 +707,18 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "scale_xyz": (-scale, scale, scale),
             }
         )
-    for price_index, price_y in enumerate((-0.84, -1.11, -1.38)):
+    for price_index, price_y in enumerate((-0.69, -0.95, -1.21)):
         asset_references.append(
             {
                 "name": f"hero_focus_price_{price_index}",
                 "asset_key": "price_display",
-                "position_xy_m": (12.265, price_y),
-                "support_z_m": 0.900,
+                "position_xy_m": (11.915, price_y),
+                "support_z_m": 0.915,
                 "rotation_rpy_deg": (0.0, 0.0, 90.0),
                 "scale_xyz": (-0.82, 0.82, 0.82),
             }
         )
-    basket_specs = ((14.55, -1.32, 8.0), (15.10, -1.10, 2.0))
+    basket_specs = ((15.12, -1.18, 8.0), (15.68, -1.05, 2.0))
     for basket_index, (basket_x, basket_y, basket_yaw) in enumerate(basket_specs):
         asset_references.append(
             {
@@ -817,7 +828,12 @@ def runtime_dense_stock_references(layout, environment) -> tuple[dict[str, objec
                     }
                 )
         # Irregularly spaced real price displays replace some blank rail runs.
-        if (row_index * 11 + bay_index * 5 + level_index * 3) % 7 in (0, 1):
+        shelf_identity_marker = f"/r{row_index}/b{bay_index}/l{level_index}"
+        existing_price_display = any(
+            asset.asset_key == "price_display" and shelf_identity_marker in asset.semantic_id
+            for asset in layout.assets
+        )
+        if not existing_price_display and (row_index * 11 + bay_index * 5 + level_index * 3) % 7 in (0, 1):
             price = catalog.by_key("price_display")
             price_offset = (-0.22, 0.12, 0.28)[(bay_index + level_index) % 3]
             references.append(
@@ -1008,14 +1024,25 @@ def _create_camera_graph(camera_path: str, width: int, height: int, fps: float):
                 ("Rgb.inputs:topicName", "/sim/camera/rgb/image_raw"),
                 ("Rgb.inputs:type", "rgb"),
                 ("Rgb.inputs:frameSkipCount", step - 1),
+                # Native 1080p payloads can briefly outpace Zenoh delivery;
+                # retain a bounded publisher history rather than silently
+                # throwing away a frame at the helper's default depth of 10.
+                ("Rgb.inputs:queueSize", 128),
                 ("CameraInfo.inputs:frameId", "camera_optical_frame"),
                 ("CameraInfo.inputs:topicName", "/sim/camera/rgb/camera_info"),
                 ("CameraInfo.inputs:frameSkipCount", step - 1),
+                ("CameraInfo.inputs:queueSize", 128),
             ],
         },
     )
     og.Controller.evaluate_sync(graph)
-    return {"requested_fps": float(fps), "frame_skip_count": step - 1, "effective_fps": 60.0 / step, "mode": "ros2_camera_helper_frameSkipCount"}
+    return {
+        "requested_fps": float(fps),
+        "frame_skip_count": step - 1,
+        "effective_fps": 60.0 / step,
+        "publisher_queue_size": 128,
+        "mode": "ros2_camera_helper_frameSkipCount",
+    }
 
 
 def _create_lidar(lidar_path: str, lidar_config, topic: str):
@@ -1130,6 +1157,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     from simulator.motion.trajectory import StraightTrajectory, WalkingTrajectory
     from simulator.ros.topic_contract import FRAMES, TOPICS
     from simulator.sensors.noise import NoiseConfig
+    from simulator.capture.stamp_digest import stamp_sequence_sha256
 
     if args.frames < 0:
         raise ValueError("--frames must be non-negative")
@@ -1318,7 +1346,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         from rosgraph_msgs.msg import Clock
         from sensor_msgs.msg import Image, PointCloud2
 
-        node.create_subscription(Image, TOPICS["rgb_image"], _on_rgb, 10)
+        node.create_subscription(Image, TOPICS["rgb_image"], _on_rgb, 128)
         node.create_subscription(Clock, TOPICS["clock"], _on_clock, 10)
         node.create_subscription(PoseStamped, TOPICS["ground_truth_pose"], _on_ground_truth, 10)
         node.create_subscription(PointCloud2, TOPICS["lidar_points"], _on_lidar, 10)
@@ -1394,6 +1422,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "frames": list(FRAMES.values()),
             "camera_cadence": camera_cadence,
             "observed_rgb_frames": len(rgb_stamps),
+            "observed_rgb_stamp_sha256": stamp_sequence_sha256(rgb_stamps),
             "observed_rgb_hz": (len(rgb_stamps) - 1) / (rgb_stamps[-1] - rgb_stamps[0]) if len(rgb_stamps) > 1 and rgb_stamps[-1] > rgb_stamps[0] else None,
             "observed_clock_samples": len(clock_stamps),
             "observed_lidar_clouds": len(lidar_stamps),
