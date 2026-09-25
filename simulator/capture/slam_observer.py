@@ -11,7 +11,6 @@ import csv
 import hashlib
 import json
 import math
-import sqlite3
 import time
 from pathlib import Path
 
@@ -199,7 +198,14 @@ def _write_ply(path: Path, points: list[tuple[float, float, float]]) -> None:
 
 
 class SlamObserver:
-    def __init__(self, output_dir: Path, duration_s: float, startup_timeout_s: float):
+    def __init__(
+        self,
+        output_dir: Path,
+        target_clock_s: float,
+        startup_timeout_s: float,
+        expected_first_clock_s: float,
+        clock_start_tolerance_s: float,
+    ):
         import rclpy
         from nav_msgs.msg import Odometry
         from rosgraph_msgs.msg import Clock
@@ -213,12 +219,23 @@ class SlamObserver:
         self.rclpy = rclpy
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.duration_s = float(duration_s)
+        self.target_clock_s = float(target_clock_s)
+        self.expected_first_clock_s = float(expected_first_clock_s)
+        self.clock_start_tolerance_s = float(clock_start_tolerance_s)
+        if not math.isfinite(self.target_clock_s) or self.target_clock_s < 0.0:
+            raise ValueError("target clock must be a finite non-negative absolute simulation time")
+        if not math.isfinite(self.expected_first_clock_s) or self.expected_first_clock_s < 0.0:
+            raise ValueError("expected first clock must be a finite non-negative simulation time")
+        if self.target_clock_s < self.expected_first_clock_s:
+            raise ValueError("target clock must not precede the expected first clock")
+        if not math.isfinite(self.clock_start_tolerance_s) or self.clock_start_tolerance_s < 0.0:
+            raise ValueError("clock start tolerance must be finite and non-negative")
+        self.replay_span_s = self.target_clock_s - self.expected_first_clock_s
         self.startup_timeout_s = float(startup_timeout_s)
         self.started_wall = time.monotonic()
         self.first_clock_s: float | None = None
         self.last_clock_s: float | None = None
-        self.target_clock_s: float | None = None
+        self.clock_start_covered = False
         self.clock_regressions = 0
         self.clock_target_reached = False
         self.replay_complete_signal: Path | None = None
@@ -232,10 +249,12 @@ class SlamObserver:
         self.replay_drained = False
         self.publish_map_acknowledged = False
         self.final_map_span = False
-        self.mapper_database_span = False
-        self.database_path: Path | None = None
-        self.database_node_count = 0
+        # SQLite persistence is verified by the launcher only after RTAB-Map
+        # has stopped and checkpointed its live transaction.
+        self.mapper_database_span: bool | None = None
+        self.database_node_count: int | None = None
         self.database_last_stamp_s: float | None = None
+        self.database_verification_stage = "pending_post_mapper_shutdown"
         self.map_messages_before_publish = 0
         self.close_timeout_s = 60.0
         self.odom_rows: list[dict[str, float]] = []
@@ -285,8 +304,8 @@ class SlamObserver:
         self.last_clock_s = stamp_s
         if self.first_clock_s is None:
             self.first_clock_s = stamp_s
-            self.target_clock_s = self.first_clock_s + self.duration_s
-        if self.target_clock_s is not None and stamp_s >= self.target_clock_s - 1e-3:
+            self.clock_start_covered = stamp_s <= self.expected_first_clock_s + self.clock_start_tolerance_s + 1e-3
+        if stamp_s >= self.target_clock_s - 1e-3:
             self.clock_target_reached = True
 
     def _on_odom(self, message) -> None:
@@ -357,29 +376,6 @@ class SlamObserver:
         self.map_data_message = message
         self.map_data_stamp_s = _stamp(message.header.stamp)
 
-    def _database_progress(self) -> tuple[int, float | None]:
-        if self.database_path is None or not self.database_path.is_file():
-            return 0, None
-        try:
-            connection = sqlite3.connect(self.database_path.as_uri() + "?mode=ro", uri=True, timeout=0.2)
-            try:
-                connection.execute("PRAGMA busy_timeout=200")
-                count, stamp = connection.execute("SELECT count(*), max(stamp) FROM Node").fetchone()
-            finally:
-                connection.close()
-            return int(count or 0), None if stamp is None else float(stamp)
-        except (sqlite3.Error, OSError, ValueError):
-            return 0, None
-
-    def _database_covers_input(self) -> bool:
-        self.database_node_count, self.database_last_stamp_s = self._database_progress()
-        return (
-            self.expected_sensor_last_stamp_s is not None
-            and self.database_node_count > 0
-            and self.database_last_stamp_s is not None
-            and self.database_last_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
-        )
-
     def _publish_final_map(self) -> None:
         service_deadline = time.monotonic() + self.close_timeout_s
         while self.rclpy.ok() and not self.publish_map_client.wait_for_service(timeout_sec=0.2):
@@ -421,7 +417,6 @@ class SlamObserver:
         last_generation = self.callback_generation
         while self.rclpy.ok():
             now = time.monotonic()
-            self.mapper_database_span = self._database_covers_input()
             self.final_map_span = (
                 self.map_messages > self.map_messages_before_publish
                 and self.map_stamp_s is not None
@@ -441,7 +436,7 @@ class SlamObserver:
             if self.callback_generation != last_generation:
                 quiet_since = None
                 last_generation = self.callback_generation
-            elif self.publish_map_acknowledged and self.final_map_span and self.mapper_database_span and graph_triplet_ready:
+            elif self.publish_map_acknowledged and self.final_map_span and graph_triplet_ready:
                 if quiet_since is None:
                     quiet_since = now
                 elif now - quiet_since >= 1.0:
@@ -454,7 +449,7 @@ class SlamObserver:
                         raise RuntimeError("optimized graph changed between pre-request baseline and final map publication")
                     return
             if now >= post_ack_deadline:
-                raise RuntimeError("final optimized map/database span did not settle within the bounded wait")
+                raise RuntimeError("final optimized map/graph span did not settle within the bounded wait")
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def _capture_final_optimized_graph(self) -> None:
@@ -584,7 +579,7 @@ class SlamObserver:
         signal_seen_wall: float | None = None
         quiet_since: float | None = None
         last_generation = self.callback_generation
-        wall_deadline = self.started_wall + max(60.0, self.duration_s * 20.0 + 30.0)
+        wall_deadline = self.started_wall + max(60.0, self.replay_span_s * 20.0 + 30.0)
         while self.rclpy.ok():
             now = time.monotonic()
             if self.replay_complete_signal.is_file():
@@ -600,14 +595,28 @@ class SlamObserver:
                     self.drain_quiet_polls = 0
                     last_generation = self.callback_generation
                 if now - signal_seen_wall >= 60.0:
-                    raise RuntimeError("mapper did not commit the replay input span within the bounded wait")
-                if quiet_since is not None and now - quiet_since >= 1.0 and self._database_covers_input():
+                    raise RuntimeError("offline replay callbacks did not settle within the bounded wait")
+                if quiet_since is not None and now - quiet_since >= 1.0:
+                    if not self.clock_start_covered:
+                        raise RuntimeError(
+                            f"bag replay observer missed the beginning of /clock: first {self.first_clock_s}, "
+                            f"expected no later than {self.expected_first_clock_s + self.clock_start_tolerance_s}"
+                        )
                     if not self.clock_target_reached:
                         raise RuntimeError(
                             f"bag replay exited before /clock reached target {self.target_clock_s}; last clock was {self.last_clock_s}"
                         )
                     if self.clock_regressions:
                         raise RuntimeError(f"bag replay /clock moved backwards {self.clock_regressions} time(s)")
+                    if (
+                        self.expected_sensor_last_stamp_s is None
+                        or self.last_odom_stamp_s is None
+                        or self.last_odom_stamp_s < self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
+                    ):
+                        raise RuntimeError(
+                            f"SLAM odometry did not process the captured sensor span: "
+                            f"last {self.last_odom_stamp_s}, expected {self.expected_sensor_last_stamp_s}"
+                        )
                     self.replay_drained = True
                     self._publish_final_map()
                     return
@@ -682,8 +691,15 @@ class SlamObserver:
             and self.last_odom_stamp_s is not None
             and self.last_odom_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
         )
+        live_complete = bool(
+            self.odom_rows and self.latest_map and self.replay_complete_signal_observed
+            and self.clock_start_covered and self.clock_target_reached and self.replay_drained
+            and self.publish_map_acknowledged and self.drain_complete and not self.clock_regressions
+            and processed_sensor_span and self.final_map_span and map_pose_correction_complete
+            and self.map_graph_matches_final_cloud
+        )
         result = {
-            "status": "complete" if self.odom_rows and self.latest_map and self.replay_complete_signal_observed and self.clock_target_reached and self.replay_drained and self.publish_map_acknowledged and self.drain_complete and not self.clock_regressions and processed_sensor_span and self.final_map_span and self.mapper_database_span and map_pose_correction_complete else "incomplete",
+            "status": "pending_database_validation" if live_complete else "incomplete",
             "odom_sample_count": len(self.odom_rows),
             "map_pose_frame_id": "map",
             "raw_odom_frame_id": "odom",
@@ -692,7 +708,7 @@ class SlamObserver:
             "optimized_pose_graph_complete": self.optimized_pose_graph_complete,
             "map_graph_matches_final_cloud": self.map_graph_matches_final_cloud,
             "pre_publish_graph_version": getattr(self, "pre_publish_graph_version", None),
-            "pre_publish_graph_version_source": "paired pre-request /mapData graph after replay/database drain",
+            "pre_publish_graph_version_source": "paired pre-request /mapData graph after replay callback drain and before post-shutdown database validation",
             "pose_source": "rtabmap_optimized_graph",
             "graph_pose_version": self.graph_pose_version,
             "dense_pose_version": getattr(self, "dense_pose_version", None),
@@ -708,6 +724,10 @@ class SlamObserver:
             "first_clock_s": self.first_clock_s,
             "last_clock_s": self.last_clock_s,
             "target_clock_s": self.target_clock_s,
+            "replay_span_s": self.replay_span_s,
+            "expected_first_clock_s": self.expected_first_clock_s,
+            "clock_start_tolerance_s": self.clock_start_tolerance_s,
+            "clock_start_covered": self.clock_start_covered,
             "clock_target_reached": self.clock_target_reached,
             "clock_regressions": self.clock_regressions,
             "replay_complete_signal_observed": self.replay_complete_signal_observed,
@@ -720,6 +740,7 @@ class SlamObserver:
             "mapper_database_span": self.mapper_database_span,
             "database_node_count": self.database_node_count,
             "database_last_stamp_s": self.database_last_stamp_s,
+            "database_verification_stage": self.database_verification_stage,
             "last_map_stamp_s": self.map_stamp_s,
             "last_odom_stamp_s": self.last_odom_stamp_s,
             "expected_sensor_last_stamp_s": self.expected_sensor_last_stamp_s,
@@ -737,21 +758,27 @@ class SlamObserver:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--duration-seconds", required=True, type=float)
+    parser.add_argument("--target-clock-seconds", required=True, type=float)
+    parser.add_argument("--expected-first-clock-seconds", required=True, type=float)
+    parser.add_argument("--clock-start-tolerance-seconds", required=True, type=float)
     parser.add_argument("--startup-timeout-seconds", type=float, default=180.0)
     parser.add_argument("--replay-complete-signal", required=True)
     parser.add_argument("--expected-sensor-last-stamp-seconds", required=True, type=float)
     parser.add_argument("--sensor-scan-period-seconds", required=True, type=float)
-    parser.add_argument("--database-path", required=True)
     args = parser.parse_args()
     import rclpy
 
     rclpy.init()
-    observer = SlamObserver(Path(args.output_dir), args.duration_seconds, args.startup_timeout_seconds)
+    observer = SlamObserver(
+        Path(args.output_dir),
+        args.target_clock_seconds,
+        args.startup_timeout_seconds,
+        args.expected_first_clock_seconds,
+        args.clock_start_tolerance_seconds,
+    )
     observer.replay_complete_signal = Path(args.replay_complete_signal)
     observer.expected_sensor_last_stamp_s = args.expected_sensor_last_stamp_seconds
     observer.sensor_scan_period_s = args.sensor_scan_period_seconds
-    observer.database_path = Path(args.database_path)
     error: BaseException | None = None
     result: dict[str, object] | None = None
     try:
@@ -772,7 +799,7 @@ def main() -> None:
         print(json.dumps(result, indent=2))
     if error is not None:
         raise error
-    if result is None or result["status"] != "complete":
+    if result is None or result["status"] != "pending_database_validation":
         raise RuntimeError(f"offline SLAM did not complete replay, clock drain, odometry and map capture: {result}")
 
 
