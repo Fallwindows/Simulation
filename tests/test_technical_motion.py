@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
+import time
 import unittest
 from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
-from types import MethodType
+from types import MethodType, SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
@@ -19,12 +21,77 @@ from simulator.technical_views import (
     camera_motion_receipt,
     load_plan,
 )
-from simulator.technical_lidar import EstimatedTrajectory, RgbFrameRecord, SelectiveLidarSource
-from simulator.presentation.technical_bundle import CAMERA_TRACE_BASIS, _validate_camera_motion_trace
+from simulator.technical_lidar import (
+    EstimatedTrajectory,
+    RgbFrameRecord,
+    ScanRecord,
+    SelectiveLidarSource,
+    _transform_points,
+    load_camera_head_transform_artifact,
+)
+from simulator.sensors.scan_projection import CameraIntrinsics
+from simulator.presentation.technical_bundle import (
+    CAMERA_TRACE_BASIS,
+    _validate_camera_head_transform_receipt,
+    _validate_camera_motion_trace,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "config" / "technical_views.json"
+
+
+def _write_camera_head_fixture(directory: Path) -> tuple[Path, Path]:
+    artifact = directory / "camera_head_transforms.json"
+    optical = {
+        "parent": "camera_link", "child": "camera_optical_frame",
+        "translation_m": [0.0, 0.0, 0.0],
+        "rotation_xyzw": [0.5, -0.5, 0.5, -0.5],
+    }
+    artifact_payload = {
+        "schema": "grocery.camera_head_transforms", "version": 1,
+        "frames": {"parent": "sensor_rig", "child": "camera_link", "optical_child": "camera_optical_frame"},
+        "direction": "parent_to_child", "translation_units": "m", "timestamp_units": "s",
+        "timestamp_domain": "Isaac simulation time (/clock)", "sample_hz": 2.0, "duration_s": 1.0,
+        "interpolation": {
+            "translation": "linear", "rotation": "shortest_arc_quaternion_slerp_xyzw",
+            "range": "closed_0_to_duration_no_extrapolation",
+        },
+        "composition": "q_sensor_rig_camera_link = q_configured_mount * q_head_articulation",
+        "source": {
+            "trajectory_config": {"path": "config/scenario.yaml", "sha256": "a" * 64},
+            "git_commit": "b" * 40, "git_tree": "c" * 40,
+        },
+        "static_child_transform": optical,
+        "samples": [
+            {"timestamp_s": 0.0, "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 0.0, 1.0]},
+            {"timestamp_s": 0.5, "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 0.3826834323650898, 0.9238795325112867]},
+            {"timestamp_s": 1.0, "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 2 ** -0.5, 2 ** -0.5]},
+        ],
+    }
+    artifact.write_text(json.dumps(artifact_payload, sort_keys=True) + "\n", encoding="utf-8")
+    sensor_transforms = directory / "sensor_transforms.json"
+    sensor_payload = {
+        "frames": {"sensor_rig": "sensor_rig", "camera_link": "camera_link", "camera_optical": "camera_optical_frame", "lidar_link": "lidar_link"},
+        "transforms": [
+            optical,
+            {"parent": "sensor_rig", "child": "lidar_link", "translation_m": [0.0, 0.0, 0.0], "rotation_xyzw": [0.0, 0.0, 0.0, 1.0]},
+        ],
+        "dynamic_transform_artifacts": [{
+            "parent_frame": "sensor_rig", "child_frame": "camera_link", "path": artifact.name,
+            "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+            "size_bytes": artifact.stat().st_size, "schema_version": 1,
+        }],
+    }
+    sensor_transforms.write_text(json.dumps(sensor_payload, sort_keys=True) + "\n", encoding="utf-8")
+    (directory / "capture_manifest.json").write_text(json.dumps({
+        "files": [{
+            "path": artifact.name,
+            "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+            "size_bytes": artifact.stat().st_size,
+        }],
+    }, sort_keys=True) + "\n", encoding="utf-8")
+    return sensor_transforms, artifact
 
 
 class _SyntheticTrajectory:
@@ -356,6 +423,171 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertLessEqual(source.rgb_decoder_restart_count, 1)
         self.assertLessEqual(source.rgb_decoded_frame_count, 175)
         self.assertLessEqual(len(source._rgb_frame_cache), 4)
+
+    def test_bound_camera_head_transform_drives_timestamped_lidar_alignment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            transforms_path, _artifact_path = _write_camera_head_fixture(Path(temporary))
+            trajectory, receipt = load_camera_head_transform_artifact(transforms_path)
+        self.assertIsNotNone(trajectory)
+        self.assertEqual(receipt["mode"], "dynamic_bound_artifact")
+        self.assertEqual(receipt["sample_count"], 3)
+        trajectory.validate_image_timestamps([0.0, 0.5, 1.0])
+        with self.assertRaisesRegex(ValueError, "no matching camera head transform sample"):
+            trajectory.validate_image_timestamps([0.0, 0.4, 1.0])
+        _validate_camera_head_transform_receipt(receipt, receipt, "sensor_activation")
+        forged_receipt = dict(receipt, sha256="0" * 64)
+        with self.assertRaisesRegex(ValueError, "camera head transform receipt"):
+            _validate_camera_head_transform_receipt(forged_receipt, receipt, "sensor_activation")
+        with self.assertRaisesRegex(ValueError, "camera head transform receipt"):
+            _validate_camera_head_transform_receipt(None, receipt, "sensor_activation")
+        source = object.__new__(SelectiveLidarSource)
+        source.camera_head_trajectory = trajectory
+        source.optical_from_lidar = np.eye(4, dtype=np.float64)
+        source.optical_from_camera_link = np.eye(4, dtype=np.float64)
+        source.rig_from_lidar = np.eye(4, dtype=np.float64)
+        source.trajectory = EstimatedTrajectory(
+            np.asarray([0.0, 1.0]),
+            np.zeros((2, 3)),
+            np.asarray([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]]),
+        )
+        point = np.asarray([[1.0, 0.0, 4.0]])
+        at_start = _transform_points(source._optical_from_lidar_at(0.0, 0.0), point)
+        after_turn = _transform_points(source._optical_from_lidar_at(0.0, 1.0), point)
+        np.testing.assert_allclose(at_start, [[1.0, 0.0, 4.0]], atol=1e-12)
+        np.testing.assert_allclose(after_turn, [[0.0, -1.0, 4.0]], atol=1e-12)
+        with self.assertRaises(ValueError):
+            source._optical_from_lidar_at(0.0, 1.01)
+
+        source.trajectory = EstimatedTrajectory(
+            np.asarray([0.0, 1.0]),
+            np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+            np.asarray([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]]),
+        )
+        moved_base = _transform_points(
+            source._optical_from_lidar_at(0.0, 1.0), np.asarray([[2.0, 0.0, 4.0]])
+        )
+        np.testing.assert_allclose(moved_base, [[0.0, -1.0, 4.0]], atol=1e-12)
+
+        started = time.perf_counter()
+        for timestamp in np.linspace(0.0, 1.0, 5000):
+            trajectory.rig_from_camera_link(float(timestamp))
+        self.assertLess(time.perf_counter() - started, 2.0)
+
+    def test_camera_head_artifact_rejects_missing_stale_duplicate_and_nonmonotonic_data(self):
+        def refresh_binding(transforms_path: Path, artifact_path: Path) -> None:
+            payload = json.loads(transforms_path.read_text(encoding="utf-8"))
+            declaration = payload["dynamic_transform_artifacts"][0]
+            declaration["sha256"] = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+            declaration["size_bytes"] = artifact_path.stat().st_size
+            transforms_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+            manifest_path = transforms_path.with_name("capture_manifest.json")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["files"][0].update(
+                sha256=declaration["sha256"], size_bytes=declaration["size_bytes"]
+            )
+            manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # Each attack gets an independent, valid starting artifact.
+            for attack in (
+                "missing", "stale", "missing_declaration", "duplicate_declaration",
+                "duplicate_static_edge", "unbound_manifest", "nonmonotonic",
+            ):
+                case = root / attack
+                case.mkdir()
+                transforms_path, artifact_path = _write_camera_head_fixture(case)
+                if attack == "missing":
+                    artifact_path.unlink()
+                    expected = "missing"
+                elif attack == "stale":
+                    artifact_path.write_bytes(artifact_path.read_bytes() + b"stale")
+                    expected = "size or SHA-256"
+                elif attack == "missing_declaration":
+                    payload = json.loads(transforms_path.read_text(encoding="utf-8"))
+                    payload.pop("dynamic_transform_artifacts")
+                    transforms_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+                    expected = "neither a complete static path nor a dynamic artifact"
+                elif attack == "duplicate_declaration":
+                    payload = json.loads(transforms_path.read_text(encoding="utf-8"))
+                    payload["dynamic_transform_artifacts"].append(dict(payload["dynamic_transform_artifacts"][0]))
+                    transforms_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+                    expected = "duplicates a frame pair"
+                elif attack == "duplicate_static_edge":
+                    payload = json.loads(transforms_path.read_text(encoding="utf-8"))
+                    payload["transforms"].append({
+                        "parent": "sensor_rig", "child": "camera_link",
+                        "translation_m": [0.0, 0.0, 0.0],
+                        "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    })
+                    transforms_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+                    expected = "disjoint dynamic and static graph edges"
+                elif attack == "unbound_manifest":
+                    manifest_path = transforms_path.with_name("capture_manifest.json")
+                    manifest_path.write_text('{"files":[]}\n', encoding="utf-8")
+                    expected = "capture manifest does not bind"
+                else:
+                    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+                    payload["samples"][1]["timestamp_s"] = 0.0
+                    artifact_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+                    refresh_binding(transforms_path, artifact_path)
+                    expected = "strictly increasing"
+                with self.subTest(attack=attack), self.assertRaisesRegex(ValueError, expected):
+                    load_camera_head_transform_artifact(transforms_path)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            transforms_path, _artifact_path = _write_camera_head_fixture(Path(temporary))
+            payload = json.loads(transforms_path.read_text(encoding="utf-8"))
+            payload.pop("dynamic_transform_artifacts")
+            payload["transforms"].append({
+                "parent": "sensor_rig", "child": "camera_link",
+                "translation_m": [0.1, 0.0, 1.2],
+                "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+            })
+            transforms_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+            trajectory, receipt = load_camera_head_transform_artifact(transforms_path)
+            self.assertIsNone(trajectory)
+            self.assertEqual(receipt["mode"], "static_sensor_transform")
+
+    def test_dynamic_projection_cache_is_keyed_by_rgb_frame_and_remains_bounded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            transforms_path, _artifact_path = _write_camera_head_fixture(Path(temporary))
+            trajectory, _receipt = load_camera_head_transform_artifact(transforms_path)
+        source = object.__new__(SelectiveLidarSource)
+        source.database_path = Path("unused.db3")
+        source.lidar_frame_id = "lidar_link"
+        source.minimum_depth_m = 0.05
+        source.maximum_depth_m = 20.0
+        source.intrinsics = CameraIntrinsics(100, 100, 10.0, 10.0, 50.0, 50.0)
+        source.camera_head_trajectory = trajectory
+        source.optical_from_lidar = np.eye(4, dtype=np.float64)
+        source.optical_from_camera_link = np.eye(4, dtype=np.float64)
+        source.rig_from_lidar = np.eye(4, dtype=np.float64)
+        source.trajectory = EstimatedTrajectory(
+            np.asarray([0.0, 1.0]), np.zeros((2, 3)),
+            np.asarray([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]]),
+        )
+        source._projected_cache = OrderedDict()
+        record = ScanRecord(7, 0)
+        cloud = SimpleNamespace(
+            frame_id="lidar_link",
+            fields=tuple(SimpleNamespace(name=name) for name in ("x", "y", "z", "intensity")),
+            xyz_m=np.asarray([[1.0, 0.0, 4.0], [0.5, 0.0, 3.0]]),
+            raw_point_indices=np.asarray([11, 29]),
+        )
+        bag_record = SimpleNamespace(cloud=cloud)
+        projected = []
+        with patch("simulator.technical_lidar.read_pointcloud2_sqlite", return_value=bag_record):
+            for frame_index, timestamp in enumerate(np.linspace(0.0, 1.0, 6)):
+                rgb = RgbFrameRecord(frame_index, float(timestamp), 100, 100, "camera_optical_frame")
+                projected.append(source._projected(record, rgb)[0])
+        self.assertEqual(len(source._projected_cache), 4)
+        self.assertEqual(list(source._projected_cache), [
+            (0, 400_000_000), (0, 600_000_000), (0, 800_000_000), (0, 1_000_000_000),
+        ])
+        self.assertFalse(np.allclose(projected[0].u_px, projected[-1].u_px))
+        np.testing.assert_array_equal(projected[0].raw_point_indices, [11, 29])
+        np.testing.assert_array_equal(projected[-1].raw_point_indices, [11, 29])
 
 
 if __name__ == "__main__":

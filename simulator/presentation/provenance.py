@@ -911,6 +911,21 @@ def _validate_view_manifest(
         actual = (float(rows[0]["stamp_s"]), float(rows[-1]["stamp_s"]))
         if any(abs(observed - expected) > 1e-6 for observed, expected in zip((start, end), actual)):
             raise ValueError("RGB view manifest source_time_range_s must equal the actual frame-index stamps")
+        capture_directory = artifacts["capture_manifest"].path.parent
+        sensor_transforms = capture_directory / "sensor_transforms.json"
+        from simulator.technical_lidar import load_camera_head_transform_artifact
+
+        camera_head_trajectory, expected_camera_head_receipt = load_camera_head_transform_artifact(
+            sensor_transforms
+        )
+        if camera_head_trajectory is not None:
+            camera_head_trajectory.validate_image_timestamps(float(row["stamp_s"]) for row in rows)
+        camera_head_receipt = data.get("camera_head_transform")
+        if (
+            expected_camera_head_receipt.get("artifact_declared") is True
+            or camera_head_receipt is not None
+        ) and camera_head_receipt != expected_camera_head_receipt:
+            raise ValueError("RGB view manifest camera head transform binding is invalid")
         validate_presentation_transform(data.get("presentation_transform"))
     if data.get("map_version") != item.get("map_version") or data.get("object_state_version") != item.get("object_state_version"):
         raise ValueError("view manifest map/object version mismatch")

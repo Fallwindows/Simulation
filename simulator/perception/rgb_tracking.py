@@ -29,6 +29,8 @@ import cv2
 import numpy as np
 
 from evaluation.metrics import PoseSample, interpolate_pose, safe_quaternion
+from simulator.sensors.scan_projection import resolve_transform
+from simulator.technical_lidar import load_camera_head_transform_artifact
 
 LIDAR_POINT_MAX_DECIMATION_FACTOR = 8
 
@@ -657,12 +659,49 @@ def _load_slam_poses(
 def _load_sensor_geometry(path: Path) -> dict[str, object]:
     data = json.loads(path.read_text(encoding="utf-8"))
     transforms = {item["child"]: item for item in data["transforms"]}
+    camera_head_trajectory, camera_head_receipt = load_camera_head_transform_artifact(path, data)
+    if camera_head_trajectory is None:
+        if "camera_link" in transforms:
+            rig_camera_t = np.asarray(transforms["camera_link"]["translation_m"], dtype=np.float64)
+            rig_camera_r = _quat_to_matrix(tuple(transforms["camera_link"]["rotation_xyzw"]))
+            link_optical_t = np.asarray(
+                transforms["camera_optical_frame"]["translation_m"], dtype=np.float64
+            )
+            link_optical_r = _quat_to_matrix(
+                tuple(transforms["camera_optical_frame"]["rotation_xyzw"])
+            )
+        else:
+            frames = data["frames"]
+            rig_from_optical = resolve_transform(
+                data["transforms"],
+                source_frame=str(frames["camera_optical"]),
+                target_frame=str(frames["sensor_rig"]),
+            )
+            rig_camera_t = rig_from_optical[:3, 3]
+            rig_camera_r = rig_from_optical[:3, :3]
+            link_optical_t = np.zeros(3, dtype=np.float64)
+            link_optical_r = np.eye(3, dtype=np.float64)
+    else:
+        # Dynamic captures intentionally omit the same static graph edge. These
+        # placeholders are never used because projection evaluates the bound
+        # head trajectory at each image timestamp.
+        rig_camera_t = np.zeros(3, dtype=np.float64)
+        rig_camera_r = np.eye(3, dtype=np.float64)
+        link_optical_t = np.asarray(
+            transforms["camera_optical_frame"]["translation_m"], dtype=np.float64
+        )
+        link_optical_r = _quat_to_matrix(
+            tuple(transforms["camera_optical_frame"]["rotation_xyzw"])
+        )
     return {
         "rig_lidar_t": np.asarray(transforms["lidar_link"]["translation_m"], dtype=np.float64),
         "rig_lidar_r": _quat_to_matrix(tuple(transforms["lidar_link"]["rotation_xyzw"])),
-        "rig_camera_t": np.asarray(transforms["camera_link"]["translation_m"], dtype=np.float64),
-        "rig_camera_r": _quat_to_matrix(tuple(transforms["camera_link"]["rotation_xyzw"])),
-        "link_optical_r": _quat_to_matrix(tuple(transforms["camera_optical_frame"]["rotation_xyzw"])),
+        "rig_camera_t": rig_camera_t,
+        "rig_camera_r": rig_camera_r,
+        "link_optical_t": link_optical_t,
+        "link_optical_r": link_optical_r,
+        "camera_head_trajectory": camera_head_trajectory,
+        "camera_head_transform_receipt": camera_head_receipt,
         "fx": float(data["intrinsics"]["fx_px"]),
         "fy": float(data["intrinsics"]["fy_px"]),
         "cx": float(data["intrinsics"]["cx_px"]),
@@ -827,14 +866,28 @@ def _nearest_frame_index(frames: list[dict[str, object]], timestamps: list[float
     return selected if abs(timestamps[selected] - timestamp_s) <= 0.08 else None
 
 
-def _world_points_to_camera(points_world: np.ndarray, camera_pose: PoseSample, geometry: dict[str, object]) -> np.ndarray:
+def _world_points_to_camera(
+    points_world: np.ndarray,
+    camera_pose: PoseSample,
+    geometry: dict[str, object],
+    image_timestamp_s: float | None = None,
+) -> np.ndarray:
     """Express world points in the RGB camera optical frame at image time."""
 
     world_r = _quat_to_matrix(camera_pose.orientation_xyzw)
     pose_t = np.asarray(camera_pose.position_m, dtype=np.float64)
     points_rig = (points_world - pose_t) @ world_r
-    points_link = (points_rig - geometry["rig_camera_t"]) @ geometry["rig_camera_r"]
-    return points_link @ geometry["link_optical_r"]
+    rig_camera_t = geometry["rig_camera_t"]
+    rig_camera_r = geometry["rig_camera_r"]
+    camera_head = geometry.get("camera_head_trajectory")
+    if camera_head is not None:
+        timestamp_s = camera_pose.timestamp_s if image_timestamp_s is None else image_timestamp_s
+        rig_from_camera = camera_head.rig_from_camera_link(timestamp_s)
+        rig_camera_t = rig_from_camera[:3, 3]
+        rig_camera_r = rig_from_camera[:3, :3]
+    points_link = (points_rig - rig_camera_t) @ rig_camera_r
+    link_optical_t = geometry.get("link_optical_t", np.zeros(3, dtype=np.float64))
+    return (points_link - link_optical_t) @ geometry["link_optical_r"]
 
 
 def _augment_with_lidar_estimates(
@@ -855,6 +908,9 @@ def _augment_with_lidar_estimates(
     geometry = _load_sensor_geometry(capture / "sensor_transforms.json")
     start_t = np.asarray(poses[0].position_m, dtype=np.float64)
     frame_timestamps = [float(frame["stamp_s"]) for frame in frames]
+    camera_head = geometry.get("camera_head_trajectory")
+    if camera_head is not None:
+        camera_head.validate_image_timestamps(frame_timestamps)
     annotations_by_frame = {int(record["frame_index"]): record for record in frame_annotations}
     observations_map: dict[int, list[np.ndarray]] = {}
     observation_support: dict[int, dict[str, object]] = {}
@@ -899,7 +955,9 @@ def _augment_with_lidar_estimates(
         # LiDAR and RGB callbacks have independent timestamps.  Project each
         # return through its measurement-time world pose and then into the
         # camera pose at the selected RGB image timestamp.
-        points_optical = _world_points_to_camera(points_world, rgb_pose, geometry)
+        points_optical = _world_points_to_camera(
+            points_world, rgb_pose, geometry, image_timestamp_s=rgb_stamp_s
+        )
         positive = (points_optical[:, 2] > 0.25) & (points_optical[:, 2] < 45.0)
         points_world = points_world[positive]
         points_optical = points_optical[positive]
@@ -1009,6 +1067,15 @@ def _augment_with_lidar_estimates(
                 detection["estimated_center_map_m"] = [round(float(value), 3) for value in estimate]
                 detection["position_quantity"] = "median_of_associated_front_surface_lidar_returns"
                 detection["pose_provenance"] = pose_provenance
+                detection["camera_transform_provenance"] = geometry.get(
+                    "camera_head_transform_receipt",
+                    {
+                        "mode": "static_sensor_transform",
+                        "artifact_declared": False,
+                        "parent_frame": "sensor_rig",
+                        "child_frame": "camera_link",
+                    },
+                )
     support_summary: dict[int, dict[str, object]] = {}
     for track_id, support in observation_support.items():
         stamps = sorted(float(value) for value in support["scan_stamps_s"])
@@ -1038,6 +1105,15 @@ def _augment_with_lidar_estimates(
         "source_pose_artifact": "slam_map_poses.csv",
         "map_to_odom_correction_applied": True,
         "pose_provenance": pose_provenance,
+        "camera_transform_provenance": geometry.get(
+            "camera_head_transform_receipt",
+            {
+                "mode": "static_sensor_transform",
+                "artifact_declared": False,
+                "parent_frame": "sensor_rig",
+                "child_frame": "camera_link",
+            },
+        ),
         "lidar_input_stream_read": True,
         "position_quantity": "median_of_associated_front_surface_lidar_returns",
         "lidar_pose_time_reference": "PointCloud2 header timestamp; per-return timing and deskew are unavailable",

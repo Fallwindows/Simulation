@@ -1533,7 +1533,12 @@ class TechnicalRenderer:
         rgb_pairs = sorted(self._rgb_pairs.get(spec.id, set()))
         result: dict[str, object] = {
             "point_projection": (
-                "recorded lidar_link through recorded calibration into camera_optical_frame"
+                (
+                    "recorded lidar_link through the image-timestamp camera head transform "
+                    "into camera_optical_frame"
+                    if self.source.camera_head_transform_receipt.get("artifact_declared") is True
+                    else "recorded lidar_link through recorded calibration into camera_optical_frame"
+                )
                 if spec.temporal_mode == "current_window"
                 else "recorded lidar_link through interpolated estimated sensor-rig pose into map"
             ),
@@ -1560,6 +1565,7 @@ class TechnicalRenderer:
                 "rigid_pose_time": "PointCloud2 header/database timestamp",
             },
             "camera_calibration": self.source.camera_calibration_receipt,
+            "camera_head_transform": self.source.camera_head_transform_receipt,
             "camera_motion": camera_motion_receipt(
                 spec, self._camera_trace_by_view[spec.id], self.camera_focus_inventory, self.camera_path
             ),
@@ -1876,6 +1882,7 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
     with trace_path.open("w", encoding="utf-8", newline="\n") as handle:
         for row in renderer.camera_trace_rows():
             handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+    lidar_source.verify_camera_head_transform_snapshot()
     _verify_bound_input_snapshot(bundle)
     if canonical_text_sha256(Path(__file__).resolve()) != renderer_hash:
         raise ValueError("technical renderer changed during rendering")
@@ -1913,7 +1920,7 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
         "render_graph_sources": [
             "raw_lidar_bag", "rgb_video", "rgb_frames", "camera_info", "sensor_transforms",
             "trajectory", "inventory", "frame_annotations",
-        ],
+        ] + (["camera_head_transforms"] if lidar_source.camera_head_transform_receipt.get("artifact_declared") is True else []),
         "selective_current_scan_goal": {
             "status": "complete",
             "representation": "feature-specific selections from timestamped raw PointCloud2 returns",
