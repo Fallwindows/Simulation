@@ -385,6 +385,13 @@ def validate_technical_delivery(
         expected_window = expected_plan.get("source_window_s")
         if derivation.get("source_window_s") != expected_window:
             raise ValueError(f"technical receipt source window is invalid for {view_id}")
+        if derivation.get("rendered_context_point_budget") != expected_plan.get("maximum_points"):
+            raise ValueError(f"technical receipt context point budget is invalid for {view_id}")
+        if derivation.get("context_treatment") not in {
+            "local sparse structural silhouette around the estimated ROI",
+            "bounded structural or current-return subset",
+        }:
+            raise ValueError(f"technical receipt context treatment is invalid for {view_id}")
         if (
             derivation.get("selective_current_scan_status") != "complete"
             or derivation.get("future_returns_consumed") is not False

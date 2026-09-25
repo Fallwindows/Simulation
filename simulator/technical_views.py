@@ -760,7 +760,7 @@ class TechnicalRenderer:
         self._used_scans: dict[str, dict[int, PreparedScan]] = {}
         self._used_rois: dict[str, tuple[RoiObservation, ...]] = {}
         self._rgb_pairs: dict[str, set[tuple[int, int, int]]] = {}
-        self._history_views: dict[str, tuple[tuple[PreparedScan, ...], np.ndarray, np.ndarray, int]] = {}
+        self._history_views: dict[str, tuple[tuple[PreparedScan, ...], np.ndarray, np.ndarray]] = {}
         scale = profile.height / 720.0
         self.fonts = {
             "kicker": ImageFont.truetype(str(FONT_BOLD), max(13, int(15 * scale))),
@@ -823,7 +823,7 @@ class TechnicalRenderer:
         candidates = np.flatnonzero((scan.depth_m >= 1.5) & (scan.depth_m <= 10.0))
         if not len(candidates):
             return
-        count = min(30, len(candidates))
+        count = min(12, len(candidates))
         chosen = candidates[np.linspace(0, len(candidates) - 1, count, dtype=np.int32)]
         activation = float(np.clip((progress - 0.06) / 0.32, 0.0, 1.0))
         chosen = chosen[: max(1, int(round(count * activation)))]
@@ -874,7 +874,7 @@ class TechnicalRenderer:
 
     def _draw_map_points(
         self, frame: np.ndarray, points: np.ndarray, eye: np.ndarray, target: np.ndarray, focal: float,
-        color: tuple[int, int, int], dim: float = 1.0,
+        color: tuple[int, int, int], dim: float = 1.0, point_radius: int | None = None,
     ) -> None:
         if not len(points):
             return
@@ -887,7 +887,7 @@ class TechnicalRenderer:
         order = np.argsort(depth)[::-1]
         xy = pixels[order]
         layer[xy[:, 1], xy[:, 0]] = colors[order]
-        radius = 1 if self.profile.height <= 720 else 2
+        radius = point_radius if point_radius is not None else (1 if self.profile.height <= 720 else 2)
         layer = cv2.dilate(layer, np.ones((radius + 1, radius + 1), dtype=np.uint8))
         glow = cv2.GaussianBlur(layer, (0, 0), 2.5)
         np.maximum(frame, (glow * 0.25).astype(np.uint8), out=frame)
@@ -915,32 +915,40 @@ class TechnicalRenderer:
                 raise ValueError(f"technical view {spec.id} has no past LiDAR history in its source window")
             all_points = np.concatenate([scan.map_xyz_m for scan in scans], axis=0)
             offsets = np.cumsum([len(scan.map_xyz_m) for scan in scans], dtype=np.int64)
-            stable_stride = max(1, int(math.ceil(len(all_points) / spec.maximum_points)))
-            prepared = (scans, all_points, offsets, stable_stride)
+            prepared = (scans, all_points, offsets)
             self._history_views[spec.id] = prepared
-        history, all_points, offsets, stable_stride = prepared
+        history, all_points, offsets = prepared
         scan_count = int(np.searchsorted([scan.record.timestamp_s for scan in history], cutoff_s, side="right"))
         if scan_count <= 0:
             raise ValueError(f"technical view {spec.id} cutoff precedes its first available past scan")
         for scan in history[:scan_count]:
             self._register_scan(spec.id, scan)
         point_end = int(offsets[scan_count - 1])
-        history_points = all_points[:point_end:stable_stride][:spec.maximum_points]
+        history_points = all_points[:point_end]
         rois: tuple[RoiObservation, ...] = ()
         detail = spec.temporal_mode == "snapshot_orbit"
         if spec.selection_mode == "estimated_roi_front_surfaces":
-            rois = self.source.roi_observations(start_s, end_s, 6)
+            roi_limit = 1 if spec.id == "object_detail" else 6
+            rois = self.source.roi_observations(start_s, end_s, roi_limit)
             self._used_rois[spec.id] = rois
             focus = np.median(rois[0].map_xyz_m, axis=0)
+            radius_m = 3.2 if spec.id == "object_detail" else 5.2
+            delta = history_points - focus[None, :]
+            local = (np.linalg.norm(delta[:, :2], axis=1) <= radius_m) & (np.abs(delta[:, 2]) <= 2.4)
+            history_points = history_points[local]
         else:
             focus = np.asarray([np.median(self.trajectory[:, 0]), 0.0, 0.8], dtype=np.float32)
+        stable_stride = max(1, int(math.ceil(len(history_points) / spec.maximum_points)))
+        history_points = history_points[::stable_stride][:spec.maximum_points]
         eye, target, focal = self._map_camera(np.asarray(focus), progress, detail)
         frame = self._background()
-        self._draw_map_points(frame, history_points, eye, target, focal, (205, 146, 46), 0.70)
+        context_dim = 0.16 if spec.id == "object_detail" else (0.30 if rois else 0.68)
+        self._draw_map_points(frame, history_points, eye, target, focal, (132, 94, 40), context_dim)
         callouts: list[tuple[int, tuple[int, int], int]] = []
         if rois:
             for roi_index, roi in enumerate(rois):
-                self._draw_map_points(frame, roi.map_xyz_m, eye, target, focal, (70, 225, 255) if roi_index else (90, 242, 167), 1.0)
+                roi_color = (48, 238, 255) if roi_index else (70, 255, 180)
+                self._draw_map_points(frame, roi.map_xyz_m, eye, target, focal, roi_color, 1.0, 3)
                 center = np.mean(roi.map_xyz_m, axis=0, keepdims=True)
                 pixels, _depth, mask = project_points(center, eye, target, self.profile.width, self.profile.height, focal)
                 if mask.sum():
@@ -998,7 +1006,7 @@ class TechnicalRenderer:
             draw.text((line_x, int(174 * scale)), "MAPPED FROM", font=self.fonts["kicker"], fill=(91, 225, 244, 255))
             draw.text((line_x, int(214 * scale)), "SIMULATED\nSENSOR DATA.", font=self.fonts["title"], fill=(242, 247, 249, 255), spacing=int(7 * scale))
             draw.rectangle((line_x, int(344 * scale), line_x + int(90 * scale), int(348 * scale)), fill=(72, 224, 242, 255))
-            draw.text((line_x, int(378 * scale)), "PAST-ONLY LIDAR HISTORY\nESTIMATED TRAJECTORY\nESTIMATED ITEM LOCATIONS", font=self.fonts["body"], fill=(174, 197, 207, 255), spacing=int(9 * scale))
+            draw.text((line_x, int(378 * scale)), "PAST-ONLY LIDAR HISTORY\nESTIMATED TRAJECTORY\nSELECTIVE RAW RETURNS", font=self.fonts["body"], fill=(174, 197, 207, 255), spacing=int(9 * scale))
         return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
     def frame(self, spec: ViewSpec, index: int) -> np.ndarray:
@@ -1031,6 +1039,12 @@ class TechnicalRenderer:
             "selective_current_scan_status": "complete",
             "scan_selection": self.source.scan_summary(scans),
             "rgb_context": spec.rgb_context,
+            "rendered_context_point_budget": spec.maximum_points,
+            "context_treatment": (
+                "local sparse structural silhouette around the estimated ROI"
+                if spec.selection_mode == "estimated_roi_front_surfaces"
+                else "bounded structural or current-return subset"
+            ),
             "scan_time_model": {
                 "per_return_timing": "absent_in_bound_PointCloud2_fields",
                 "deskew": "not_applied",

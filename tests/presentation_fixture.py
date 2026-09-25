@@ -304,6 +304,12 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                 "selection_mode": specs_by_id[view_id].selection_mode,
                 "temporal_mode": specs_by_id[view_id].temporal_mode,
                 "source_window_s": list(specs_by_id[view_id].source_window_s),
+                "rendered_context_point_budget": specs_by_id[view_id].maximum_points,
+                "context_treatment": (
+                    "local sparse structural silhouette around the estimated ROI"
+                    if specs_by_id[view_id].selection_mode == "estimated_roi_front_surfaces"
+                    else "bounded structural or current-return subset"
+                ),
                 "future_returns_consumed": False,
                 "causal_display_policy": "latest and previous scans only; maximum current age is 2 configured scan periods",
                 "storyboard_pixels_consumed": False,

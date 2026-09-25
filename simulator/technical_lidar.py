@@ -558,7 +558,16 @@ class SelectiveLidarSource:
             return cached
         projected, raw_count, field_names = self._projected(record)
         if selection_mode == "camera_occlusion_surfaces":
-            positions = _front_cells(projected, 34, limit)
+            raw = projected.raw_xyz_m
+            planar_range = np.linalg.norm(raw[:, :2], axis=1)
+            mask = (
+                (raw[:, 0] >= 0.45)
+                & (raw[:, 0] <= 12.0)
+                & (raw[:, 2] >= -1.45)
+                & (raw[:, 2] <= 1.10)
+                & ((np.abs(raw[:, 1]) >= 0.82) | (planar_range <= 4.5))
+            )
+            positions = _front_cells(projected, 48, limit, mask)
         elif selection_mode == "navigation_boundaries":
             raw = projected.raw_xyz_m
             planar_range = np.linalg.norm(raw[:, :2], axis=1)
@@ -577,10 +586,13 @@ class SelectiveLidarSource:
                 & (raw[:, 0] <= 12.0)
                 & (raw[:, 2] >= -1.55)
                 & (raw[:, 2] <= 1.20)
-                & ((np.abs(raw[:, 1]) >= 0.72) | (raw[:, 2] <= -1.25))
+                & (
+                    ((np.abs(raw[:, 1]) >= 0.95) & (raw[:, 2] >= -1.42))
+                    | ((raw[:, 2] <= -1.34) & (np.abs(raw[:, 1]) >= 0.72))
+                )
             )
             candidates = np.flatnonzero(mask)
-            kept = _voxel_positions(raw[candidates], projected.raw_point_indices[candidates], 0.085, limit)
+            kept = _voxel_positions(raw[candidates], projected.raw_point_indices[candidates], 0.13, limit)
             positions = candidates[kept]
         else:
             raise ValueError(f"unsupported LiDAR selection mode: {selection_mode}")
