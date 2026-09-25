@@ -596,10 +596,18 @@ class RetailAssetTests(unittest.TestCase):
         expected = {
             "cereal_sunrise", "cereal_harvest", "cereal_grain", "cereal_berry",
             "cereal_honey", "cereal_morning", "juice_citrus", "coffee_bag",
+            "tea_box", "coffee_canister", "snack_wafer",
         }
         self.assertEqual(set(hero_directions), expected)
         self.assertEqual(len({direction[0] for direction in hero_directions.values()}), len(expected))
-        self.assertEqual(len({direction[3] for direction in hero_directions.values()}), len(expected))
+        art_sources = {
+            asset_key: packaging_generator.HERO_FOOD_SOURCES.get(
+                asset_key,
+                (hero_directions[asset_key][3], "procedural"),
+            )[0]
+            for asset_key in expected
+        }
+        self.assertEqual(len(set(art_sources.values())), len(expected))
 
         front_hashes = set()
         for asset_key in sorted(expected):
@@ -758,7 +766,20 @@ class RetailAssetTests(unittest.TestCase):
             self.assertEqual(provenance_by_key[asset_key]["height_px"], 1024)
         provenance_record = manifest["source_food_provenance"]
         self.assertEqual(provenance_record["path"], "source_food/hero_r4_provenance.json")
-        self.assertEqual(provenance_record["sha256"], hashlib.sha256(provenance_path.read_bytes()).hexdigest())
+        self.assertEqual(
+            provenance_record["hash_basis"],
+            "UTF-8 JSON with sorted keys and compact separators",
+        )
+        canonical_provenance = json.dumps(
+            provenance,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.assertEqual(
+            provenance_record["sha256"],
+            hashlib.sha256(canonical_provenance).hexdigest(),
+        )
 
     def test_register_parts_match_upgraded_organic_and_fixture_geometry(self):
         expectations = {

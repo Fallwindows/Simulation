@@ -242,7 +242,8 @@ ITEM_ART_DIRECTIONS: dict[str, tuple[str, str, int]] = {
 # use a complete fictional wrap rather than a repeated square label: side copy,
 # a distinct back panel, and the food illustration all remain deterministic and
 # project-authored. The tuple is brand, flavor/variety copy, factual secondary
-# copy, and the procedural illustration family.
+# copy, and the procedural fallback illustration family used when no pinned
+# source-food cutout exists.
 HERO_ART_DIRECTIONS: dict[str, tuple[str, str, str, str]] = {
     "cereal_sunrise": ("DAWNFIELD", "ROLLED OATS + RED BERRIES", "WHOLE GRAIN • 12 SERVINGS", "oat_bowl"),
     "cereal_harvest": ("RIVERBEND", "TOASTED GRAIN LOOPS", "FAMILY SIZE • WHOLE GRAIN", "grain_loops"),
@@ -483,13 +484,18 @@ def _draw_food_illustration(
         draw.arc((x0 + int(width * .40), y0 + int(height * .04), x1 - int(width * .18), y0 + int(height * .36)), 190, 335, fill=(235, 226, 207), width=max(2, width // 55))
 
 
+def _source_food_path(filename: str) -> Path:
+    """Resolve pinned source-food inputs independently of the output root."""
+    return Path(__file__).resolve().parents[2] / "assets" / "retail" / "source_food" / filename
+
+
 def _paste_hero_food_source(image, spec: AssetSpec, box: tuple[int, int, int, int]) -> bool:
     """Composite one pinned original RGBA food cutout; return false for vector-only art."""
     source_record = HERO_FOOD_SOURCES.get(spec.asset_key)
     if source_record is None:
         return False
     filename, expected_hash = source_record
-    source_path = Path(__file__).resolve().parents[2] / "assets" / "retail" / "source_food" / filename
+    source_path = _source_food_path(filename)
     if not source_path.is_file():
         raise RuntimeError(f"required hero food source missing: {source_path}")
     actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
@@ -1907,6 +1913,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _canonical_json_sha256(path: Path) -> str:
+    """Hash JSON content without making checkout line endings part of provenance."""
+    value = json.loads(path.read_text(encoding="utf-8"))
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _usda_scope_sha256(path: Path, scope_name: str) -> str:
     """Hash one USDA scope so geometry and appearance remain separable."""
     text = path.read_text(encoding="utf-8")
@@ -2053,7 +2071,8 @@ def generate_library(root: Path | None = None) -> Path:
         },
         "source_food_provenance": {
             "path": "source_food/hero_r4_provenance.json",
-            "sha256": _sha256(asset_root / "source_food" / "hero_r4_provenance.json"),
+            "sha256": _canonical_json_sha256(_source_food_path("hero_r4_provenance.json")),
+            "hash_basis": "UTF-8 JSON with sorted keys and compact separators",
         },
         "assets": entries,
     }

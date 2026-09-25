@@ -23,7 +23,8 @@
   },
   "source_food_provenance": {
     "path": "source_food/hero_r4_provenance.json",
-    "sha256": "b8588f1218abef2bce13d5e23bb08c821f65739dc69d2335dcdc2b43d4c11f08"
+    "sha256": "1658d8f6b87bb8536e9982afca1eded8623afadcb5f458e156d90efe9836970f",
+    "hash_basis": "UTF-8 JSON with sorted keys and compact separators"
   },
   "assets": [
     {
