@@ -145,9 +145,14 @@ class RetailAssetTests(unittest.TestCase):
                 self.assertGreater(geometric_normal[1], 0.0, label)
                 self.assertEqual(normal, (0.0, 1.0, 0.0), label)
                 # U increases with local X and V with local Z at every corner.
+                uv_bounds = (
+                    packaging_generator._hero_wrap_regions(spec)["front"]
+                    if asset.asset_key in packaging_generator.HERO_ART_DIRECTIONS
+                    else (0.0, 0.0, 1.0, 1.0)
+                )
                 for point, (u, v) in zip(points, uvs):
-                    self.assertAlmostEqual(u, 1.0 if point[0] > 0.0 else 0.0, places=7, msg=label)
-                    self.assertAlmostEqual(v, 1.0 if point[2] > 0.0 else 0.0, places=7, msg=label)
+                    self.assertAlmostEqual(u, uv_bounds[2] if point[0] > 0.0 else uv_bounds[0], places=6, msg=label)
+                    self.assertAlmostEqual(v, uv_bounds[3] if point[2] > 0.0 else uv_bounds[1], places=6, msg=label)
 
     def test_generated_usd_uses_supported_schema_properties_and_types(self):
         usd_by_key = {asset.asset_key: asset.usd_path for asset in self.catalog.assets}
@@ -581,6 +586,131 @@ class RetailAssetTests(unittest.TestCase):
             "banana_bunch", "pear", "broccoli", "carrot_bunch",
             "angled_produce_bin", "wicker_basket", "shelf_divider", "bottle_rack",
         })
+
+    def test_hero_packages_use_distinct_full_wrap_art_and_surface_maps(self):
+        try:
+            from PIL import Image as PillowImage
+        except ImportError as error:
+            self.skipTest(f"Pillow image inspection unavailable: {error}")
+        hero_directions = packaging_generator.HERO_ART_DIRECTIONS
+        expected = {
+            "cereal_sunrise", "cereal_harvest", "cereal_grain", "cereal_berry",
+            "cereal_honey", "cereal_morning", "juice_citrus", "coffee_bag",
+        }
+        self.assertEqual(set(hero_directions), expected)
+        self.assertEqual(len({direction[0] for direction in hero_directions.values()}), len(expected))
+        self.assertEqual(len({direction[3] for direction in hero_directions.values()}), len(expected))
+
+        front_hashes = set()
+        for asset_key in sorted(expected):
+            asset = self.catalog_by_key[asset_key]
+            source = asset.usd_path.read_text(encoding="utf-8")
+            self.assertIn('def Mesh "HeroLeftPrintPanel"', source, asset_key)
+            self.assertIn('def Mesh "HeroRightPrintPanel"', source, asset_key)
+            self.assertIn('def Mesh "HeroBackPrintPanel"', source, asset_key)
+            self.assertEqual(source.count('def Mesh "Hero'), 3, asset_key)
+            self.assertIsNotNone(asset.normal_texture_path, asset_key)
+            self.assertIsNotNone(asset.roughness_texture_path, asset_key)
+            self.assertIn("normal_map", asset.material_classes)
+            self.assertIn("roughness_map", asset.material_classes)
+
+            spec = next(spec for spec in packaging_generator.ASSET_SPECS if spec.asset_key == asset_key)
+            regions = packaging_generator._hero_wrap_regions(spec)
+            self.assertLess(regions["left"][2], regions["front"][2])
+            self.assertLessEqual(regions["front"][2], regions["right"][0] + 1e-12)
+            self.assertLessEqual(regions["right"][2], regions["back"][0] + 1e-12)
+            with PillowImage.open(asset.texture_path) as image:
+                self.assertGreater(image.width, image.height, asset_key)
+                bounds = regions["front"]
+                crop = image.crop((
+                    int(bounds[0] * image.width), int(bounds[1] * image.height),
+                    int(bounds[2] * image.width), int(bounds[3] * image.height),
+                ))
+                colors = crop.convert("RGB").getcolors(maxcolors=crop.width * crop.height)
+                self.assertIsNotNone(colors, asset_key)
+                self.assertGreater(len(colors), 180, asset_key)
+                front_hashes.add(hashlib.sha256(crop.tobytes()).hexdigest())
+        self.assertEqual(len(front_hashes), len(expected))
+
+    def test_hero_wrap_panel_winding_and_uvs_are_exterior_readable(self):
+        expected_panels = {
+            # UVs follow a continuous left/front/right/back package wrap.
+            # The direction tuple is (coordinate axis, sign as U increases).
+            "HeroLeftPrintPanel": ((-1.0, 0.0, 0.0), 1, 1.0),
+            "HeroRightPrintPanel": ((1.0, 0.0, 0.0), 1, -1.0),
+            "HeroBackPrintPanel": ((0.0, -1.0, 0.0), 0, -1.0),
+        }
+        for asset_key in sorted(packaging_generator.HERO_ART_DIRECTIONS):
+            source = self.catalog_by_key[asset_key].usd_path.read_text(encoding="utf-8")
+            for panel_name, (expected_normal, u_axis, u_sign) in expected_panels.items():
+                match = re.search(
+                    rf'def Mesh "{panel_name}".*?point3f\[\] points = \[([^\]]+)\]'
+                    r'.*?int\[\] faceVertexIndices = \[([^\]]+)\]'
+                    r'.*?normal3f\[\] normals = \[\(([^)]+)\)\]'
+                    r'.*?texCoord2f\[\] primvars:st = \[([^\]]+)\]',
+                    source,
+                    re.DOTALL,
+                )
+                self.assertIsNotNone(match, f"{asset_key} {panel_name}")
+                points = [tuple(float(value) for value in point) for point in re.findall(
+                    r'(-?\d+\.\d+),\s*(-?\d+\.\d+),\s*(-?\d+\.\d+)', match.group(1)
+                )]
+                indices = [int(value.strip()) for value in match.group(2).split(",")]
+                normal = tuple(float(value.strip()) for value in match.group(3).split(","))
+                uvs = [tuple(float(value.strip()) for value in uv.split(",")) for uv in re.findall(
+                    r'\(([^()]+)\)', match.group(4)
+                )]
+                self.assertEqual((len(points), len(indices), len(uvs)), (4, 4, 4))
+                self.assertEqual(normal, expected_normal, f"{asset_key} {panel_name}")
+                p0, p1, p2 = (points[indices[index]] for index in range(3))
+                edge_a = tuple(p1[index] - p0[index] for index in range(3))
+                edge_b = tuple(p2[index] - p0[index] for index in range(3))
+                geometric_normal = (
+                    edge_a[1] * edge_b[2] - edge_a[2] * edge_b[1],
+                    edge_a[2] * edge_b[0] - edge_a[0] * edge_b[2],
+                    edge_a[0] * edge_b[1] - edge_a[1] * edge_b[0],
+                )
+                self.assertGreater(
+                    sum(geometric_normal[index] * normal[index] for index in range(3)),
+                    0.0,
+                    f"{asset_key} {panel_name} is back-facing",
+                )
+                low_u = min(zip(points, uvs), key=lambda sample: sample[1][0])
+                high_u = max(zip(points, uvs), key=lambda sample: sample[1][0])
+                self.assertGreater(
+                    (high_u[0][u_axis] - low_u[0][u_axis]) * u_sign,
+                    0.0,
+                    f"{asset_key} {panel_name} mirrors U from the exterior",
+                )
+                low_v = min(zip(points, uvs), key=lambda sample: sample[1][1])
+                high_v = max(zip(points, uvs), key=lambda sample: sample[1][1])
+                self.assertGreater(high_v[0][2] - low_v[0][2], 0.0, f"{asset_key} {panel_name} flips V")
+
+    def test_hero_food_sources_are_pinned_original_rgba_inputs(self):
+        try:
+            from PIL import Image as PillowImage
+        except ImportError as error:
+            self.skipTest(f"Pillow image inspection unavailable: {error}")
+        expected_keys = {"cereal_sunrise", "cereal_harvest", "juice_citrus", "coffee_bag"}
+        self.assertEqual(set(packaging_generator.HERO_FOOD_SOURCES), expected_keys)
+        self.assertEqual(
+            len({record[0] for record in packaging_generator.HERO_FOOD_SOURCES.values()}),
+            len(expected_keys),
+        )
+        root = Path(__file__).resolve().parents[1]
+        manifest = json.loads((root / "assets/retail/manifest.json").read_text(encoding="utf-8"))
+        manifest_by_key = {entry["asset_key"]: entry for entry in manifest["assets"]}
+        for asset_key, (filename, expected_hash) in packaging_generator.HERO_FOOD_SOURCES.items():
+            source_path = root / "assets" / "retail" / "source_food" / filename
+            self.assertTrue(source_path.is_file(), asset_key)
+            self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(), expected_hash, asset_key)
+            with PillowImage.open(source_path) as image:
+                self.assertEqual(image.mode, "RGBA", asset_key)
+                alpha_min, alpha_max = image.getchannel("A").getextrema()
+                self.assertEqual(alpha_min, 0, asset_key)
+                self.assertGreaterEqual(alpha_max, 250, asset_key)
+            self.assertEqual(manifest_by_key[asset_key]["source_food_path"], f"source_food/{filename}")
+            self.assertEqual(manifest_by_key[asset_key]["source_food_sha256"], expected_hash)
 
     def test_register_parts_match_upgraded_organic_and_fixture_geometry(self):
         expectations = {

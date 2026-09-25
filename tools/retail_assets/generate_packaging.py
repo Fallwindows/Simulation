@@ -237,6 +237,42 @@ ITEM_ART_DIRECTIONS: dict[str, tuple[str, str, int]] = {
     "price_display": ("INKTAG 260", "SHELF PRICE", 5),
 }
 
+
+# These eight packages dominate the representative 9 s/17 s RGB views. They
+# use a complete fictional wrap rather than a repeated square label: side copy,
+# a distinct back panel, and the food illustration all remain deterministic and
+# project-authored. The tuple is brand, flavor/variety copy, factual secondary
+# copy, and the procedural illustration family.
+HERO_ART_DIRECTIONS: dict[str, tuple[str, str, str, str]] = {
+    "cereal_sunrise": ("DAWNFIELD", "ROLLED OATS + RED BERRIES", "WHOLE GRAIN • 12 SERVINGS", "oat_bowl"),
+    "cereal_harvest": ("RIVERBEND", "TOASTED GRAIN LOOPS", "FAMILY SIZE • WHOLE GRAIN", "grain_loops"),
+    "cereal_grain": ("FIELD NOTES", "SEVEN-GRAIN FLAKES", "LIGHTLY TOASTED • HIGH FIBER", "wheat"),
+    "cereal_berry": ("BLUE HILL", "BERRY OAT CLUSTERS", "DRIED BERRIES • CRISP OATS", "berries"),
+    "cereal_honey": ("GOLDEN COMB", "HONEY ALMOND CRUNCH", "PURE HONEY • ROASTED NUTS", "honey"),
+    "cereal_morning": ("FIRST LIGHT", "FRUIT + GRAIN MIX", "RAISINS • OATS • SEEDS", "muesli"),
+    "juice_citrus": ("SUN ORCHARD", "ORANGE + TANGERINE", "NOT FROM CONCENTRATE • 1 L", "citrus"),
+    "coffee_bag": ("NIGHT OWL", "SUMATRA DARK ROAST", "WHOLE BEAN • ROAST 04", "coffee"),
+}
+
+HERO_FOOD_SOURCES: dict[str, tuple[str, str]] = {
+    "cereal_sunrise": (
+        "oat_berry_bowl_v1.png",
+        "05092075da2683fdb96bc5ade5e8173813ff52a5837cf72f180100dd982b2139",
+    ),
+    "cereal_harvest": (
+        "toasted_loops_bowl_v1.png",
+        "43e5d2f9abae2f9389c5f4af596fb82263df19a0e81c65ba1e64c38aefefe70f",
+    ),
+    "juice_citrus": (
+        "citrus_still_life_v1.png",
+        "ba636324e9fff4e56cc35738206fcb72f8f54e5d0ec76827ebafaf03cf1df86b",
+    ),
+    "coffee_bag": (
+        "roasted_coffee_scoop_v1.png",
+        "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56",
+    ),
+}
+
 BOTTLE_LEFT_STRIP_FRACTION = 0.16
 BOTTLE_LAYOUT_FIVE_TEXT_INSET_FRACTION = 0.20
 
@@ -337,6 +373,210 @@ def _write_rich_texture(path: Path, spec: AssetSpec, size: int = 768) -> None:
         width = 3 if index % 5 == 0 else 1 + (index % 3)
         draw.rectangle((barcode_x + index * 7, barcode_y, barcode_x + index * 7 + width, barcode_y + int(size * .075)), fill=dark)
     draw.text((int(size * 0.08), int(size * 0.91)), "FICTIONAL PRODUCT • 100% DEMO", font=_font(int(size * .022)), fill=dark)
+    image.save(path, format="PNG", optimize=True)
+
+
+def _hero_wrap_regions(spec: AssetSpec) -> dict[str, tuple[float, float, float, float]]:
+    """Return UV regions for a conventional left/front/right/back package wrap."""
+    width, depth, _ = spec.dimensions_m
+    perimeter = 2.0 * (width + depth)
+    left_end = depth / perimeter
+    front_end = (depth + width) / perimeter
+    right_end = (2.0 * depth + width) / perimeter
+    return {
+        "left": (0.0, 0.04, left_end, 0.96),
+        "front": (left_end, 0.04, front_end, 0.96),
+        "right": (front_end, 0.04, right_end, 0.96),
+        "back": (right_end, 0.04, 1.0, 0.96),
+    }
+
+
+def _draw_food_illustration(
+    draw,
+    kind: str,
+    box: tuple[int, int, int, int],
+    ink: tuple[int, int, int],
+    accent: tuple[int, int, int],
+    seed: bytes,
+) -> None:
+    """Layer shaded shapes into item-specific, food-readable artwork."""
+    x0, y0, x1, y1 = box
+    width, height = x1 - x0, y1 - y0
+    cx, cy = x0 + width // 2, y0 + int(height * .58)
+    shadow = _blend(ink, (0, 0, 0), .34)
+    cream = (242, 226, 188)
+
+    if kind in {"oat_bowl", "grain_loops", "berries", "muesli"}:
+        draw.ellipse((x0 + int(width * .10), y0 + int(height * .48), x1 - int(width * .06), y1 - int(height * .03)), fill=shadow)
+        draw.pieslice((x0 + int(width * .08), y0 + int(height * .32), x1 - int(width * .04), y1 - int(height * .04)), 0, 180, fill=(231, 225, 207), outline=ink, width=max(2, width // 90))
+        draw.ellipse((x0 + int(width * .08), y0 + int(height * .31), x1 - int(width * .04), y0 + int(height * .62)), fill=(248, 240, 218), outline=ink, width=max(2, width // 100))
+        for index in range(18):
+            px = x0 + int(width * (.16 + .66 * ((seed[index % 32] + index * 29) % 101) / 100.0))
+            py = y0 + int(height * (.37 + .17 * ((seed[(index + 7) % 32] + index * 11) % 101) / 100.0))
+            radius = max(3, int(width * (.022 + .010 * (index % 3))))
+            if kind == "grain_loops":
+                draw.ellipse((px - radius, py - radius, px + radius, py + radius), fill=(205, 137, 63), outline=shadow, width=max(1, radius // 4))
+                inner = max(2, radius // 2)
+                draw.ellipse((px - inner, py - inner, px + inner, py + inner), fill=(245, 222, 174))
+            elif kind in {"berries", "oat_bowl"} and index % 4 == 0:
+                berry = (137, 35, 55) if index % 8 == 0 else (62, 72, 124)
+                draw.ellipse((px - radius, py - radius, px + radius, py + radius), fill=berry, outline=shadow)
+                draw.ellipse((px - radius // 3, py - radius // 2, px, py - radius // 6), fill=(246, 213, 196))
+            else:
+                draw.ellipse((px - radius, py - radius // 2, px + radius, py + radius // 2), fill=(194, 145, 72), outline=shadow)
+        draw.arc((x0 + int(width * .12), y0 + int(height * .39), x1 - int(width * .08), y0 + int(height * .66)), 190, 345, fill=(255, 255, 248), width=max(2, width // 42))
+    elif kind == "wheat":
+        for stalk in range(5):
+            sx = x0 + int(width * (.22 + stalk * .13))
+            top = y0 + int(height * (.20 + .035 * (stalk % 2)))
+            draw.line((sx, y1 - int(height * .06), sx + int(width * .05), top), fill=shadow, width=max(3, width // 70))
+            for grain in range(6):
+                gy = top + int(grain * height * .075)
+                gx = sx + int(width * (.05 - grain * .006))
+                direction = -1 if grain % 2 else 1
+                grain_end = gx + direction * int(width * .10)
+                draw.ellipse((min(gx, grain_end), gy, max(gx, grain_end), gy + int(height * .055)), fill=(218, 164, 71), outline=shadow)
+    elif kind == "honey":
+        radius = min(width, height) // 7
+        for row in range(3):
+            for col in range(3):
+                px = x0 + int(width * (.22 + col * .24 + .12 * (row % 2)))
+                py = y0 + int(height * (.28 + row * .20))
+                draw.regular_polygon((px, py, radius), 6, rotation=30, fill=(226, 163, 41), outline=shadow)
+                draw.regular_polygon((px, py, max(2, radius - width // 32)), 6, rotation=30, fill=(248, 194, 63))
+        draw.line((x0 + int(width * .12), y0 + int(height * .13), x1 - int(width * .05), y0 + int(height * .70)), fill=(113, 69, 33), width=max(5, width // 30))
+        draw.rounded_rectangle((cx - width // 7, cy - height // 10, cx + width // 7, cy), radius=max(3, width // 25), fill=(190, 122, 37), outline=shadow)
+    elif kind == "citrus":
+        for index, (dx, dy, scale) in enumerate(((-.20, .08, .32), (.12, -.06, .38), (.25, .22, .25))):
+            radius = int(min(width, height) * scale)
+            px, py = cx + int(width * dx), cy + int(height * dy)
+            outer = (235, 129, 28) if index != 2 else (239, 173, 34)
+            draw.ellipse((px - radius, py - radius, px + radius, py + radius), fill=outer, outline=shadow, width=max(2, width // 80))
+            draw.ellipse((px - int(radius * .82), py - int(radius * .82), px + int(radius * .82), py + int(radius * .82)), fill=(255, 220, 116), outline=cream, width=max(2, width // 65))
+            for spoke in range(8):
+                angle = spoke * math.pi / 4.0
+                draw.line((px, py, px + int(math.cos(angle) * radius * .78), py + int(math.sin(angle) * radius * .78)), fill=cream, width=max(1, width // 100))
+        draw.ellipse((x0 + int(width * .15), y0 + int(height * .10), x0 + int(width * .52), y0 + int(height * .26)), fill=(72, 128, 68), outline=shadow)
+    else:  # coffee
+        draw.ellipse((x0 + int(width * .11), y0 + int(height * .22), x1 - int(width * .08), y1 - int(height * .04)), fill=(44, 29, 23), outline=(15, 12, 10), width=max(3, width // 75))
+        for index in range(13):
+            px = x0 + int(width * (.18 + .66 * ((seed[index] + index * 17) % 101) / 100.0))
+            py = y0 + int(height * (.30 + .48 * ((seed[(index + 11) % 32] + index * 23) % 101) / 100.0))
+            rx, ry = max(5, width // 18), max(7, height // 16)
+            draw.ellipse((px - rx, py - ry, px + rx, py + ry), fill=(111, 66, 41), outline=(31, 20, 16), width=max(2, width // 120))
+            draw.arc((px - rx // 2, py - ry, px + rx // 2, py + ry), 80, 280, fill=(221, 158, 102), width=max(1, width // 140))
+        draw.arc((x0 + int(width * .40), y0 + int(height * .04), x1 - int(width * .18), y0 + int(height * .36)), 190, 335, fill=(235, 226, 207), width=max(2, width // 55))
+
+
+def _paste_hero_food_source(image, spec: AssetSpec, box: tuple[int, int, int, int]) -> bool:
+    """Composite one pinned original RGBA food cutout; return false for vector-only art."""
+    source_record = HERO_FOOD_SOURCES.get(spec.asset_key)
+    if source_record is None:
+        return False
+    filename, expected_hash = source_record
+    source_path = Path(__file__).resolve().parents[2] / "assets" / "retail" / "source_food" / filename
+    if not source_path.is_file():
+        raise RuntimeError(f"required hero food source missing: {source_path}")
+    actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if actual_hash != expected_hash:
+        raise RuntimeError(
+            f"hero food source hash mismatch: {source_path} ({actual_hash}; expected {expected_hash})"
+        )
+    with Image.open(source_path) as opened:
+        source = opened.convert("RGBA")
+    alpha_bounds = source.getchannel("A").getbbox()
+    if alpha_bounds is None:
+        raise RuntimeError(f"hero food source has no visible alpha content: {source_path}")
+    source = source.crop(alpha_bounds)
+    x0, y0, x1, y1 = box
+    target_width, target_height = x1 - x0, y1 - y0
+    source.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+    paste_x = x0 + (target_width - source.width) // 2
+    paste_y = y0 + (target_height - source.height) // 2
+    image.paste(source, (paste_x, paste_y), source)
+    return True
+
+
+def _write_hero_wrap_texture(path: Path, spec: AssetSpec, height: int = 768) -> None:
+    """Write a four-panel retail wrap for packages closest to the RGB camera."""
+    if Image is None:
+        raise RuntimeError(f"Pillow=={REQUIRED_PILLOW_VERSION} is required; refusing to write {path}")
+    regions = _hero_wrap_regions(spec)
+    physical_width, physical_depth, physical_height = spec.dimensions_m
+    width = int(round(height * 2.0 * (physical_width + physical_depth) / physical_height))
+    width = max(960, min(1536, width))
+    base = tuple(int(round(value * 255)) for value in spec.color)
+    accent = tuple(int(round(value * 255)) for value in spec.accent)
+    ink = _blend(base, (8, 12, 16), .78)
+    paper = _blend(base, (250, 246, 231), .66)
+    seed = hashlib.sha256((spec.asset_key + ":hero-wrap-v1").encode("utf-8")).digest()
+    image = Image.new("RGB", (width, height), paper)
+    draw = ImageDraw.Draw(image)
+
+    for y in range(height):
+        amount = .06 + .11 * y / max(1, height - 1)
+        draw.line((0, y, width, y), fill=_blend(paper, base, amount))
+    for index in range(420):
+        x = (seed[index % 32] * (index + 19) + index * 37) % width
+        y = (seed[(index + 9) % 32] * (index + 31) + index * 17) % height
+        dot = _blend(paper, ink, .07 + .03 * (index % 3))
+        draw.point((x, y), fill=dot)
+
+    px = {
+        name: (int(round(bounds[0] * width)), int(round(bounds[1] * height)), int(round(bounds[2] * width)), int(round(bounds[3] * height)))
+        for name, bounds in regions.items()
+    }
+    brand, variety, secondary, illustration = HERO_ART_DIRECTIONS[spec.asset_key]
+    lx0, ly0, lx1, ly1 = px["left"]
+    fx0, fy0, fx1, fy1 = px["front"]
+    rx0, ry0, rx1, ry1 = px["right"]
+    bx0, by0, bx1, by1 = px["back"]
+    front_width = fx1 - fx0
+
+    draw.rectangle((lx0, ly0, lx1, ly1), fill=_blend(base, paper, .36), outline=ink, width=max(2, width // 360))
+    draw.rectangle((lx0, ly0, lx1, ly0 + int((ly1 - ly0) * .18)), fill=ink)
+    draw.text(((lx0 + lx1) // 2, ly0 + int(height * .035)), brand, font=_font(max(13, int((lx1 - lx0) * .095)), True), fill=(246, 244, 231), anchor="ma")
+    draw.text((lx0 + int((lx1 - lx0) * .10), ly0 + int(height * .23)), "INGREDIENTS", font=_font(max(13, int((lx1 - lx0) * .085)), True), fill=ink)
+    for row, scale in enumerate((.76, .88, .64, .82, .70, .55)):
+        y = ly0 + int(height * (.30 + row * .055))
+        draw.line((lx0 + int((lx1 - lx0) * .10), y, lx0 + int((lx1 - lx0) * scale), y), fill=ink, width=max(2, height // 320))
+    draw.text(((lx0 + lx1) // 2, ly1 - int(height * .09)), "PACKED FOR\nNORTHSTAR MARKET", font=_font(max(12, int((lx1 - lx0) * .068)), True), fill=ink, anchor="mm", align="center")
+
+    draw.rectangle((rx0, ry0, rx1, ry1), fill=_blend(accent, paper, .40), outline=ink, width=max(2, width // 360))
+    draw.text(((rx0 + rx1) // 2, ry0 + int(height * .10)), "SERVING\nSUGGESTION", font=_font(max(13, int((rx1 - rx0) * .08)), True), fill=ink, anchor="mm", align="center")
+    for row in range(5):
+        y = ry0 + int(height * (.25 + row * .095))
+        draw.rectangle((rx0 + int((rx1 - rx0) * .12), y, rx1 - int((rx1 - rx0) * .12), y + max(2, height // 145)), fill=_blend(ink, accent, .18 * (row % 2)))
+    draw.text(((rx0 + rx1) // 2, ry1 - int(height * .10)), "NET WT\nFICTIONAL PRODUCT", font=_font(max(12, int((rx1 - rx0) * .07)), True), fill=ink, anchor="mm", align="center")
+
+    draw.rectangle((bx0, by0, bx1, by1), fill=(244, 241, 225), outline=ink, width=max(2, width // 360))
+    back_margin = max(10, int((bx1 - bx0) * .07))
+    draw.text((bx0 + back_margin, by0 + int(height * .035)), "Nutrition Facts", font=_font(max(18, int((bx1 - bx0) * .075)), True), fill=(16, 16, 14))
+    rule_y = by0 + int(height * .10)
+    draw.rectangle((bx0 + back_margin, rule_y, bx1 - back_margin, rule_y + max(5, height // 95)), fill=(18, 18, 16))
+    for row in range(9):
+        y = rule_y + int(height * (.045 + row * .054))
+        draw.line((bx0 + back_margin, y, bx1 - back_margin, y), fill=(28, 28, 25), width=2 if row not in {2, 6} else 5)
+    barcode_left = bx0 + back_margin
+    barcode_top = by1 - int(height * .20)
+    cursor = barcode_left
+    for index in range(31):
+        bar_width = 1 + seed[index % 32] % 4
+        draw.rectangle((cursor, barcode_top, cursor + bar_width, by1 - int(height * .06)), fill=(20, 20, 18))
+        cursor += bar_width + 2 + seed[(index + 13) % 32] % 3
+    draw.text((bx1 - back_margin, by1 - int(height * .10)), "LOT " + spec.asset_key[-4:].upper(), font=_font(max(12, int((bx1 - bx0) * .045))), fill=ink, anchor="rm")
+
+    draw.rounded_rectangle((fx0, fy0, fx1, fy1), radius=max(10, front_width // 24), fill=_blend(base, paper, .18), outline=ink, width=max(3, front_width // 75))
+    draw.rectangle((fx0, fy0, fx1, fy0 + int(height * .13)), fill=ink)
+    draw.text(((fx0 + fx1) // 2, fy0 + int(height * .062)), brand, font=_font(max(18, int(front_width * .085)), True), fill=(247, 244, 230), anchor="mm")
+    draw.text(((fx0 + fx1) // 2, fy0 + int(height * .205)), spec.product_name, font=_font(max(25, int(front_width * (.115 if len(spec.product_name) < 13 else .092))), True), fill=ink, anchor="mm")
+    draw.text(((fx0 + fx1) // 2, fy0 + int(height * .275)), variety, font=_font(max(14, int(front_width * .048)), True), fill=_blend(ink, accent, .18), anchor="mm")
+    art_box = (fx0 + int(front_width * .08), fy0 + int(height * .30), fx1 - int(front_width * .08), fy0 + int(height * .76))
+    if not _paste_hero_food_source(image, spec, art_box):
+        _draw_food_illustration(draw, illustration, art_box, ink, accent, seed)
+    draw.rectangle((fx0, fy0 + int(height * .78), fx1, fy1), fill=accent)
+    draw.text(((fx0 + fx1) // 2, fy0 + int(height * .835)), secondary, font=_font(max(13, int(front_width * .047)), True), fill=ink, anchor="mm")
+    draw.text(((fx0 + fx1) // 2, fy0 + int(height * .895)), "ORIGINAL FICTIONAL PACKAGING • DEMO", font=_font(max(11, int(front_width * .034))), fill=ink, anchor="mm")
     image.save(path, format="PNG", optimize=True)
 
 
@@ -683,10 +923,23 @@ def _material(
     return "\n".join(lines)
 
 
-def _front_panel(width: float, depth: float, height: float) -> str:
+def _front_panel(
+    width: float,
+    depth: float,
+    height: float,
+    uv_bounds: tuple[float, float, float, float] | None = None,
+) -> str:
     y = depth / 2.0 + 0.002
     w = width * 0.88 / 2.0
     h = height * 0.84 / 2.0
+    uv = (
+        "[(0, 0), (1, 0), (1, 1), (0, 1)]"
+        if uv_bounds is None else
+        "[(%.6f, %.6f), (%.6f, %.6f), (%.6f, %.6f), (%.6f, %.6f)]" % (
+            uv_bounds[0], uv_bounds[1], uv_bounds[2], uv_bounds[1],
+            uv_bounds[2], uv_bounds[3], uv_bounds[0], uv_bounds[3],
+        )
+    )
     return f'''        def Mesh "FrontPanel" (
             prepend apiSchemas = ["MaterialBindingAPI"]
         ) {{
@@ -698,7 +951,7 @@ def _front_panel(width: float, depth: float, height: float) -> str:
             normal3f[] normals = [(0, 1, 0)] (
                 interpolation = "uniform"
             )
-            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+            texCoord2f[] primvars:st = {uv} (
                 interpolation = "vertex"
             )
             rel material:binding = </Asset/Looks/Front>
@@ -802,6 +1055,57 @@ def _side_and_back_print_panels(width: float, depth: float, height: float) -> li
             normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
             texCoord2f[] primvars:st = {back_uv} (interpolation = "vertex")
             rel material:binding = </Asset/Looks/Print>
+        }}''',
+    ]
+
+
+def _hero_side_and_back_print_panels(spec: AssetSpec, material: str) -> list[str]:
+    """Add near-full side/back print faces mapped to the hero wrap atlas."""
+    width, depth, height = spec.dimensions_m
+    regions = _hero_wrap_regions(spec)
+    half_h = height * .42
+    half_side_depth = depth * .44
+    x_offset = width / 2.0 + .001
+    y_offset = depth / 2.0 + .001
+
+    def uv(bounds: tuple[float, float, float, float], reverse_u: bool = False) -> str:
+        low_u, high_u = bounds[0], bounds[2]
+        if reverse_u:
+            low_u, high_u = high_u, low_u
+        return "[(%.6f, %.6f), (%.6f, %.6f), (%.6f, %.6f), (%.6f, %.6f)]" % (
+            low_u, bounds[1], high_u, bounds[1], high_u, bounds[3], low_u, bounds[3],
+        )
+
+    return [
+        f'''        def Mesh "HeroLeftPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {{
+            point3f[] points = [(-{x_offset:.5f}, -{half_side_depth:.5f}, -{half_h:.5f}), (-{x_offset:.5f}, {half_side_depth:.5f}, -{half_h:.5f}), (-{x_offset:.5f}, {half_side_depth:.5f}, {half_h:.5f}), (-{x_offset:.5f}, -{half_side_depth:.5f}, {half_h:.5f})]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = {uv(regions["left"])} (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/{material}>
+        }}''',
+        f'''        def Mesh "HeroRightPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {{
+            point3f[] points = [({x_offset:.5f}, {half_side_depth:.5f}, -{half_h:.5f}), ({x_offset:.5f}, -{half_side_depth:.5f}, -{half_h:.5f}), ({x_offset:.5f}, -{half_side_depth:.5f}, {half_h:.5f}), ({x_offset:.5f}, {half_side_depth:.5f}, {half_h:.5f})]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = {uv(regions["right"])} (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/{material}>
+        }}''',
+        f'''        def Mesh "HeroBackPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {{
+            point3f[] points = [(-{width * .44:.5f}, -{y_offset:.5f}, -{half_h:.5f}), ({width * .44:.5f}, -{y_offset:.5f}, -{half_h:.5f}), ({width * .44:.5f}, -{y_offset:.5f}, {half_h:.5f}), (-{width * .44:.5f}, -{y_offset:.5f}, {half_h:.5f})]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = {uv(regions["back"], reverse_u=True)} (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/{material}>
         }}''',
     ]
 
@@ -1088,10 +1392,16 @@ def _asset_usda(
     texture_path = f"../textures/{texture_name}"
     normal_texture_path = f"../textures/{normal_texture_name}" if normal_texture_name else None
     roughness_texture_path = f"../textures/{roughness_texture_name}" if roughness_texture_name else None
+    is_hero_asset = spec.asset_key in HERO_ART_DIRECTIONS
+    hero_front_uv = _hero_wrap_regions(spec)["front"] if is_hero_asset else None
+
+    def asset_front_panel(panel_width: float, panel_depth: float, panel_height: float) -> str:
+        return _front_panel(panel_width, panel_depth, panel_height, hero_front_uv)
+
     geometry: list[str] = []
     if spec.model_type in {"box", "carton", "sign"}:
         geometry.append(_beveled_box("BodyShell", spec.dimensions_m, min(width, depth) * 0.075, body_material))
-        geometry.append(_front_panel(width, depth, height))
+        geometry.append(asset_front_panel(width, depth, height))
         geometry.append(_cube("TopBand", (width * 0.86, 0.012, height * 0.10), (0.0, depth / 2.0 + 0.008, height * 0.34), front_material))
         geometry.append(_cube("BottomTrim", (width * 0.82, 0.010, height * 0.025), (0.0, depth / 2.0 + 0.009, -height * 0.40), "Metal"))
         if spec.model_type == "carton":
@@ -1107,7 +1417,7 @@ def _asset_usda(
         else:
             geometry.append(_cylinder("TopRim", radius * 0.97, height * 0.035, "Metal", height * 0.4825, vertices=40))
             geometry.append(_cylinder("BottomRim", radius * 0.97, height * 0.025, "Metal", -height * 0.4875, vertices=40))
-        geometry.append(_front_panel(width, depth, height * 0.65))
+        geometry.append(asset_front_panel(width, depth, height * 0.65))
     elif spec.model_type == "bottle":
         radius = min(width, depth) / 2.0
         geometry.append(_cylinder("Body", radius * 0.91, height * 0.70, body_material, -height * 0.15, vertices=40))
@@ -1116,7 +1426,7 @@ def _asset_usda(
             height * 0.095, body_material, height * 0.245,
         ))
         geometry.append(_cylinder("Neck", radius * 0.57, height * 0.17, body_material, height * 0.36, vertices=32))
-        geometry.append(_front_panel(width, depth, height * 0.42))
+        geometry.append(asset_front_panel(width, depth, height * 0.42))
         geometry.append(_cylinder("Cap", radius * 0.60, height * 0.05, "Metal", height * 0.475, vertices=32))
         geometry.append(_cylinder("CapRidge", radius * 0.63, height * 0.014, "Metal", height * 0.46, vertices=32))
     elif spec.model_type == "fruit":
@@ -1161,7 +1471,7 @@ def _asset_usda(
             _cylinder_at("Cap", width * 0.13, height * 0.045, "Front", (width * 0.18, 0.0, height * 0.4775), vertices=28),
             _cube("HandleTop", (width * 0.34, depth * 0.15, height * 0.055), (-width * 0.22, 0.0, height * 0.36), "Body"),
             _cube("HandleSide", (width * 0.07, depth * 0.15, height * 0.26), (-width * 0.37, 0.0, height * 0.25), "Body"),
-            _front_panel(width, depth, height * 0.48),
+            asset_front_panel(width, depth, height * 0.48),
         ])
     elif spec.model_type == "gable_carton":
         geometry.extend([
@@ -1171,14 +1481,14 @@ def _asset_usda(
             _wedge("GableRight", (width * 0.50, depth, height * 0.22), "Paper", (width * 0.25, 0.0, height * 0.39)),
             _cube("TopSeam", (width * 0.16, depth, height * 0.035), (0.0, 0.0, height * 0.4825), "Front"),
             _cylinder_at("PourCap", width * 0.09, height * 0.03, "Metal", (width * 0.20, depth * 0.15, height * 0.43), vertices=24),
-            _front_panel(width, depth, height * 0.70),
+            asset_front_panel(width, depth, height * 0.70),
         ])
     elif spec.model_type == "yogurt_cup":
         geometry.extend([
             _frustum("TaperedCup", width * 0.41, width * 0.50, height * 0.84, "Body", -height * 0.04, vertices=40),
             _cylinder("FoilLid", width * 0.53, height * 0.025, "Metal", height * 0.4875, vertices=48),
             _cylinder("BaseRing", width * 0.39, height * 0.025, "Front", -height * 0.4875, vertices=40),
-            _front_panel(width * 0.85, depth * 0.90, height * 0.55),
+            asset_front_panel(width * 0.85, depth * 0.90, height * 0.55),
         ])
     elif spec.model_type == "egg_carton":
         geometry.extend([
@@ -1215,7 +1525,7 @@ def _asset_usda(
             _oval_prism("TubFoot", (width * 0.82, depth * 0.82, height * 0.05), "Body", -height * 0.475, vertices=40),
             _oval_prism("SnapLid", (width, depth, height * 0.14), "Front", height * 0.43, vertices=40),
             _oval_prism("RolledRim", (width, depth * 0.96, height * 0.035), "Metal", height * 0.35, vertices=40),
-            _front_panel(width * 0.82, depth, height * 0.48),
+            asset_front_panel(width * 0.82, depth, height * 0.48),
         ])
     elif spec.model_type in {"oil_bottle", "longneck_bottle"}:
         square = spec.model_type == "oil_bottle"
@@ -1230,7 +1540,7 @@ def _asset_usda(
             _frustum("LongShoulder", width * 0.46, width * 0.18, height * 0.17, "Glass", height * 0.21, vertices=40),
             _cylinder("LongNeck", width * 0.18, height * 0.23, "Glass", height * 0.37, vertices=32),
             _cylinder("Closure", width * (0.20 if square else 0.19), height * 0.045, "Metal", height * 0.4775, vertices=32),
-            _front_panel(width, depth, height * 0.38),
+            asset_front_panel(width, depth, height * 0.38),
         ])
     elif spec.model_type == "handled_bottle":
         geometry.extend([
@@ -1277,7 +1587,7 @@ def _asset_usda(
                 _frustum("Shoulder", width * 0.46, width * 0.20, height * 0.13, "Body", height * 0.31, vertices=32),
                 _cylinder("FlipSpout", width * 0.20, height * 0.12, "Front", height * 0.44, vertices=28),
             ])
-        geometry.append(_front_panel(width, depth, height * 0.48))
+        geometry.append(asset_front_panel(width, depth, height * 0.48))
     elif spec.model_type in {"detergent_jug", "bleach_jug"}:
         bleach = spec.model_type == "bleach_jug"
         geometry.extend([
@@ -1288,7 +1598,7 @@ def _asset_usda(
             _cylinder_at("MeasuringCap", width * 0.15, height * 0.07, "Front", ((-1 if bleach else 1) * width * 0.22, 0.0, height * 0.465), vertices=28),
             _cube("HandleTop", (width * 0.36, depth * 0.13, height * 0.055), ((1 if bleach else -1) * width * 0.23, 0.0, height * 0.32), "Dark"),
             _cube("HandleSide", (width * 0.07, depth * 0.13, height * 0.25), ((1 if bleach else -1) * width * 0.38, 0.0, height * 0.22), "Dark"),
-            _front_panel(width, depth, height * 0.46),
+            asset_front_panel(width, depth, height * 0.46),
         ])
     elif spec.model_type in {"short_can", "canister"}:
         geometry.extend([
@@ -1303,13 +1613,13 @@ def _asset_usda(
                 _cylinder("Overcap", width * 0.51, height * 0.12, "Front", height * 0.44, vertices=48),
                 _cube("GripBand", (width * 0.94, depth * 0.08, height * 0.08), (0.0, depth * 0.48, height * 0.36), "Dark"),
             ])
-        geometry.append(_front_panel(width * 0.88, depth, height * 0.66))
+        geometry.append(asset_front_panel(width * 0.88, depth, height * 0.66))
     elif spec.model_type == "rectangular_tin":
         geometry.extend([
             _beveled_box("RoundedTin", spec.dimensions_m, 0.012, "Metal"),
             _cube("RolledSeam", (width * 0.94, depth * 0.94, height * 0.16), (0.0, 0.0, height * 0.42), "Front"),
             _ellipsoid("KeyTab", (width * 0.24, depth * 0.18, height * 0.08), (width * 0.24, 0.0, height * 0.43), "Dark"),
-            _front_panel(width * 0.88, depth, height * 0.62),
+            asset_front_panel(width * 0.88, depth, height * 0.62),
         ])
     elif spec.model_type in {"hinged_box", "window_box", "long_box", "handled_box", "tissue_box"}:
         geometry.append(_beveled_box("Carton", spec.dimensions_m, min(width, depth) * 0.08, "Paper"))
@@ -1341,7 +1651,7 @@ def _asset_usda(
                 _ellipsoid("OvalOpening", (width * 0.42, depth * 0.28, height * 0.12), (0.0, 0.0, height * 0.43), "Dark"),
                 _ellipsoid("RaisedTissue", (width * 0.36, depth * 0.20, height * 0.25), (0.0, 0.0, height * 0.36), "Paper"),
             ])
-        geometry.append(_front_panel(width, depth, height * 0.72))
+        geometry.append(asset_front_panel(width, depth, height * 0.72))
     elif spec.model_type in {"gusset_bag", "valve_bag", "paper_sack", "pillow_bag"}:
         geometry.extend(_pouch("Package", spec.dimensions_m, "Paper" if spec.model_type != "pillow_bag" else "Body"))
         if spec.model_type == "gusset_bag":
@@ -1360,7 +1670,7 @@ def _asset_usda(
             for side in (-1, 1):
                 name = "CrimpBottom" if side < 0 else "CrimpTop"
                 geometry.append(_cube(name, (width * 0.92, depth * 0.28, height * 0.045), (0.0, 0.0, side * height * 0.475), "Metal"))
-        geometry.append(_front_panel(width * 0.90, depth, height * 0.62))
+        geometry.append(asset_front_panel(width * 0.90, depth, height * 0.62))
     elif spec.model_type == "bread_bag":
         geometry.extend([
             _loaf_mesh("ScoredLoaf", (width * 0.96, depth * 0.88, height * 0.76), "Paper"),
@@ -1368,7 +1678,7 @@ def _asset_usda(
             _cube("BagBottomSeal", (width * 0.84, depth * 0.52, height * 0.06), (0.0, 0.0, -height * 0.47), "Clear"),
             _frustum("TwistedNeck", width * 0.22, width * 0.10, height * 0.20, "Clear", height * 0.36, vertices=20),
             _cube("Closure", (width * 0.12, depth * 0.16, height * 0.04), (0.0, 0.0, height * 0.43), "Front"),
-            _front_panel(width * 0.72, depth, height * 0.48),
+            asset_front_panel(width * 0.72, depth, height * 0.48),
         ])
     elif spec.model_type == "banana_bunch":
         for finger in range(5):
@@ -1421,7 +1731,7 @@ def _asset_usda(
                 _cube("LeftGrip", (width * 0.08, depth * 0.08, height * 0.34), (-width * 0.45, 0.0, -height * 0.08), "Front"),
                 _cube("RightGrip", (width * 0.08, depth * 0.08, height * 0.34), (width * 0.45, 0.0, -height * 0.08), "Front"),
             ])
-        geometry.append(_front_panel(width, depth, height * 0.48))
+        geometry.append(asset_front_panel(width, depth, height * 0.48))
     elif spec.model_type == "paper_roll":
         geometry.extend([
             _cylinder("PaperCylinder", width * 0.50, height, "Paper", vertices=48),
@@ -1478,7 +1788,7 @@ def _asset_usda(
             _cube("RailClip", (width, depth, height * 0.24), (0.0, -depth * 0.20, -height * 0.38), "Metal"),
             _beveled_box("Bezel", (width, depth, height), 0.006, "Dark"),
             _cube("EInkPanel", (width * 0.88, depth * 0.10, height * 0.68), (0.0, depth * 0.48, 0.0), "Paper"),
-            _front_panel(width * 0.88, depth, height * 0.68),
+            asset_front_panel(width * 0.88, depth, height * 0.68),
         ])
     else:
         raise ValueError(spec.model_type)
@@ -1488,7 +1798,7 @@ def _asset_usda(
         "angled_bin", "wicker_basket", "shelf_divider", "bottle_rack",
     }
     if is_new_asset and not texture_exempt and not any("primvars:st" in fragment for fragment in geometry):
-        geometry.append(_front_panel(width * 0.86, depth, height * 0.62))
+        geometry.append(asset_front_panel(width * 0.86, depth, height * 0.62))
 
     # Front is the one textured material and belongs only on explicit UV
     # meshes.  Colored caps, seams, rails, and closures use Accent instead.
@@ -1497,13 +1807,19 @@ def _asset_usda(
             fragment if "primvars:st" in fragment else fragment.replace("</Asset/Looks/Front>", "</Asset/Looks/Accent>")
             for fragment in geometry
         ]
-        if any("primvars:st" in fragment for fragment in geometry) and spec.department not in {"produce", "fixtures"}:
+        if (
+            not is_hero_asset
+            and any("primvars:st" in fragment for fragment in geometry)
+            and spec.department not in {"produce", "fixtures"}
+        ):
             geometry.extend(_side_and_back_print_panels(width, depth, height))
+    if is_hero_asset:
+        geometry.extend(_hero_side_and_back_print_panels(spec, "Print" if is_new_asset else "Front"))
 
     has_uv_label = any("primvars:st" in fragment for fragment in geometry)
     body_roughness = 0.62
     front_roughness = 0.54
-    if is_new_asset:
+    if is_new_asset or is_hero_asset:
         system = _new_art_system(spec)
         body_roughness = {
             "produce": 0.82,
@@ -1636,8 +1952,9 @@ def generate_library(root: Path | None = None) -> Path:
     for spec in ASSET_SPECS:
         texture_name = f"{spec.asset_key}.png"
         texture_path = texture_root / texture_name
-        candidate_normal_name = f"{spec.asset_key}_normal.png" if spec.assembly_parts else None
-        candidate_roughness_name = f"{spec.asset_key}_roughness.png" if spec.assembly_parts else None
+        is_hero_asset = spec.asset_key in HERO_ART_DIRECTIONS
+        candidate_normal_name = f"{spec.asset_key}_normal.png" if spec.assembly_parts or is_hero_asset else None
+        candidate_roughness_name = f"{spec.asset_key}_roughness.png" if spec.assembly_parts or is_hero_asset else None
         usd_source = _asset_usda(spec, texture_name, candidate_normal_name, candidate_roughness_name)
         uses_surface_maps = 'def Shader "NormalTexture"' in usd_source
         normal_texture_name = candidate_normal_name if uses_surface_maps else None
@@ -1645,7 +1962,11 @@ def generate_library(root: Path | None = None) -> Path:
         normal_texture_path = texture_root / normal_texture_name if normal_texture_name else None
         roughness_texture_path = texture_root / roughness_texture_name if roughness_texture_name else None
         usd_path = usd_root / f"{spec.asset_key}.usda"
-        if spec.assembly_parts:
+        if is_hero_asset:
+            _write_hero_wrap_texture(texture_path, spec)
+            assert normal_texture_path is not None and roughness_texture_path is not None
+            _write_surface_maps(normal_texture_path, roughness_texture_path, spec)
+        elif spec.assembly_parts:
             _write_category_texture(texture_path, spec)
             if uses_surface_maps:
                 assert normal_texture_path is not None and roughness_texture_path is not None
@@ -1693,6 +2014,12 @@ def generate_library(root: Path | None = None) -> Path:
                 "normal_texture_sha256": _sha256(normal_texture_path),
                 "roughness_texture_path": f"textures/{roughness_texture_name}",
                 "roughness_texture_sha256": _sha256(roughness_texture_path),
+            })
+        if spec.asset_key in HERO_FOOD_SOURCES:
+            source_name, source_hash = HERO_FOOD_SOURCES[spec.asset_key]
+            entry.update({
+                "source_food_path": f"source_food/{source_name}",
+                "source_food_sha256": source_hash,
             })
         entries.append(entry)
     manifest = {

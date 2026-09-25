@@ -45,13 +45,21 @@
       "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "5abbd484f9e18424afe6c8dc7e845cc6a0ce43a48d6b4b3967bf48d8c4d6196c",
-      "texture_sha256": "fea1ff84a088601b90b4b17ee2e90e80737b6cf83e698cb852191b3abfa620b8",
-      "geometry_scope_sha256": "43952d95c93cb440de92c944ad8829407f679904206ae13a8d8a6c63f110ecd8",
-      "appearance_scope_sha256": "bc09792e8d00b1a29c221404ad176b77517e89a3ed8eec0b071920f02ec26c23"
+      "usd_sha256": "aba4991938a6599b1613c807c50dd2a388ec5670a347a98673e4fd9835677036",
+      "texture_sha256": "affd4945591f3c4a88da564360d25ce3a8780decb728094afcfea62ff507bc56",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "5d459ad3b4523c9c715234849e7db0d2c1d5875b3ef366ba080d4c19667d0a82",
+      "normal_texture_path": "textures/cereal_sunrise_normal.png",
+      "normal_texture_sha256": "a4223d2c9be28134c062031ddaa65bd3d611b64b678bb4574dede319c38ffc99",
+      "roughness_texture_path": "textures/cereal_sunrise_roughness.png",
+      "roughness_texture_sha256": "cee7cfc572c4b4004e5e02a1c4a7de3016787d1f19cc5eb8421be9ef6f1f55c5",
+      "source_food_path": "source_food/oat_berry_bowl_v1.png",
+      "source_food_sha256": "05092075da2683fdb96bc5ade5e8173813ff52a5837cf72f180100dd982b2139"
     },
     {
       "asset_key": "cereal_harvest",
@@ -76,13 +84,21 @@
       "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "f7d10bc0686dc2645d6ecb2fd1f8db73be40543471493b0de2df6c689e0369f2",
-      "texture_sha256": "d8ce0781ba4adc1d907ab68b524e844dcc7d65101360539eed8ba37d386e9113",
-      "geometry_scope_sha256": "43952d95c93cb440de92c944ad8829407f679904206ae13a8d8a6c63f110ecd8",
-      "appearance_scope_sha256": "ec8999762ea27856d67f0be67e0a6243c9f3e250b586ed729ad1b2d923a4604d"
+      "usd_sha256": "ffb3af37880b2430b621fcdf08fee683da18fa7f6fdc40e8c42e85dc976c4d5a",
+      "texture_sha256": "f9fc0cf1afcf163437367985bc9ca92ddd65c00c95f07910cc371250453da5ca",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "db76ba4b03d86f4daae7d1385e90a1c8640b69a56e705e9122a6fcedce37af78",
+      "normal_texture_path": "textures/cereal_harvest_normal.png",
+      "normal_texture_sha256": "112e1b4e3e63bee0bc4633e7ac254cb15cc62e27d8b248f1a1495d7d9a09457f",
+      "roughness_texture_path": "textures/cereal_harvest_roughness.png",
+      "roughness_texture_sha256": "6e5847e733624d2a463274004b2f589c1db6d9a6e17873a0451d179de8667827",
+      "source_food_path": "source_food/toasted_loops_bowl_v1.png",
+      "source_food_sha256": "43e5d2f9abae2f9389c5f4af596fb82263df19a0e81c65ba1e64c38aefefe70f"
     },
     {
       "asset_key": "cereal_grain",
@@ -107,13 +123,19 @@
       "geometry_signature": "841b6af4a491bfcd9fdc7e3ab86a5ccf964d37c57da44606cba4c3d214168212",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "b5850d6a4e2ede5eb7adae88a8de69d963e44e052f36b6729956d8725e7035ff",
-      "texture_sha256": "02945a1d9ae2bd17138c49ac4a26880b54367cf840581543d367b3d040e17ef4",
-      "geometry_scope_sha256": "b4dbfcdbae202e9cbe3a8133dd7b0a4c5278e26e88ac1f7c992bb0e2dfecf873",
-      "appearance_scope_sha256": "17d9a4441d7ab8f4ceb5221139de3107814f0da48236330004e5b9613137cd19"
+      "usd_sha256": "7c0fe95114b44b0cab580bdf8b49bc230cb4ccd69f76a74a0346251a2982c1f5",
+      "texture_sha256": "1e80aa758f54dfae8d89162fbe289bc410afd96756429842ca75920db0a46dca",
+      "geometry_scope_sha256": "ec19f133267804f9c40e8de9f5b92a36992368704749871aff5f783a3bbd7cf9",
+      "appearance_scope_sha256": "889c64d08ff4929c5a5e49e6e49692eefefb43ced0373b42941d08328f3cde34",
+      "normal_texture_path": "textures/cereal_grain_normal.png",
+      "normal_texture_sha256": "b961cdb60ac23d9a814814ae46d4c762ea520f9132496733aaaacb5f8d8dde50",
+      "roughness_texture_path": "textures/cereal_grain_roughness.png",
+      "roughness_texture_sha256": "a143b8ba24dd75f00186d4b2bff0f5ea445aaae121a1190d9cfacfc9e1f2c9c0"
     },
     {
       "asset_key": "cereal_berry",
@@ -138,13 +160,19 @@
       "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "083acd59ae43d1c1afd9dceba7976d64ccca8d8fd5746b93a8a294505ac719ea",
-      "texture_sha256": "fc215886be6fbe5b5c8f12bba147a181d865e575d6b0cee8715b94e1cdd0ca9e",
-      "geometry_scope_sha256": "43952d95c93cb440de92c944ad8829407f679904206ae13a8d8a6c63f110ecd8",
-      "appearance_scope_sha256": "aed74791e0ac9f320e28a7ccc0988a473545751fa56a429a19c6c478c14f572c"
+      "usd_sha256": "4e7bc7839753f582b4964077b1ee9b4e619e8b065038b62c49a091769e4fa0a2",
+      "texture_sha256": "4a75dbf006586de9c259d90e91b50af341e2f40370115a8e25b07e27d4421481",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "9feffd3c0718eeaada93b185ffa13e19450a8516d666668f7fd4897743dc67ae",
+      "normal_texture_path": "textures/cereal_berry_normal.png",
+      "normal_texture_sha256": "c81d29b10bac9372b2534aac1b680fc075b7e3dc540de6922397b5c768f55fd4",
+      "roughness_texture_path": "textures/cereal_berry_roughness.png",
+      "roughness_texture_sha256": "b2af60d099dd433f2d65ee78304bc6f6f28dd3f91eca0d2d1fda357128fe4956"
     },
     {
       "asset_key": "cereal_honey",
@@ -169,13 +197,19 @@
       "geometry_signature": "9b7d15a7a13fe20ea7a139ebfd4358609e2ef904a87ff63ad0dbcc3780b9fa36",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "0106555503ab922a763f020f49b51cd253aa23cd8a7c614a48288cf26abeb821",
-      "texture_sha256": "1495fbfeb17b7bdaafb4e84b86300e77f1479b824d5e5371506976a0527ebc17",
-      "geometry_scope_sha256": "43952d95c93cb440de92c944ad8829407f679904206ae13a8d8a6c63f110ecd8",
-      "appearance_scope_sha256": "78c601ab7d70d0353a0978b3b07835cea584e210782e23390b91d9f75eef3c43"
+      "usd_sha256": "02f69c420d3ed908ebe6625938acba968ac65adeaab6849d5fe4ca408840a408",
+      "texture_sha256": "b6628d0249c2b737cd0ee20b61d710688aaaf4c73fd2a19a28683d3e4e7db642",
+      "geometry_scope_sha256": "9ea50165f3bcaac8be90b2017e8767c7b5a672be6e76bcd6c892d2952965557f",
+      "appearance_scope_sha256": "3a3a3bfa58c5f09c9ffa119b718731935b62716be97a647aca0dd6e11ac09fb6",
+      "normal_texture_path": "textures/cereal_honey_normal.png",
+      "normal_texture_sha256": "bbeced58ebaebe386e24eb17bc3935ef42335d67cca4e72b30306eeeda77f2c5",
+      "roughness_texture_path": "textures/cereal_honey_roughness.png",
+      "roughness_texture_sha256": "82a3e2ca5b01f661e97674981a401557ca69e4e80c0ad909e277611032cd7dac"
     },
     {
       "asset_key": "cereal_morning",
@@ -200,13 +234,19 @@
       "geometry_signature": "841b6af4a491bfcd9fdc7e3ab86a5ccf964d37c57da44606cba4c3d214168212",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "a0965bd2cb2431302a70746faeb95fb06cbcca8357541534ef789d69a5a25241",
-      "texture_sha256": "7357110e5f478863558d83a71655fb0426c77840ccaa39ff92fc550e4c9fafe9",
-      "geometry_scope_sha256": "b4dbfcdbae202e9cbe3a8133dd7b0a4c5278e26e88ac1f7c992bb0e2dfecf873",
-      "appearance_scope_sha256": "b035722deae57832913f08f672f4aea41b5c86fb94e3c8ced5e4b7a3583e6f96"
+      "usd_sha256": "d32ffac77753b4a725e543aea445047d7b9af7b89eee3d0c117230631e543cf2",
+      "texture_sha256": "4c0991614762a69371b4ea99089c22d2c793dd9e06387d2caa65b2d973059534",
+      "geometry_scope_sha256": "ec19f133267804f9c40e8de9f5b92a36992368704749871aff5f783a3bbd7cf9",
+      "appearance_scope_sha256": "745cd70f59a610cb708914c01d01c0a2dfc3003a990f9a8bca9e64bf98c99607",
+      "normal_texture_path": "textures/cereal_morning_normal.png",
+      "normal_texture_sha256": "953320c85f9aca21b063bc3bcf6923b9bbb1f582ded8bc75c5923514c1a80496",
+      "roughness_texture_path": "textures/cereal_morning_roughness.png",
+      "roughness_texture_sha256": "2d33181b55ce62783c3f1a0012d008eb5194d4dd9fda5e28914b0c684c6bb033"
     },
     {
       "asset_key": "snack_cracker",
@@ -386,13 +426,21 @@
       "geometry_signature": "fc1a4375f470b5829d761bd309ff07e48213480e6139786c52ec3c83cb151f87",
       "material_classes": [
         "printed_paperboard",
-        "metal_or_plastic_detail"
+        "metal_or_plastic_detail",
+        "normal_map",
+        "roughness_map"
       ],
       "introduced_in": "baseline",
-      "usd_sha256": "046956dd6205f15e1b641aa5177886954651f3737bbbb7760dc176594892a576",
-      "texture_sha256": "bf244e802a0921981cffc2865ba92df757eec122157a8cb826814835c22a85a1",
-      "geometry_scope_sha256": "ba0c665cd13a0823ae724191e21573d760e4f7b674fc815be0f14c72648d2e79",
-      "appearance_scope_sha256": "6753854dc2f4659a3b603277a27d3ee3b3717d758a05571d71483bd09fa1f51b"
+      "usd_sha256": "bd63f2c58cfe0ddd53a0652db96787e01e0d95e311e21055d1f5cb405fbd603f",
+      "texture_sha256": "da884f7b4ebfa40b03d4c440a8108fb3cd877c1f1500887ad341f40b685e2609",
+      "geometry_scope_sha256": "9afe2d0fd1483cd1906d6b05ccd0fb78a16c63774377cfefa038dc509ecf554a",
+      "appearance_scope_sha256": "7a014c062f8be5ae6c9e500cfeb5a3a9eb4f902185acca0ca98e9ff251e07bff",
+      "normal_texture_path": "textures/juice_citrus_normal.png",
+      "normal_texture_sha256": "cf8959f5fa2461d3cb2eba568e4eb29cb2b8a7e803a67fc19630ac693e9b9d35",
+      "roughness_texture_path": "textures/juice_citrus_roughness.png",
+      "roughness_texture_sha256": "04b4c828d62ddaed777d436f2a645cd3e250c398ef4c8eabb88dc61c973171cd",
+      "source_food_path": "source_food/citrus_still_life_v1.png",
+      "source_food_sha256": "ba636324e9fff4e56cc35738206fcb72f8f54e5d0ec76827ebafaf03cf1df86b"
     },
     {
       "asset_key": "juice_berry",
@@ -2042,14 +2090,16 @@
         "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "f7b30dbe77c9d4b28d50f6ba82b8ba8362844e01ef8ee9dea3fb3db35649bdbb",
-      "texture_sha256": "390f1d35f2cda251e28f303abe40561c3274dc40bba46958b8ce61034b675907",
-      "geometry_scope_sha256": "b786523aa0ed374fa2c67e7d8876fbfb9fc357754f22410905b2b1f4656d5893",
+      "usd_sha256": "594db77c4df4f279f2b0037a95a04c466fce1ad60c8c2c9bf49b27aced54c041",
+      "texture_sha256": "4fb50fdd5ce5b40903bf13e692299061dc0bb7f0b303a1f25e67a654af5de94e",
+      "geometry_scope_sha256": "7f6172ba23c70a7db24e44e1bd31033be73d33d6a2cb82afb6dadb5f583bcf0e",
       "appearance_scope_sha256": "0d1f8550f8a13715b5a627fcfe6eb59d905d15b2d88cb296fd888b4298eb563c",
       "normal_texture_path": "textures/coffee_bag_normal.png",
       "normal_texture_sha256": "9acbe0171f7cb8e47a3a2680a24ef169f2e64d765599f361f53bd6fbc6d75ee3",
       "roughness_texture_path": "textures/coffee_bag_roughness.png",
-      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514"
+      "roughness_texture_sha256": "0f922bb45e20e14b8da17dd0fead637cf0b6aa5f2f2ebb07f21bb96ebb7c9514",
+      "source_food_path": "source_food/roasted_coffee_scoop_v1.png",
+      "source_food_sha256": "e7cb189a27ed377419a1ed492d959dd8f8aa8b2d3c45334e76490ac98c1dab56"
     },
     {
       "asset_key": "flour_sack",
