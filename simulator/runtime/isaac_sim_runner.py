@@ -900,13 +900,19 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "size_m": (0.59, 0.87, 0.030),
                 "kind": "shelf",
             },
+            {
+                "name": "hero_focus_price_rail",
+                "center_m": (11.932, -0.9175, 1.138),
+                "size_m": (0.020, 0.825, 0.055),
+                "kind": "price_rail",
+            },
         ]
     )
     focus_specs = (
-        ("cereal_sunrise", 12.11, -0.60, 74.0, 1.22, 1.115),
-        ("juice_citrus", 12.15, -0.83, 77.0, 1.32, 1.119),
-        ("coffee_bag", 12.12, -1.02, 72.0, 1.28, 1.115),
-        ("cereal_harvest", 12.18, -1.23, 76.0, 1.17, 1.117),
+        ("cereal_sunrise", 12.11, -0.610, 74.0, 1.20, 1.115),
+        ("cereal_harvest", 12.15, -0.815, 77.0, 1.18, 1.119),
+        ("cereal_grain", 12.12, -1.020, 72.0, 1.18, 1.115),
+        ("cereal_berry", 12.18, -1.225, 76.0, 1.18, 1.117),
     )
     for focus_index, (key, product_x, product_y, yaw, scale, support_z) in enumerate(focus_specs):
         asset_references.append(
@@ -922,7 +928,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "scale_xyz": (-scale, scale, scale),
             }
         )
-    for price_index, price_y in enumerate((-0.69, -0.95, -1.21)):
+    for price_index, price_y in enumerate((-0.610, -0.815, -1.020, -1.225)):
         asset_references.append(
             {
                 "name": f"hero_focus_price_{price_index}",
@@ -930,7 +936,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "position_xy_m": (11.915, price_y),
                 "support_z_m": 1.115,
                 "rotation_rpy_deg": (0.0, 0.0, 90.0),
-                "scale_xyz": (-0.82, 0.82, 0.82),
+                "scale_xyz": (-0.72, 0.72, 0.72),
             }
         )
     # A second eye-level product group creates the requested close shelf beat
@@ -950,13 +956,19 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "size_m": (0.59, 0.87, 0.030),
                 "kind": "shelf",
             },
+            {
+                "name": "late_focus_price_rail",
+                "center_m": (21.082, -0.9175, 1.138),
+                "size_m": (0.020, 0.825, 0.055),
+                "kind": "price_rail",
+            },
         ]
     )
     late_focus_specs = (
-        ("pasta_box", 21.26, -0.60, 74.0, 1.18, 1.115),
-        ("tea_box", 21.30, -0.83, 77.0, 1.24, 1.119),
-        ("coffee_canister", 21.27, -1.02, 72.0, 1.20, 1.115),
-        ("snack_wafer", 21.33, -1.23, 76.0, 1.16, 1.117),
+        ("coffee_bag", 21.26, -0.610, 74.0, 1.20, 1.115),
+        ("tea_box", 21.30, -0.815, 77.0, 1.24, 1.119),
+        ("coffee_canister", 21.27, -1.020, 72.0, 1.20, 1.115),
+        ("snack_wafer", 21.33, -1.225, 76.0, 1.16, 1.117),
     )
     for focus_index, (key, product_x, product_y, yaw, scale, support_z) in enumerate(late_focus_specs):
         asset_references.append(
@@ -969,7 +981,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "scale_xyz": (-scale, scale, scale),
             }
         )
-    for price_index, price_y in enumerate((-0.69, -0.95, -1.21)):
+    for price_index, price_y in enumerate((-0.610, -0.815, -1.020, -1.225)):
         asset_references.append(
             {
                 "name": f"late_focus_price_{price_index}",
@@ -977,7 +989,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "position_xy_m": (21.065, price_y),
                 "support_z_m": 1.115,
                 "rotation_rpy_deg": (0.0, 0.0, 90.0),
-                "scale_xyz": (-0.82, 0.82, 0.82),
+                "scale_xyz": (-0.72, 0.72, 0.72),
             }
         )
     basket_specs = ((15.12, -1.18, 8.0), (15.68, -1.05, 2.0))
