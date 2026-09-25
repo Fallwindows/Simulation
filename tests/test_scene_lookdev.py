@@ -248,19 +248,59 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertLess(STRUCTURAL_MATERIALS["case_glass"]["opacity"], 0.25)
         self.assertGreater(STRUCTURAL_MATERIALS["case_glass"]["specular_level"], 1.0)
         material_root = Path(__file__).resolve().parents[1] / "assets/scene/materials"
-        expected_hashes = {
-            "laminate_albedo.png": "6972934a14ca753359620076bd10fb03b0d54b1c3955f6309bae28791e8ba352",
-            "micro_normal.png": "5d546a9833c2e1d43a032701fc9f5062bbfc61ca79fc36afb4e726d83744458c",
-            "micro_roughness.png": "8784320cc59d1af241d71cc3a9cb0c3afddf1aeb3f94e4bcac737a3a12a5aa27",
-            "powdercoat_albedo.png": "cdddce3db1865f68d11c91eb416cc03fb1cb324549b5376a7f1e92cc10dff8a2",
-            "powdercoat_cool_albedo.png": "aba60805af3ea776d6b44c64a4fe4e042d72da1c28b13f8ea8c438ede1c00e0a",
-            "powdercoat_warm_albedo.png": "5ba7ac6449ad23d9efc3da84106b4cac8ee10810c2051ca4a92025c5cf661b3d",
-            "terrazzo_albedo.png": "b257a2b52a7b728e3ab6e91d4dadd317786594f17f6ce1b4223ed032f432e0e7",
-            "terrazzo_normal.png": "25c415432fd914acf5db378f4fbdef94314a520f69592782729a617203d41d72",
-            "terrazzo_roughness.png": "2e99d43ef48dd33d602da48e70b14feeb9ed369e2f5ad3fb443167239919a90f",
-        }
-        for filename, expected in expected_hashes.items():
-            self.assertEqual(hashlib.sha256((material_root / filename).read_bytes()).hexdigest(), expected)
+        import json
+
+        from tools.generate_scene_materials import (
+            GENERATOR_VERSION,
+            MATERIAL_SETS,
+            SEED,
+            SIZE,
+            _build_outputs,
+        )
+
+        committed_manifest = json.loads(
+            (material_root / "manifest.json").read_text(encoding="utf-8")
+        )
+        _, generated_pngs, generated_manifest, generated_manifest_bytes = _build_outputs()
+        self.assertEqual(committed_manifest, generated_manifest)
+        self.assertEqual(committed_manifest, json.loads(generated_manifest_bytes.decode("utf-8")))
+        self.assertEqual(committed_manifest["generator_version"], GENERATOR_VERSION)
+        self.assertEqual(committed_manifest["seed"], SEED)
+        self.assertEqual(committed_manifest["material_sets"], MATERIAL_SETS)
+        self.assertTrue(committed_manifest["tileable"])
+        self.assertEqual(
+            committed_manifest["normal_convention"],
+            "OpenGL tangent space (+X right, +Y up, +Z outward)",
+        )
+        self.assertEqual(set(committed_manifest["files"]), set(generated_pngs))
+
+        for filename, encoded in generated_pngs.items():
+            committed = (material_root / filename).read_bytes()
+            metadata = committed_manifest["files"][filename]
+            self.assertEqual(committed, encoded, filename)
+            self.assertEqual(hashlib.sha256(committed).hexdigest(), metadata["sha256"], filename)
+            if filename != "material_preview.png":
+                self.assertEqual((metadata["width_px"], metadata["height_px"]), (SIZE, SIZE))
+            if filename.endswith("_normal.png"):
+                self.assertEqual(metadata["mode"], "RGB")
+                self.assertGreaterEqual(metadata["channel_min"][2], 245, filename)
+            if filename.endswith("_roughness.png"):
+                self.assertEqual(metadata["mode"], "L")
+                self.assertGreaterEqual(metadata["channel_min"], 8, filename)
+                self.assertLessEqual(metadata["channel_max"], 240, filename)
+                self.assertGreaterEqual(
+                    metadata["channel_max"] - metadata["channel_min"], 6, filename
+                )
+
+        glass_roughness = committed_manifest["files"]["case_glass_roughness.png"]
+        self.assertLessEqual(glass_roughness["channel_min"], 24)
+        self.assertLessEqual(glass_roughness["channel_max"], 64)
+        floor_wear = committed_manifest["files"]["floor_wear_mask.png"]
+        self.assertLessEqual(floor_wear["channel_min"], 64)
+        self.assertGreaterEqual(floor_wear["channel_max"], 192)
+        shelf_albedo = committed_manifest["files"]["powdercoat_albedo.png"]
+        self.assertGreater(min(shelf_albedo["channel_min"]), 90)
+        self.assertLess(max(shelf_albedo["channel_max"]), 160)
 
     def test_structural_materials_distinguish_floor_metal_and_paper(self):
         floor = STRUCTURAL_MATERIALS["floor"]
