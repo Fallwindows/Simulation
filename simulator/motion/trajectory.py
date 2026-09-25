@@ -29,6 +29,10 @@ class PoseSample:
     timestamp_s: float
     position_m: tuple[float, float, float]
     orientation_xyzw: tuple[float, float, float, float]
+    # Dynamic camera_link articulation relative to its configured rig mount.
+    # Keeping it in the deterministic sample makes the rendered pose and ROS
+    # TF observable from the same timestamped source.
+    camera_link_orientation_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,19 @@ def _velocity_ramp_integral(unit_time: float) -> float:
 
     u = min(max(unit_time, 0.0), 1.0)
     return u**5 * (7.0 + u * (-14.0 + u * (10.0 - 2.5 * u)))
+
+
+def _look_weight(timestamp_s: float, center_s: float, rise_s: float, fall_s: float) -> float:
+    """Return a C3-continuous 0..1..0 envelope for a composed shelf look."""
+
+    start_s, end_s = center_s - rise_s, center_s + fall_s
+    if timestamp_s <= start_s or timestamp_s >= end_s:
+        return 0.0
+    if timestamp_s < center_s:
+        return _velocity_ramp((timestamp_s - start_s) / rise_s)
+    if timestamp_s > center_s:
+        return 1.0 - _velocity_ramp((timestamp_s - center_s) / fall_s)
+    return 1.0
 
 
 def _motion_state(config: TrajectoryConfig, timestamp_s: float) -> _MotionState:
@@ -120,6 +137,11 @@ def interpolate_pose(start: PoseSample, end: PoseSample, timestamp_s: float) -> 
         timestamp_s,
         interpolate_position(start.position_m, end.position_m, fraction),
         quaternion_slerp(start.orientation_xyzw, end.orientation_xyzw, fraction),
+        quaternion_slerp(
+            start.camera_link_orientation_xyzw,
+            end.camera_link_orientation_xyzw,
+            fraction,
+        ),
     )
 
 
@@ -162,8 +184,25 @@ class WalkingTrajectory(StraightTrajectory):
         bob_wave = 0.5 - 0.5 * math.cos(bob_phase + 0.08 * math.sin(2.0 * bob_phase))
         pitch_wave = 0.9 * math.sin(bob_phase) + 0.1 * math.sin(2.0 * bob_phase)
 
-        y = y0 + self.config.sway_amplitude_m * gait_scale * sway_wave
+        look_y = 0.0
+        look_yaw = 0.0
+        look_pitch = 0.0
+        for beat in self.config.look_beats:
+            weight = _look_weight(t, beat.center_s, beat.rise_s, beat.fall_s)
+            look_y += weight * beat.lateral_offset_m
+            look_yaw += weight * beat.yaw_offset_deg
+            look_pitch += weight * beat.pitch_offset_deg
+
+        y = y0 + self.config.sway_amplitude_m * gait_scale * sway_wave + look_y
         z = z0 + self.config.bob_amplitude_m * gait_scale * bob_wave
+        # The mobile rig follows its direction of travel; the camera head owns
+        # the composed shelf look.  LiDAR and rig ground truth therefore remain
+        # physically aligned while the camera motion is explicitly exported.
         yaw = self.config.yaw_deg + self.config.yaw_amplitude_deg * gait_scale * sway_wave
         pitch = self.config.pitch_amplitude_deg * gait_scale * pitch_wave
-        return PoseSample(t, (x, y, z), quaternion_from_rpy_deg(0.0, pitch, yaw))
+        return PoseSample(
+            t,
+            (x, y, z),
+            quaternion_from_rpy_deg(0.0, pitch, yaw),
+            quaternion_from_rpy_deg(0.0, look_pitch, look_yaw),
+        )

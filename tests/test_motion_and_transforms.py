@@ -1,13 +1,25 @@
+import hashlib
+import json
 import math
+import tempfile
 import unittest
 from dataclasses import replace
 from types import SimpleNamespace
 from pathlib import Path
 
 from simulator.config.loader import load_scenario
+from simulator.capture.export_metadata import export_metadata
 from simulator.motion.trajectory import PoseSample, StraightTrajectory, WalkingTrajectory, interpolate_pose
 from simulator.sensors.rig import assert_no_ground_truth_odometry_leakage, build_sensor_rig_description
-from simulator.runtime.isaac_sim_runner import lidar_runtime_spec
+from simulator.runtime.isaac_sim_runner import (
+    camera_link_world_pose,
+    camera_mount_orientation,
+    camera_head_stamp_alignment,
+    camera_head_output_path,
+    camera_optical_world_pose,
+    lidar_runtime_spec,
+    write_camera_head_transforms,
+)
 from simulator.sensors.transforms import (
     Transform,
     camera_optical_quaternion,
@@ -15,6 +27,7 @@ from simulator.sensors.transforms import (
     interpolate_position,
     interpolate_transform,
     quaternion_from_rpy_deg,
+    quaternion_multiply,
     quaternion_normalize,
     quaternion_slerp,
     quaternion_wxyz_to_xyzw,
@@ -23,6 +36,33 @@ from simulator.sensors.transforms import (
     rotate_vector,
     transform_point,
 )
+
+
+RIGHT_HERO_GROUPS_M = {
+    9.0: ((12.11, -0.60, 1.30), (12.15, -0.83, 1.30), (12.12, -1.02, 1.30), (12.18, -1.23, 1.30)),
+    17.0: ((21.26, -0.60, 1.30), (21.30, -0.83, 1.30), (21.27, -1.02, 1.30), (21.33, -1.23, 1.30)),
+}
+
+RIGHT_HERO_CONTENT_BOUNDS_M = {
+    9.0: tuple((x, y, z) for x in (11.90, 12.50) for y in (-0.52, -1.38) for z in (1.08, 1.65)),
+    17.0: tuple((x, y, z) for x in (21.05, 21.65) for y in (-0.52, -1.38) for z in (1.08, 1.65)),
+}
+
+RIGHT_HERO_PLINTH_BOUNDS_M = {
+    9.0: tuple((x, y, z) for x in (11.90, 12.50) for y in (-0.52, -1.38) for z in (0.38, 1.11)),
+    17.0: tuple((x, y, z) for x in (21.05, 21.65) for y in (-0.52, -1.38) for z in (0.38, 1.11)),
+}
+
+
+def _camera_projection_ndc(camera_pose, point_m):
+    relative = tuple(point_m[axis] - camera_pose.position_m[axis] for axis in range(3))
+    forward = rotate_vector(camera_pose.orientation_xyzw, (1.0, 0.0, 0.0))
+    right = rotate_vector(camera_pose.orientation_xyzw, (0.0, -1.0, 0.0))
+    up = rotate_vector(camera_pose.orientation_xyzw, (0.0, 0.0, 1.0))
+    depth = sum(value * axis for value, axis in zip(relative, forward))
+    horizontal = sum(value * axis for value, axis in zip(relative, right)) / depth
+    vertical = sum(value * axis for value, axis in zip(relative, up)) / depth
+    return depth, horizontal, vertical
 
 
 class MotionTests(unittest.TestCase):
@@ -92,9 +132,12 @@ class MotionTests(unittest.TestCase):
         self.assertEqual(end.position_m[1:], walking_config.start_position_m[1:])
         self.assertEqual(start.orientation_xyzw, quaternion_from_rpy_deg(0.0, 0.0, walking_config.yaw_deg))
         self.assertEqual(end.orientation_xyzw, start.orientation_xyzw)
+        self.assertEqual(start.camera_link_orientation_xyzw, (0.0, 0.0, 0.0, 1.0))
+        self.assertEqual(end.camera_link_orientation_xyzw, start.camera_link_orientation_xyzw)
         for sample in trajectory.sample_many():
-            self.assertTrue(all(math.isfinite(value) for value in (*sample.position_m, *sample.orientation_xyzw)))
+            self.assertTrue(all(math.isfinite(value) for value in (*sample.position_m, *sample.orientation_xyzw, *sample.camera_link_orientation_xyzw)))
             self.assertAlmostEqual(math.sqrt(sum(value * value for value in sample.orientation_xyzw)), 1.0, places=12)
+            self.assertAlmostEqual(math.sqrt(sum(value * value for value in sample.camera_link_orientation_xyzw)), 1.0, places=12)
 
     def test_walking_full_pose_has_bounded_numeric_derivatives_at_30_and_60_hz(self):
         walking_config = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml").trajectory
@@ -121,15 +164,211 @@ class MotionTests(unittest.TestCase):
             self.assertLess(max(map(magnitude, acceleration)), 2.5)
             self.assertLess(max(map(magnitude, jerk)), 35.0)
 
+    def test_configured_shelf_looks_are_c2_at_boundaries_and_peak(self):
+        walking_config = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml").trajectory
+        with_looks = WalkingTrajectory(walking_config)
+        without_looks = WalkingTrajectory(replace(walking_config, look_beats=()))
+
+        def look_delta(timestamp_s):
+            pose = with_looks.sample(timestamp_s)
+            baseline = without_looks.sample(timestamp_s)
+            pose_rpy = rpy_deg_from_quaternion(pose.camera_link_orientation_xyzw)
+            baseline_rpy = rpy_deg_from_quaternion(baseline.camera_link_orientation_xyzw)
+            return (
+                pose.position_m[1] - baseline.position_m[1],
+                pose_rpy[1] - baseline_rpy[1],
+                pose_rpy[2] - baseline_rpy[2],
+            )
+
+        h = 1e-4
+        for beat in walking_config.look_beats:
+            for boundary_s in (beat.center_s - beat.rise_s, beat.center_s, beat.center_s + beat.fall_s):
+                left = look_delta(boundary_s - h)
+                center = look_delta(boundary_s)
+                right = look_delta(boundary_s + h)
+                left_velocity = tuple((center[i] - left[i]) / h for i in range(3))
+                right_velocity = tuple((right[i] - center[i]) / h for i in range(3))
+                left_acceleration = tuple((center[i] - 2.0 * left[i] + look_delta(boundary_s - 2.0 * h)[i]) / (h * h) for i in range(3))
+                right_acceleration = tuple((look_delta(boundary_s + 2.0 * h)[i] - 2.0 * right[i] + center[i]) / (h * h) for i in range(3))
+                for left_value, right_value in zip(left_velocity, right_velocity):
+                    self.assertAlmostEqual(left_value, right_value, delta=2e-5)
+                for left_value, right_value in zip(left_acceleration, right_acceleration):
+                    self.assertAlmostEqual(left_value, right_value, delta=1e-3)
+
+    def test_right_shelf_look_path_clearance_and_hero_group_coverage(self):
+        walking = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
+        walking_config = walking.trajectory
+        trajectory = WalkingTrajectory(walking_config)
+        samples = trajectory.sample_many()
+        self.assertEqual(walking_config.duration_s, 20.5)
+        self.assertEqual(walking_config.sample_hz, 30.0)
+        self.assertEqual(len(samples), 616)
+
+        # The nearest right-side fixture edge is y=-0.535 m.  Keep at least a
+        # 30 cm center clearance while the shared camera/LiDAR rig passes it.
+        self.assertGreaterEqual(min(sample.position_m[1] for sample in samples), -0.235)
+        camera_mount_rpy = [
+            rpy_deg_from_quaternion(camera_mount_orientation(sample, walking.camera))
+            for sample in samples
+        ]
+        dt = 1.0 / walking_config.sample_hz
+        yaw_velocity = [(right[2] - left[2]) / dt for left, right in zip(camera_mount_rpy, camera_mount_rpy[1:])]
+        pitch_velocity = [(right[1] - left[1]) / dt for left, right in zip(camera_mount_rpy, camera_mount_rpy[1:])]
+        yaw_acceleration = [(right - left) / dt for left, right in zip(yaw_velocity, yaw_velocity[1:])]
+        pitch_acceleration = [(right - left) / dt for left, right in zip(pitch_velocity, pitch_velocity[1:])]
+        self.assertLess(max(map(abs, yaw_velocity)), 40.0)
+        self.assertLess(max(map(abs, pitch_velocity)), 30.0)
+        self.assertLess(max(map(abs, yaw_acceleration)), 120.0)
+        self.assertLess(max(map(abs, pitch_acceleration)), 240.0)
+
+        # The mobile base remains aligned with its measured direction of
+        # travel.  This guards against side-slipping a wheeled rig to create a
+        # camera composition that belongs to an articulated head.
+        sideslip_deg = []
+        for left, right in zip(samples, samples[1:]):
+            velocity = tuple((right.position_m[axis] - left.position_m[axis]) / dt for axis in range(2))
+            speed = math.hypot(*velocity)
+            if speed <= 0.05:
+                continue
+            forward = rotate_vector(left.orientation_xyzw, (1.0, 0.0, 0.0))[:2]
+            cosine = sum(a * b for a, b in zip(velocity, forward)) / (speed * math.hypot(*forward))
+            sideslip_deg.append(math.degrees(math.acos(min(1.0, max(-1.0, cosine)))))
+        self.assertLess(max(sideslip_deg), 15.0)
+
+        for timestamp_s, group in RIGHT_HERO_GROUPS_M.items():
+            sample = trajectory.sample(timestamp_s)
+            camera_pose = camera_link_world_pose(sample, walking.camera)
+            _roll, pitch_deg, yaw_deg = rpy_deg_from_quaternion(camera_pose.orientation_xyzw)
+            self.assertLess(yaw_deg, -20.0)
+            self.assertGreater(pitch_deg, 8.0)
+            projections = [_camera_projection_ndc(camera_pose, point) for point in group]
+            self.assertTrue(all(depth > 0.8 for depth, _horizontal, _vertical in projections))
+            self.assertTrue(all(abs(horizontal) < 1.0 for _depth, horizontal, _vertical in projections))
+            # 16:9 vertical half-FOV is tan^-1(9/16) for the configured 90° horizontal FOV.
+            self.assertTrue(all(abs(vertical) < 9.0 / 16.0 for _depth, _horizontal, vertical in projections))
+            horizontal_span = max(horizontal for _depth, horizontal, _vertical in projections) - min(horizontal for _depth, horizontal, _vertical in projections)
+            self.assertGreater(horizontal_span, 0.25)
+            content = [_camera_projection_ndc(camera_pose, point) for point in RIGHT_HERO_CONTENT_BOUNDS_M[timestamp_s]]
+            self.assertTrue(all(abs(horizontal) < 0.8 for _depth, horizontal, _vertical in content))
+            self.assertTrue(all(abs(vertical) < 9.0 / 16.0 for _depth, _horizontal, vertical in content))
+
+            beat = next(item for item in walking_config.look_beats if item.center_s == timestamp_s)
+            self.assertEqual(beat.framing_target, "products_and_price_rail")
+            self.assertTrue(beat.allow_foreground_support_crop)
+            plinth = [_camera_projection_ndc(camera_pose, point) for point in RIGHT_HERO_PLINTH_BOUNDS_M[timestamp_s]]
+            self.assertTrue(any(vertical < -9.0 / 16.0 for _depth, _horizontal, vertical in plinth))
+
+            rig_world = Transform("sim_world", "sensor_rig", sample.position_m, sample.orientation_xyzw)
+            camera_world = camera_pose.position_m
+            lidar_world = transform_point(rig_world, walking.lidar.pose_in_rig.position_m)
+            static_baseline = math.dist(walking.camera.pose_in_rig.position_m, walking.lidar.pose_in_rig.position_m)
+            self.assertAlmostEqual(math.dist(camera_world, lidar_world), static_baseline, places=12)
+            self.assertGreater(rotate_vector(sample.orientation_xyzw, (1.0, 0.0, 0.0))[0], 0.99)
+            self.assertLess(rotate_vector(camera_pose.orientation_xyzw, (1.0, 0.0, 0.0))[1], -0.3)
+
+            # ROS optical +Z and the USD camera's local -Z must describe the
+            # same rendered viewing ray after their respective basis changes.
+            optical_pose = camera_optical_world_pose(sample, walking.camera)
+            ros_view_ray = rotate_vector(optical_pose.orientation_xyzw, (0.0, 0.0, 1.0))
+            camera_usd_world = quaternion_normalize(
+                quaternion_multiply(camera_pose.orientation_xyzw, camera_usd_quaternion())
+            )
+            usd_view_ray = rotate_vector(camera_usd_world, (0.0, 0.0, -1.0))
+            for ros_axis, usd_axis in zip(ros_view_ray, usd_view_ray):
+                self.assertAlmostEqual(ros_axis, usd_axis, places=12)
+
     def test_pose_interpolation_is_continuous_and_uses_shortest_rotation(self):
-        start = PoseSample(2.0, (1.0, -2.0, 0.5), quaternion_from_rpy_deg(0.0, 0.0, 170.0))
-        end = PoseSample(4.0, (5.0, 2.0, 2.5), quaternion_from_rpy_deg(0.0, 0.0, -170.0))
+        start = PoseSample(
+            2.0,
+            (1.0, -2.0, 0.5),
+            quaternion_from_rpy_deg(0.0, 0.0, 170.0),
+            quaternion_from_rpy_deg(0.0, 0.0, 20.0),
+        )
+        end = PoseSample(
+            4.0,
+            (5.0, 2.0, 2.5),
+            quaternion_from_rpy_deg(0.0, 0.0, -170.0),
+            quaternion_from_rpy_deg(0.0, 0.0, 40.0),
+        )
         midpoint = interpolate_pose(start, end, 3.0)
         self.assertEqual(midpoint.position_m, (3.0, 0.0, 1.5))
         self.assertAlmostEqual(abs(rpy_deg_from_quaternion(midpoint.orientation_xyzw)[2]), 180.0, places=6)
+        self.assertAlmostEqual(rpy_deg_from_quaternion(midpoint.camera_link_orientation_xyzw)[2], 30.0, places=6)
         self.assertAlmostEqual(math.sqrt(sum(value * value for value in midpoint.orientation_xyzw)), 1.0, places=12)
         with self.assertRaisesRegex(ValueError, "does not extrapolate"):
             interpolate_pose(start, end, 4.1)
+
+    def test_camera_head_transform_artifact_is_hashable_and_replay_complete(self):
+        root = Path(__file__).resolve().parents[1]
+        scenario = load_scenario(root / "config/scenarios/walking_baseline.yaml")
+        trajectory = WalkingTrajectory(scenario.trajectory)
+        with tempfile.TemporaryDirectory(dir=root) as directory:
+            path = Path(directory) / "camera_head_transforms.json"
+            binding = write_camera_head_transforms(
+                path,
+                trajectory,
+                scenario,
+                root / "config/trajectories/walking.yaml",
+            )
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema"], "grocery.camera_head_transforms")
+            self.assertEqual(payload["frames"]["parent"], "sensor_rig")
+            self.assertEqual(payload["frames"]["child"], "camera_link")
+            self.assertEqual(payload["timestamp_domain"], "Isaac simulation time (/clock)")
+            self.assertEqual(payload["interpolation"]["rotation"], "shortest_arc_quaternion_slerp_xyzw")
+            self.assertEqual(len(payload["samples"]), 616)
+            self.assertEqual(payload["samples"][0]["timestamp_s"], 0.0)
+            self.assertEqual(payload["samples"][-1]["timestamp_s"], 20.5)
+            self.assertTrue(all(
+                right["timestamp_s"] > left["timestamp_s"]
+                for left, right in zip(payload["samples"], payload["samples"][1:])
+            ))
+            self.assertEqual(binding["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+
+    def test_rgb_timestamps_are_matched_to_head_samples_by_time(self):
+        artifact = [index / 30.0 for index in range(616)]
+        observed = [index / 30.0 + 2e-10 for index in range(3, 616)]
+        summary = camera_head_stamp_alignment(observed, artifact)
+        self.assertTrue(summary["all_rgb_stamps_matched"])
+        self.assertEqual(summary["observed_rgb_stamps"], 613)
+        self.assertEqual(summary["matched_head_samples"], 613)
+        mismatch = camera_head_stamp_alignment([0.11], artifact)
+        self.assertFalse(mismatch["all_rgb_stamps_matched"])
+
+    def test_capture_sensor_transforms_binds_dynamic_camera_artifact(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(dir=root) as directory:
+            capture = Path(directory)
+            export_metadata(root / "config/scenarios/walking_baseline.yaml", capture, root)
+            sensor_transforms = json.loads((capture / "sensor_transforms.json").read_text(encoding="utf-8"))
+            descriptor = sensor_transforms["dynamic_transform_artifacts"][0]
+            artifact = capture / descriptor["path"]
+            static_edges = {
+                (item["parent"], item["child"])
+                for item in sensor_transforms["transforms"]
+            }
+            self.assertNotIn(("sensor_rig", "camera_link"), static_edges)
+            self.assertIn(("camera_link", "camera_optical_frame"), static_edges)
+            self.assertEqual((descriptor["parent_frame"], descriptor["child_frame"]), ("sensor_rig", "camera_link"))
+            self.assertEqual(descriptor["schema_version"], 1)
+            self.assertEqual(descriptor["size_bytes"], artifact.stat().st_size)
+            self.assertEqual(descriptor["sha256"], hashlib.sha256(artifact.read_bytes()).hexdigest())
+
+    def test_representative_capture_head_artifact_uses_guarded_directory_sibling(self):
+        root = Path(__file__).resolve().parents[1]
+        capture = root / "runs/test-representative"
+        args = SimpleNamespace(
+            capture_dir=str(capture),
+            status_path=str(capture / "status.json"),
+            camera_head_transforms_path="",
+        )
+        self.assertEqual(
+            camera_head_output_path(args, True),
+            capture.with_name("test-representative.camera_head_transforms.json"),
+        )
+        args.camera_head_transforms_path = str(capture / "camera_head_transforms.json")
+        with self.assertRaisesRegex(ValueError, "outside the representative capture directory"):
+            camera_head_output_path(args, True)
 
     def test_transform_interpolation_preserves_frames_and_rejects_bad_inputs(self):
         start = Transform("map", "rig", (0.0, 0.0, 0.0), quaternion_from_rpy_deg(0.0, 0.0, 20.0))
