@@ -304,11 +304,16 @@ class CaptureArchitectureTests(unittest.TestCase):
 
             write_catalog_artifact(usd, authored_geometry, "usd_sha256")
             uv_before = build_experiment_hashes(scenario, root)
-            uv_bytes = b"texCoord2f[] primvars:st = [(0, 0), (1, 0)"
-            self.assertIn(uv_bytes, authored_geometry)
-            write_catalog_artifact(
-                usd, authored_geometry.replace(uv_bytes, b"texCoord2f[] primvars:st = [(0, 0), (0.9, 0)", 1), "usd_sha256"
+            front_panel_uv = re.compile(
+                rb'(def Mesh "FrontPanel".*?texCoord2f\[\] primvars:st\s*=\s*\[[^\]]*?\()'
+                rb'(0\.500000)(,\s*0\.040000\))',
+                re.DOTALL,
             )
+            mutated_uv_geometry, replacement_count = front_panel_uv.subn(
+                rb'\g<1>0.490000\g<3>', authored_geometry, count=1
+            )
+            self.assertEqual(replacement_count, 1, "expected the generated FrontPanel atlas UV schema")
+            write_catalog_artifact(usd, mutated_uv_geometry, "usd_sha256")
             uv_after = build_experiment_hashes(scenario, root)
             self.assertEqual(uv_before["geometry_sha256"], uv_after["geometry_sha256"])
             self.assertNotEqual(uv_before["appearance_sha256"], uv_after["appearance_sha256"])
