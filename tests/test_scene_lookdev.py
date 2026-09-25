@@ -29,14 +29,53 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertIn("ceiling", kinds)
         self.assertEqual(kinds.count("wall"), 3)
         self.assertGreaterEqual(kinds.count("ceiling_grid"), 30)
-        panel_names = {box["name"] for box in boxes if box["kind"] == "light_panel"}
-        self.assertTrue({light["name"] for light in lights} <= panel_names)
+        fixture_names = {
+            box["name"] for box in boxes if box["kind"] in {"light_panel", "shelf_light"}
+        }
+        self.assertTrue({light["name"] for light in lights} <= fixture_names)
         self.assertGreaterEqual(len(lights), 18)
-        self.assertTrue(all(light["position_m"][2] > self.environment.shelf_height_m for light in lights))
-        self.assertTrue(all(abs(light["rotation_rpy_deg"][0]) == 32.0 for light in lights))
+        panel_lights = [light for light in lights if light["name"].startswith("panel_")]
+        shelf_lights = [light for light in lights if light["name"].startswith("shelf_strip_")]
+        self.assertTrue(all(light["position_m"][2] > self.environment.shelf_height_m for light in panel_lights))
+        self.assertTrue(all(abs(light["rotation_rpy_deg"][0]) == 32.0 for light in panel_lights))
+        self.assertEqual(len(shelf_lights), 16)
+        self.assertTrue(all(light["position_m"][2] < self.environment.shelf_height_m for light in shelf_lights))
         self.assertGreater(spec["ambient_intensity"], 0.9 * self.environment.lighting_lux)
         self.assertIn("floor_inlay", kinds)
-        self.assertIn("sign_green", kinds)
+
+    def test_real_catalog_stock_replaces_procedural_end_wall_and_adds_hero_display(self):
+        spec = store_shell_spec(self.environment)
+        boxes = spec["boxes"]
+        references = spec["asset_references"]
+        kinds = {box["kind"] for box in boxes}
+        names = {reference["name"] for reference in references}
+        keys = {reference["asset_key"] for reference in references}
+        self.assertNotIn("end_product_red", kinds)
+        self.assertNotIn("end_product_yellow", kinds)
+        self.assertNotIn("end_product_blue", kinds)
+        self.assertIn("case_glass", kinds)
+        self.assertIn("display_wood", kinds)
+        self.assertEqual(len([name for name in names if name.startswith("end_case_stock_")]), 48)
+        self.assertEqual(len([name for name in names if name.startswith("hero_stock_")]), 12)
+        self.assertIn("promo_market_sign", keys)
+        self.assertIn("price_display", keys)
+        self.assertIn("shelf_divider", keys)
+        self.assertTrue({"milk_gallon", "juice_citrus", "frozen_pizza"} <= keys)
+        hero_references = [reference for reference in references if reference["name"].startswith("hero_")]
+        self.assertTrue(all(reference["position_xy_m"][1] <= -0.995 for reference in hero_references))
+        signs = [reference for reference in references if reference["asset_key"] == "promo_market_sign"]
+        self.assertEqual(len(signs), 2)
+        self.assertTrue(all(reference["scale_xyz"][0] < 0.0 for reference in signs))
+
+    def test_structural_variation_is_bounded_and_shelves_are_not_near_black(self):
+        self.assertIn("floor_tile_warm", STRUCTURAL_MATERIALS)
+        self.assertIn("floor_tile_cool", STRUCTURAL_MATERIALS)
+        self.assertIn("ceiling_tile_warm", STRUCTURAL_MATERIALS)
+        self.assertIn("ceiling_tile_cool", STRUCTURAL_MATERIALS)
+        self.assertIn("shelf_light", STRUCTURAL_MATERIALS)
+        self.assertGreater(min(STRUCTURAL_MATERIALS["shelf"]["color"]), 0.30)
+        self.assertLess(STRUCTURAL_MATERIALS["shelf"]["metallic"], 0.15)
+        self.assertLess(STRUCTURAL_MATERIALS["case_glass"]["opacity"], 0.25)
 
     def test_structural_materials_distinguish_floor_metal_and_paper(self):
         floor = STRUCTURAL_MATERIALS["floor"]

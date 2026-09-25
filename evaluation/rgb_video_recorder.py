@@ -14,9 +14,12 @@ import numpy as np
 
 RGB_TOPIC = "/sim/camera/rgb/image_raw"
 CLOCK_TOPIC = "/clock"
-SIM_CLOCK_START_TOLERANCE_S = 1.0
 POST_TARGET_GRACE_S = 1.0
 WRITER_CLOSE_TIMEOUT_S = 5.0
+DEFAULT_PROGRESS_TIMEOUT_S = 60.0
+NOMINAL_FPS = 30.0
+FRAME_PERIOD_S = 1.0 / NOMINAL_FPS
+FRAME_GAP_TOLERANCE_S = 1e-6
 
 
 def _bounded_resource_close(resource, method_name: str, timeout_s: float) -> BaseException | None:
@@ -105,6 +108,7 @@ class RgbVideoRecorder:
         metadata_path: Path,
         duration_s: float,
         startup_timeout_s: float,
+        progress_timeout_s: float = DEFAULT_PROGRESS_TIMEOUT_S,
         frames_path: Path | None = None,
         camera_info_path: Path | None = None,
     ):
@@ -122,7 +126,9 @@ class RgbVideoRecorder:
         self.camera_info_path = camera_info_path
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
+        self.progress_timeout_s = float(progress_timeout_s)
         self.started_wall = time.monotonic()
+        self.last_progress_wall = self.started_wall
         self.first_clock_s: float | None = None
         self.target_s: float | None = None
         self.post_target_deadline: float | None = None
@@ -131,6 +137,10 @@ class RgbVideoRecorder:
         self.last_clock_s: float | None = None
         self.frames_written = 0
         self.invalid_frames = 0
+        self.nonincreasing_frames = 0
+        self.clock_regressions = 0
+        self.max_frame_gap_s: float | None = None
+        self.frame_ids: set[str] = set()
         self.writer: cv2.VideoWriter | None = None
         self.codec = "avc1"
         self.width: int | None = None
@@ -147,13 +157,20 @@ class RgbVideoRecorder:
         self.node.create_subscription(Clock, CLOCK_TOPIC, self._on_clock, 20)
 
     def _on_clock(self, message) -> None:
-        self.last_clock_s = _clock_stamp(message)
+        stamp_s = _clock_stamp(message)
+        previous_clock = self.last_clock_s
+        if previous_clock is not None and stamp_s < previous_clock - 1e-9:
+            if self.post_target_deadline is not None:
+                return
+            self.clock_regressions += 1
+        self.last_clock_s = stamp_s if previous_clock is None else max(previous_clock, stamp_s)
+        if previous_clock is None or stamp_s > previous_clock + 1e-9:
+            self.last_progress_wall = time.monotonic()
         if self.first_clock_s is None:
-            self.first_clock_s = self.last_clock_s
-            if self.first_clock_s <= SIM_CLOCK_START_TOLERANCE_S:
-                self.target_s = self.duration_s
-            else:
-                self.target_s = self.first_clock_s + self.duration_s
+            self.first_clock_s = stamp_s
+            # duration_s is the absolute scenario horizon.  Subscriber
+            # discovery latency must not extend the requested simulation.
+            self.target_s = self.duration_s
         if self.target_s is not None and self.last_clock_s >= self.target_s - 1e-3 and self.post_target_deadline is None:
             self.post_target_deadline = time.monotonic() + POST_TARGET_GRACE_S
             self.done_reason = "simulation_time_reached"
@@ -189,6 +206,7 @@ class RgbVideoRecorder:
     def _on_image(self, message) -> None:
         stamp = _stamp(message)
         if self.last_image_stamp_s is not None and stamp <= self.last_image_stamp_s:
+            self.nonincreasing_frames += 1
             return
         if self.target_s is not None and stamp > self.target_s + 0.05:
             return
@@ -201,11 +219,16 @@ class RgbVideoRecorder:
             return
         assert self.writer is not None
         self.writer.write(frame)
+        if self.last_image_stamp_s is not None:
+            gap_s = stamp - self.last_image_stamp_s
+            self.max_frame_gap_s = gap_s if self.max_frame_gap_s is None else max(self.max_frame_gap_s, gap_s)
         self.last_image_stamp_s = stamp
         if self.first_image_stamp_s is None:
             self.first_image_stamp_s = stamp
             self.encoding = str(message.encoding)
         self.frames_written += 1
+        self.frame_ids.add(str(message.header.frame_id))
+        self.last_progress_wall = time.monotonic()
         self.frame_records.append({
             "frame_index": self.frames_written - 1,
             "stamp_s": stamp,
@@ -220,8 +243,16 @@ class RgbVideoRecorder:
             now = time.monotonic()
             if self.post_target_deadline is not None and now >= self.post_target_deadline:
                 break
-            if self.post_target_deadline is None and now - self.started_wall >= self.startup_timeout_s:
+            awaiting_first_samples = self.first_clock_s is None or self.first_image_stamp_s is None
+            if awaiting_first_samples and now - self.started_wall >= self.startup_timeout_s:
                 self.done_reason = "startup_timeout"
+                break
+            if (
+                not awaiting_first_samples
+                and self.post_target_deadline is None
+                and now - self.last_progress_wall >= self.progress_timeout_s
+            ):
+                self.done_reason = "progress_timeout"
                 break
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
@@ -246,8 +277,35 @@ class RgbVideoRecorder:
             duration_s = self.last_image_stamp_s - self.first_image_stamp_s
             if duration_s > 0 and self.frames_written > 1:
                 actual_fps = (self.frames_written - 1) / duration_s
+        max_frame_gap_s = getattr(self, "max_frame_gap_s", None)
+        nonincreasing_frames = getattr(self, "nonincreasing_frames", 0)
+        clock_regressions = getattr(self, "clock_regressions", 0)
+        camera_info_record = getattr(self, "camera_info_record", None)
+        frame_ids = getattr(self, "frame_ids", set())
+        cadence_contiguous = (
+            self.frames_written >= 2
+            and nonincreasing_frames == 0
+            and max_frame_gap_s is not None
+            and max_frame_gap_s <= FRAME_PERIOD_S + FRAME_GAP_TOLERANCE_S
+        )
+        horizon_covered = (
+            self.first_image_stamp_s is not None
+            and self.first_image_stamp_s <= 0.1 + FRAME_GAP_TOLERANCE_S
+            and self.last_image_stamp_s is not None
+            and self.target_s is not None
+            and self.last_image_stamp_s >= self.target_s - FRAME_PERIOD_S - FRAME_GAP_TOLERANCE_S
+        )
+        camera_info_valid = (
+            camera_info_record is not None
+            and camera_info_record.get("frame_id") == "camera_optical_frame"
+        )
         complete = (
-            self.frames_written > 0
+            cadence_contiguous
+            and horizon_covered
+            and camera_info_valid
+            and frame_ids == {"camera_optical_frame"}
+            and clock_regressions == 0
+            and self.invalid_frames == 0
             and self.done_reason == "simulation_time_reached"
             and file_size > 0
             and release_error is None
@@ -268,6 +326,13 @@ class RgbVideoRecorder:
             "last_clock_s": self.last_clock_s,
             "encoding": self.encoding,
             "invalid_frames": self.invalid_frames,
+            "nonincreasing_frames": nonincreasing_frames,
+            "max_frame_gap_s": max_frame_gap_s,
+            "cadence_contiguous": cadence_contiguous,
+            "horizon_covered": horizon_covered,
+            "clock_regressions": clock_regressions,
+            "frame_ids": sorted(frame_ids),
+            "camera_info_frame_id": camera_info_record.get("frame_id") if camera_info_record else None,
             "file_size_bytes": file_size,
             "completion_reason": self.done_reason,
         }
@@ -314,7 +379,8 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--metadata", required=True)
     parser.add_argument("--duration-seconds", type=float, required=True)
-    parser.add_argument("--startup-timeout-seconds", type=float, default=90.0)
+    parser.add_argument("--startup-timeout-seconds", type=float, default=600.0)
+    parser.add_argument("--progress-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--frames-jsonl", default="")
     parser.add_argument("--camera-info-json", default="")
     args = parser.parse_args()
@@ -326,6 +392,7 @@ def main() -> None:
         Path(args.metadata),
         args.duration_seconds,
         args.startup_timeout_seconds,
+        args.progress_timeout_seconds,
         Path(args.frames_jsonl) if args.frames_jsonl else None,
         Path(args.camera_info_json) if args.camera_info_json else None,
     )

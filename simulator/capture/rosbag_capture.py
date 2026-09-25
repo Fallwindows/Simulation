@@ -23,6 +23,23 @@ TOPIC_TYPES = {
     "/tf_static": "tf2_msgs/msg/TFMessage",
 }
 WRITER_CLOSE_TIMEOUT_S = 5.0
+DEFAULT_PROGRESS_TIMEOUT_S = 60.0
+TARGET_TOLERANCE_S = 1e-3
+
+
+def _maximum_nearest_skew_s(reference_stamps: list[float], candidate_stamps: list[float]) -> float | None:
+    """Return the worst nearest-neighbour timestamp skew for sorted samples."""
+
+    if not reference_stamps or not candidate_stamps:
+        return None
+    candidates = sorted(candidate_stamps)
+    cursor = 0
+    maximum = 0.0
+    for reference in sorted(reference_stamps):
+        while cursor + 1 < len(candidates) and abs(candidates[cursor + 1] - reference) <= abs(candidates[cursor] - reference):
+            cursor += 1
+        maximum = max(maximum, abs(candidates[cursor] - reference))
+    return maximum
 
 
 def _bounded_resource_close(resource, method_name: str, timeout_s: float) -> BaseException | None:
@@ -64,7 +81,14 @@ def _stamp_s(message) -> float | None:
 
 
 class RawCaptureWriter:
-    def __init__(self, output: Path, duration_s: float, startup_timeout_s: float, post_target_wall_s: float = 2.0):
+    def __init__(
+        self,
+        output: Path,
+        duration_s: float,
+        startup_timeout_s: float,
+        progress_timeout_s: float = DEFAULT_PROGRESS_TIMEOUT_S,
+        post_target_wall_s: float = 2.0,
+    ):
         import rclpy
         from rclpy.node import Node
         from rosgraph_msgs.msg import Clock
@@ -78,15 +102,29 @@ class RawCaptureWriter:
         self.output = output
         self.duration_s = float(duration_s)
         self.startup_timeout_s = float(startup_timeout_s)
+        self.progress_timeout_s = float(progress_timeout_s)
         self.post_target_wall_s = float(post_target_wall_s)
         self.started_wall = time.monotonic()
+        self.last_progress_wall = self.started_wall
         self.first_clock_s: float | None = None
         self.last_clock_s: float | None = None
-        self.target_clock_s: float | None = None
+        # duration_s is the absolute scenario horizon.  Offsetting it by the
+        # first observed clock makes the target unreachable when subscribers
+        # discover the graph after simulation has already advanced.
+        self.target_clock_s = self.duration_s
         self.target_wall_deadline: float | None = None
+        self.clock_regressions = 0
+        self.ignored_teardown_clock_regressions = 0
         self.counts = {topic: 0 for topic in TOPIC_TYPES}
         self.first_stamp_s: dict[str, float | None] = {topic: None for topic in TOPIC_TYPES}
         self.last_stamp_s: dict[str, float | None] = {topic: None for topic in TOPIC_TYPES}
+        self.max_stamp_gap_s: dict[str, float | None] = {topic: None for topic in TOPIC_TYPES}
+        self.stamp_regressions = {topic: 0 for topic in TOPIC_TYPES}
+        self.rgb_stamps_s: list[float] = []
+        self.lidar_stamps_s: list[float] = []
+        self.camera_info_frame_ids: set[str] = set()
+        self.lidar_frame_ids: set[str] = set()
+        self.lidar_point_counts: list[int] = []
         self._closed = False
         self._close_result: dict[str, object] | None = None
         self._close_error: BaseException | None = None
@@ -124,11 +162,21 @@ class RawCaptureWriter:
                 # bridge/render graph is starting or tearing down.  They are
                 # valid raw messages, but must not move completion metadata
                 # backwards after simulation has advanced.
-                self.last_clock_s = stamp_s if self.last_clock_s is None else max(self.last_clock_s, stamp_s)
+                previous_clock = self.last_clock_s
+                if previous_clock is not None and stamp_s < previous_clock - 1e-9:
+                    target_clock_s = self.target_clock_s if self.target_clock_s is not None else self.duration_s
+                    if previous_clock >= target_clock_s - TARGET_TOLERANCE_S:
+                        self.ignored_teardown_clock_regressions = getattr(self, "ignored_teardown_clock_regressions", 0) + 1
+                        return
+                    self.clock_regressions = getattr(self, "clock_regressions", 0) + 1
+                self.last_clock_s = stamp_s if previous_clock is None else max(previous_clock, stamp_s)
+                if previous_clock is None or stamp_s > previous_clock + 1e-9:
+                    self.last_progress_wall = time.monotonic()
                 if self.first_clock_s is None:
                     self.first_clock_s = stamp_s
-                    self.target_clock_s = stamp_s + self.duration_s
-                if self.target_clock_s is not None and stamp_s >= self.target_clock_s and self.target_wall_deadline is None:
+                    if self.target_clock_s is None:
+                        self.target_clock_s = self.duration_s
+                if stamp_s >= self.target_clock_s - TARGET_TOLERANCE_S and self.target_wall_deadline is None:
                     self.target_wall_deadline = time.monotonic() + self.post_target_wall_s
             try:
                 self.writer.write(topic, self.serialize_message(message), int(round(stamp_s * 1_000_000_000.0)))
@@ -138,10 +186,23 @@ class RawCaptureWriter:
             self.counts[topic] += 1
             if self.first_stamp_s[topic] is None:
                 self.first_stamp_s[topic] = stamp_s
-            if topic == "/clock" and self.last_stamp_s[topic] is not None:
-                self.last_stamp_s[topic] = max(float(self.last_stamp_s[topic]), stamp_s)
-            else:
-                self.last_stamp_s[topic] = stamp_s
+            previous_stamp = self.last_stamp_s[topic]
+            if previous_stamp is not None:
+                gap = stamp_s - float(previous_stamp)
+                if gap < -1e-9:
+                    self.stamp_regressions[topic] += 1
+                elif gap > 0.0:
+                    previous_max = self.max_stamp_gap_s[topic]
+                    self.max_stamp_gap_s[topic] = gap if previous_max is None else max(float(previous_max), gap)
+            self.last_stamp_s[topic] = stamp_s if previous_stamp is None else max(float(previous_stamp), stamp_s)
+            if topic == "/sim/camera/rgb/image_raw":
+                self.rgb_stamps_s.append(stamp_s)
+            elif topic == "/sim/camera/rgb/camera_info":
+                self.camera_info_frame_ids.add(str(message.header.frame_id))
+            elif topic == "/sim/lidar/points":
+                self.lidar_stamps_s.append(stamp_s)
+                self.lidar_frame_ids.add(str(message.header.frame_id))
+                self.lidar_point_counts.append(int(message.width) * int(message.height))
 
         return receive
 
@@ -152,6 +213,12 @@ class RawCaptureWriter:
                 return
             if self.first_clock_s is None and now - self.started_wall >= self.startup_timeout_s:
                 raise RuntimeError("raw capture did not observe /clock before startup timeout")
+            if (
+                self.first_clock_s is not None
+                and self.target_wall_deadline is None
+                and now - self.last_progress_wall >= self.progress_timeout_s
+            ):
+                raise RuntimeError("raw capture clock stalled before absolute scenario target")
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def close(self) -> dict[str, object]:
@@ -175,19 +242,42 @@ class RawCaptureWriter:
         if self._callback_error is not None or node_error is not None or close_error is not None:
             self._close_error = self._callback_error or node_error or close_error
             raise RuntimeError("raw capture did not finish cleanly; writer/node was closed") from self._close_error
+        target_reached = self.last_clock_s is not None and self.last_clock_s >= self.target_clock_s - TARGET_TOLERANCE_S
+        maximum_skew = _maximum_nearest_skew_s(self.lidar_stamps_s, self.rgb_stamps_s)
+        all_topics_positive = all(self.counts[topic] > 0 for topic in TOPIC_TYPES)
+        lidar_nonempty = len(self.lidar_point_counts) >= 2 and min(self.lidar_point_counts) > 0
+        ordered = (
+            self.clock_regressions == 0
+            and self.stamp_regressions["/sim/camera/rgb/image_raw"] == 0
+            and self.stamp_regressions["/sim/lidar/points"] == 0
+        )
+        complete = target_reached and all_topics_positive and lidar_nonempty and ordered
         result = {
-            "status": "complete",
+            "status": "complete" if complete else "failed",
             "uri": self.output.name,
             "storage_id": "sqlite3",
             "topics": list(TOPIC_TYPES),
             "counts": self.counts,
             "first_stamp_s": self.first_stamp_s,
             "last_stamp_s": self.last_stamp_s,
+            "max_stamp_gap_s": self.max_stamp_gap_s,
+            "stamp_regressions": self.stamp_regressions,
             "first_clock_s": self.first_clock_s,
             "last_clock_s": self.last_clock_s,
             "target_clock_s": self.target_clock_s,
+            "target_reached": target_reached,
+            "clock_regressions": self.clock_regressions,
+            "ignored_teardown_clock_regressions": self.ignored_teardown_clock_regressions,
+            "camera_info_frame_ids": sorted(self.camera_info_frame_ids),
+            "lidar_frame_ids": sorted(self.lidar_frame_ids),
+            "lidar_point_count_min": min(self.lidar_point_counts) if self.lidar_point_counts else None,
+            "lidar_point_count_max": max(self.lidar_point_counts) if self.lidar_point_counts else None,
+            "max_rgb_lidar_skew_s": maximum_skew,
         }
         self._close_result = result
+        if not complete:
+            self._close_error = RuntimeError(f"raw capture validation failed: {result}")
+            raise self._close_error
         return result
 
 
@@ -195,7 +285,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--duration-seconds", type=float, required=True)
-    parser.add_argument("--startup-timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--startup-timeout-seconds", type=float, default=600.0)
+    parser.add_argument("--progress-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--metadata", required=True)
     args = parser.parse_args()
     import rclpy
@@ -204,7 +295,12 @@ def main() -> None:
     writer: RawCaptureWriter | None = None
     error: BaseException | None = None
     try:
-        writer = RawCaptureWriter(Path(args.output), args.duration_seconds, args.startup_timeout_seconds)
+        writer = RawCaptureWriter(
+            Path(args.output),
+            args.duration_seconds,
+            args.startup_timeout_seconds,
+            args.progress_timeout_seconds,
+        )
         writer.spin_until_done()
         result = writer.close()
         Path(args.metadata).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
