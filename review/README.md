@@ -1,5 +1,12 @@
 # Review index
 
+## Production-quality grocery demo (G02, in progress)
+
+- [Current G02 checkpoint](PRODUCTION_QUALITY_G02.md)
+- Authoritative progress ledger: [implementation journal](../IMPLEMENTATION_JOURNAL.md)
+- The isolated integration source has accepted asset, motion, scan-diagnostic, presentation-port, and transition slices. Scene visual realism and final selective-LiDAR delivery remain open.
+- No G02 production film, paired final sensor capture, merge to the user's main checkout, or release is claimed at this checkpoint.
+
 ## Forensic repair checkpoint
 
 - [Forensic repair pass — integration checkpoint](FORENSIC_REPAIR_PASS.md)
