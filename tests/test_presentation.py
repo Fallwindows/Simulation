@@ -580,6 +580,20 @@ class CompletePresentationTests(unittest.TestCase):
             ffprobe=str(FFPROBE),
         )
 
+    def _mutated_technical_receipt(self, name: str, output_index: int, mutate):
+        manifest_path = self.fixture["technical_manifest"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        output = manifest["outputs"][output_index]
+        receipt_path = manifest_path.parent / output["receipt"]["path"]
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        mutate(receipt)
+        forged_receipt = manifest_path.parent / f"{name}_receipt.json"
+        forged_receipt.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+        output["receipt"] = {"path": forged_receipt.name, "sha256": sha256_path(forged_receipt)}
+        forged_manifest = manifest_path.parent / f"{name}_manifest.json"
+        forged_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        return forged_manifest
+
     def test_repaired_producers_feed_the_1350_frame_presentation_contract(self):
         capture = json.loads(self.fixture["capture_manifest"].read_text(encoding="utf-8"))
         self.assertEqual(capture["manifest_version"], 1)
@@ -704,6 +718,173 @@ class CompletePresentationTests(unittest.TestCase):
         timestamp_rms = max(ImageStat.Stat(ImageChops.difference(*timestamp_band)).rms)
         self.assertGreater(full_rms, 10.0, "technical fixture must contain structured moving geometry")
         self.assertGreater(timestamp_rms, 1.0, "technical fixture must visibly advance its frame/time overlay")
+
+    def test_technical_scan_timing_frame_and_roi_receipts_are_required(self):
+        bad_frame = self._mutated_technical_receipt(
+            "bad_scan_frame", 0,
+            lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].update(
+                source_frame_id="camera_optical_frame"
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "selected-return receipt"):
+            validate_technical_delivery(bad_frame, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        bad_timing = self._mutated_technical_receipt(
+            "bad_scan_timing", 1,
+            lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].pop("per_return_timing"),
+        )
+        with self.assertRaisesRegex(ValueError, "selected-return receipt"):
+            validate_technical_delivery(bad_timing, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        bad_roi = self._mutated_technical_receipt(
+            "bad_roi_skew", 3,
+            lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                absolute_rgb_skew_ns=18_000_000
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "co-timed RGB"):
+            validate_technical_delivery(bad_roi, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        manifest = json.loads(self.fixture["technical_manifest"].read_text(encoding="utf-8"))
+        manifest["implementation_sha256"]["simulator/technical_lidar.py"] = "0" * 64
+        bad_implementation = self.fixture["technical_manifest"].with_name("bad_implementation_manifest.json")
+        bad_implementation.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "implementation hashes"):
+            validate_technical_delivery(
+                bad_implementation, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+            )
+
+    def test_technical_receipt_cross_field_contradictions_are_rejected(self):
+        attacks = [
+            (
+                "scan_outside_window", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].update(
+                    timestamp_ns=999_000_000_000
+                ),
+                "outside the source window",
+            ),
+            (
+                "wrong_scan_selection_mode", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].update(
+                    selection_mode="past_structural_history"
+                ),
+                "selected-return receipt row",
+            ),
+            (
+                "forged_aggregate_count", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"].update(
+                    selected_return_count=999999
+                ),
+                "aggregate selected-return count",
+            ),
+            (
+                "forged_aggregate_time_range", 0,
+                lambda receipt: receipt["derivation"]["scan_selection"].update(
+                    time_range_s=[0.0, 0.0]
+                ),
+                "aggregate time range",
+            ),
+            (
+                "wrong_roi_context", 3,
+                lambda receipt: receipt["derivation"].update(
+                    context_treatment="bounded structural or current-return subset"
+                ),
+                "context treatment",
+            ),
+            (
+                "missing_roi_method", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop("selection"),
+                "ROI method/index receipt",
+            ),
+            (
+                "missing_roi_index_hash", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "selected_raw_indices_sha256"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
+                "missing_roi_raw_indices", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "selected_raw_indices"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
+                "missing_roi_count", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "selected_return_count"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
+                "missing_roi_bbox", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "bbox_xyxy"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
+                "wrong_roi_message", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    scan_message_id=999
+                ),
+                "not bound to a valid in-window selected scan",
+            ),
+            (
+                "roi_timestamp_outside_window", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    scan_timestamp_ns=999_000_000_000
+                ),
+                "not bound to a valid in-window selected scan",
+            ),
+            (
+                "rgb_pair_not_selected", 0,
+                lambda receipt: receipt["derivation"]["cotimed_rgb_pairs"]["pairs"][0].update(
+                    scan_timestamp_ns=3_000_000_000
+                ),
+                "does not match the bound RGB frame index",
+            ),
+            (
+                "rgb_pair_forged_frame_timestamp", 0,
+                lambda receipt: receipt["derivation"]["cotimed_rgb_pairs"]["pairs"][0].update(
+                    rgb_frame_index=614, absolute_skew_ns=0
+                ),
+                "does not match the bound RGB frame index",
+            ),
+            (
+                "roi_forged_raw_index_digest", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    selected_raw_indices_sha256="f" * 64
+                ),
+                "not bound to a valid in-window selected scan",
+            ),
+            (
+                "roi_forged_rgb_frame_timestamp", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    rgb_frame_index=614, rgb_timestamp_s=20.466666667,
+                    absolute_rgb_skew_ns=0,
+                ),
+                "not bound to a valid in-window selected scan",
+            ),
+        ]
+        for name, output_index, mutate, message in attacks:
+            with self.subTest(name=name):
+                forged = self._mutated_technical_receipt(name, output_index, mutate)
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_technical_delivery(
+                        forged, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+                    )
+
+        def duplicate_scan(receipt):
+            selection = receipt["derivation"]["scan_selection"]
+            selection["scans"].append(dict(selection["scans"][0]))
+            selection["scan_count"] = 2
+            selection["selected_return_count"] *= 2
+
+        forged = self._mutated_technical_receipt("duplicate_scan", 0, duplicate_scan)
+        with self.assertRaisesRegex(ValueError, "selected-return receipt row"):
+            validate_technical_delivery(forged, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
 
     def test_complete_preview_is_exact_and_applies_declared_rgb_hflip(self):
         output = self.root / "preview"

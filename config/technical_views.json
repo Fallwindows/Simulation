@@ -1,14 +1,12 @@
 {
   "fps": 30,
-  "new_goal_status": {
-    "selective_feature_specific_lidar": "unfinished",
-    "motion_validation": "blocked_pending_replacement_and_transition_review",
-    "known_blockers": [
-      "The retained renderer projects the complete finalized SLAM map rather than feature-specific current-scan returns.",
-      "The retained film has hard source resets at frames 540, 660, 750, 840, 960, 1080, and 1200.",
-      "The existing 1350-frame audit found the largest adjacent visual change at the RGB-to-technical boundary 539->540.",
-      "Continuous camera interpolation removes integer pose indexing in this port, but the resulting clips still require visual motion review."
-    ]
+  "selective_lidar_contract": {
+    "status": "complete",
+    "input": "recorded CDR sensor_msgs/msg/PointCloud2",
+    "current_view_frame": "camera_optical_frame from recorded calibration",
+    "history_view_frame": "map from interpolated estimated trajectory",
+    "temporal_rule": "current scans or past-only bounded history; never future returns",
+    "semantic_rule": "estimated RGB regions only; no simulator truth, asset metadata, or fabricated class labels"
   },
   "profiles": {
     "preview": {"width": 1280, "height": 720, "crf": 23, "preset": "veryfast"},
@@ -16,74 +14,67 @@
   },
   "views": [
     {
-      "id": "sensor_activation",
-      "presentation_role": "lidar",
-      "frames": 120,
-      "title": "SENSOR GEOMETRY",
-      "subtitle": "OFFLINE MAP-POINT RAY EXPLANATION · NOT A CURRENT SCAN",
-      "capability_focus": "sensor-ray geometry",
-      "point_source": "legacy finalized offline map points",
-      "selective_current_scan_status": "unfinished"
+      "id": "sensor_activation", "presentation_role": "lidar", "frames": 120,
+      "title": "CURRENT SENSOR RETURNS", "subtitle": "CO-TIMED RGB · CORRIDOR BOUNDARIES + NEAR SURFACES",
+      "capability_focus": "camera-aligned corridor boundaries and near-surface returns",
+      "point_source": "raw timestamped PointCloud2 returns selected from corridor sides and near surfaces by nearest projected cell",
+      "selective_current_scan_status": "complete", "selection_mode": "camera_occlusion_surfaces",
+      "temporal_mode": "current_window", "source_window_s": [2.0, 5.9], "display_window_s": [2.0, 5.9], "rgb_context": true,
+      "maximum_points": 1000, "history_stride_scans": 1
     },
     {
-      "id": "lidar_environment",
-      "presentation_role": "lidar",
-      "frames": 90,
-      "title": "AISLE GEOMETRY",
-      "subtitle": "OFFLINE LIDAR-SLAM MAP CLOUD · POINTS ONLY",
-      "capability_focus": "environment geometry",
-      "point_source": "legacy finalized offline map points",
-      "selective_current_scan_status": "unfinished"
+      "id": "lidar_environment", "presentation_role": "lidar", "frames": 90,
+      "title": "NAVIGATION GEOMETRY", "subtitle": "CURRENT SIDE BOUNDARIES + NEAR-FIELD OBSTACLES",
+      "capability_focus": "obstacle and traversable-boundary perception",
+      "point_source": "raw current PointCloud2 returns filtered by sensor-frame range and boundary geometry",
+      "selective_current_scan_status": "complete", "selection_mode": "navigation_boundaries",
+      "temporal_mode": "current_window", "source_window_s": [5.9, 8.8], "display_window_s": [5.9, 8.8], "rgb_context": false,
+      "maximum_points": 3000, "history_stride_scans": 1
     },
     {
-      "id": "persistent_map",
-      "presentation_role": "map",
-      "frames": 90,
-      "title": "PERSISTENT MAP",
-      "subtitle": "FINALIZED OFFLINE SLAM SNAPSHOT · ESTIMATED PATH",
-      "capability_focus": "persistent mapping",
-      "point_source": "legacy finalized offline map points",
-      "selective_current_scan_status": "unfinished"
+      "id": "persistent_map", "presentation_role": "map", "frames": 90,
+      "title": "PERSISTENT OBSERVATIONS", "subtitle": "PAST-ONLY STRUCTURAL RETURNS · ESTIMATED PATH",
+      "capability_focus": "persistent mapping from observed structure",
+      "point_source": "bounded structural subsets of raw scans at or before the displayed cutoff",
+      "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
+      "temporal_mode": "past_only_reveal", "source_window_s": [0.2, 11.7], "display_window_s": [8.8, 11.7], "rgb_context": false,
+      "maximum_points": 22000, "history_stride_scans": 3
     },
     {
-      "id": "object_association",
-      "presentation_role": "reconstruction",
-      "frames": 120,
-      "title": "OBJECT ASSOCIATION",
-      "subtitle": "ESTIMATED CENTERS · EXTENTS NOT ESTIMATED",
-      "capability_focus": "object association",
-      "point_source": "legacy finalized offline map points plus estimated centers",
-      "selective_current_scan_status": "unfinished"
+      "id": "object_association", "presentation_role": "reconstruction", "frames": 120,
+      "title": "ESTIMATED REGION SUPPORT", "subtitle": "RGB REGION → NEAREST RAW LIDAR SURFACE",
+      "capability_focus": "estimated object-region association",
+      "point_source": "front-surface raw returns inside ground-truth-free estimated RGB regions",
+      "selective_current_scan_status": "complete", "selection_mode": "estimated_roi_front_surfaces",
+      "temporal_mode": "snapshot_orbit", "source_window_s": [0.2, 12.8], "display_window_s": [10.8, 12.8], "rgb_context": false,
+      "maximum_points": 8000, "history_stride_scans": 4
     },
     {
-      "id": "object_detail",
-      "presentation_role": "reconstruction",
-      "frames": 120,
-      "title": "PERSISTENT ITEM RECORD",
-      "subtitle": "LIDAR-LOCALIZED CENTER · OBSERVATION SUPPORT",
-      "capability_focus": "object targeting detail",
-      "point_source": "legacy finalized offline map points plus estimated center",
-      "selective_current_scan_status": "unfinished"
+      "id": "object_detail", "presentation_role": "reconstruction", "frames": 120,
+      "title": "ONE ESTIMATED REGION", "subtitle": "RAW RETURN SUPPORT · FULL EXTENT NOT ESTIMATED",
+      "capability_focus": "one estimated region and its measured support",
+      "point_source": "one selected estimated RGB region with nearest front-surface raw returns",
+      "selective_current_scan_status": "complete", "selection_mode": "estimated_roi_front_surfaces",
+      "temporal_mode": "snapshot_orbit", "source_window_s": [0.2, 12.8], "display_window_s": [10.8, 12.8], "rgb_context": false,
+      "maximum_points": 3600, "history_stride_scans": 4
     },
     {
-      "id": "observed_aisle_overview",
-      "presentation_role": "reconstruction",
-      "frames": 120,
-      "title": "OBSERVED AISLE",
-      "subtitle": "MAP + PATH + PERSISTENT ESTIMATED CENTERS",
-      "capability_focus": "integrated observed aisle",
-      "point_source": "legacy finalized offline map points plus estimated centers",
-      "selective_current_scan_status": "unfinished"
+      "id": "observed_aisle_overview", "presentation_role": "reconstruction", "frames": 120,
+      "title": "OBSERVED AISLE STRUCTURE", "subtitle": "PAST-ONLY RETURNS + ESTIMATED TRAJECTORY",
+      "capability_focus": "integrated observed-aisle overview",
+      "point_source": "past-only structural raw-return subsets and estimated trajectory",
+      "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
+      "temporal_mode": "past_only_orbit", "source_window_s": [0.2, 17.4], "display_window_s": [12.8, 17.4], "rgb_context": false,
+      "maximum_points": 26000, "history_stride_scans": 3
     },
     {
-      "id": "final_technical_view",
-      "presentation_role": "reconstruction",
-      "frames": 150,
-      "title": "SENSOR-DERIVED MAP",
-      "subtitle": "SIMULATED ENVIRONMENT · PERSISTENT ITEM LOCATIONS",
+      "id": "final_technical_view", "presentation_role": "reconstruction", "frames": 150,
+      "title": "SENSOR-DERIVED MAP", "subtitle": "SIMULATED ENVIRONMENT · PAST-ONLY LIDAR HISTORY",
       "capability_focus": "final technical summary",
-      "point_source": "legacy finalized offline map points plus estimated centers",
-      "selective_current_scan_status": "unfinished"
+      "point_source": "past-only structural raw-return subsets and estimated trajectory",
+      "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
+      "temporal_mode": "past_only_orbit", "source_window_s": [0.2, 18.5], "display_window_s": [17.4, 18.5], "rgb_context": false,
+      "maximum_points": 18000, "history_stride_scans": 3
     }
   ]
 }
