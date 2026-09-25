@@ -1,9 +1,10 @@
-"""CPU renderer for honest technical views of recorded SLAM artifacts.
+"""CPU renderer for selective technical views of recorded RGB/LiDAR data.
 
-The renderer consumes a coherent capture/SLAM/perception run. It projects the
-actual point cloud, estimated trajectory, and ground-truth-free estimated item
-centers with NumPy/OpenCV, then uses Pillow for screen typography. It does not
-load scene geometry, RGB beauty footage, or storyboard pixels.
+The renderer consumes one exact capture/SLAM/perception bundle.  Current views
+project real timestamped PointCloud2 returns into their co-timed recorded RGB
+camera, while map views transform bounded past-only return subsets through the
+estimated trajectory.  It never reads scene geometry, assets, simulator truth,
+or storyboard pixels.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
 
-import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,8 +28,6 @@ from simulator.perception.provenance import (
     validate_perception_frame_coverage,
     validate_perception_manifest_bindings,
 )
-
-
 PRODUCER_ID = "grocery_sim.technical_views.cpu.v1"
 ALLOWED_ESTIMATED_DEPTH_SOURCES = frozenset({"lidar_projected_with_slam_pose"})
 VIEW_ORDER = (
@@ -43,6 +41,27 @@ VIEW_ORDER = (
 )
 FONT_REGULAR = Path("C:/Windows/Fonts/segoeui.ttf")
 FONT_BOLD = Path("C:/Windows/Fonts/segoeuib.ttf")
+IMPLEMENTATION_SOURCES = (
+    "simulator/technical_lidar.py",
+    "simulator/sensors/scan_projection.py",
+    "simulator/sensors/feature_selection.py",
+)
+
+
+def _opencv():
+    """Load OpenCV only in render paths; provenance inspection stays native-only."""
+
+    import cv2
+
+    return cv2
+
+
+class _LazyOpenCv:
+    def __getattr__(self, name: str):
+        return getattr(_opencv(), name)
+
+
+cv2 = _LazyOpenCv()
 
 
 @dataclass(frozen=True)
@@ -65,6 +84,12 @@ class ViewSpec:
     capability_focus: str
     point_source: str
     selective_current_scan_status: str
+    selection_mode: str
+    temporal_mode: str
+    source_window_s: tuple[float, float]
+    rgb_context: bool
+    maximum_points: int
+    history_stride_scans: int
 
 
 @dataclass(frozen=True)
@@ -97,6 +122,17 @@ class SourceBundle:
     slam_manifest_path: Path
     perception_manifest_path: Path
     source_catalog_path: Path
+    raw_lidar_bag_path: Path
+    bag_metadata_path: Path
+    camera_info_path: Path
+    sensor_transforms_path: Path
+    effective_config_path: Path
+    scene_manifest_path: Path
+    rgb_video_path: Path
+    rgb_frames_path: Path
+    annotations_path: Path
+    compatibility_status: str
+    delivery_eligible: bool
     hashes: dict[str, str]
 
 
@@ -115,6 +151,37 @@ def canonical_text_sha256(path: Path) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def implementation_hashes(repo_root: Path) -> dict[str, str]:
+    return {name: canonical_text_sha256(repo_root / name) for name in IMPLEMENTATION_SOURCES}
+
+
+def _verify_bound_input_snapshot(bundle: SourceBundle) -> None:
+    """Rehash every bound input after rendering before a manifest is published."""
+
+    paths = {
+        "map": bundle.map_path,
+        "trajectory": bundle.trajectory_path,
+        "inventory": bundle.inventory_path,
+        "capture_manifest": bundle.capture_manifest_path,
+        "slam_manifest": bundle.slam_manifest_path,
+        "perception_manifest": bundle.perception_manifest_path,
+        "raw_lidar_bag": bundle.raw_lidar_bag_path,
+        "bag_metadata": bundle.bag_metadata_path,
+        "camera_info": bundle.camera_info_path,
+        "sensor_transforms": bundle.sensor_transforms_path,
+        "effective_config": bundle.effective_config_path,
+        "scene_manifest": bundle.scene_manifest_path,
+        "rgb_video": bundle.rgb_video_path,
+        "rgb_frames": bundle.rgb_frames_path,
+        "frame_annotations": bundle.annotations_path,
+    }
+    changed = [name for name, path in paths.items() if sha256_file(path) != bundle.hashes[name]]
+    if canonical_text_sha256(bundle.source_catalog_path) != bundle.hashes["source_catalog"]:
+        changed.append("source_catalog")
+    if changed:
+        raise ValueError(f"technical render inputs changed during rendering: {sorted(changed)}")
+
+
 def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpec, ...]]:
     plan_path = Path(path)
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
@@ -130,7 +197,15 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
         )
         for name, values in payload["profiles"].items()
     }
-    views = tuple(ViewSpec(**item) for item in payload["views"])
+    views = tuple(
+        ViewSpec(
+            **{
+                **item,
+                "source_window_s": tuple(float(value) for value in item["source_window_s"]),
+            }
+        )
+        for item in payload["views"]
+    )
     if tuple(view.id for view in views) != VIEW_ORDER:
         raise ValueError(f"technical view order must be {VIEW_ORDER}")
     if any(view.frames <= 0 for view in views):
@@ -141,8 +216,23 @@ def load_plan(path: str | Path) -> tuple[dict[str, RenderProfile], tuple[ViewSpe
         raise ValueError("delivery profile must be 1920x1080")
     if fps != 30:
         raise ValueError("technical source views must be 30 fps")
-    if any(view.selective_current_scan_status != "unfinished" for view in views):
-        raise ValueError("legacy technical views must remain marked unfinished for selective current-scan visualization")
+    if any(view.selective_current_scan_status != "complete" for view in views):
+        raise ValueError("technical views must use the completed selective current-scan contract")
+    allowed_modes = {
+        "camera_occlusion_surfaces", "navigation_boundaries", "past_structural_history",
+        "estimated_roi_front_surfaces",
+    }
+    allowed_temporal = {"current_window", "past_only_reveal", "snapshot_orbit", "past_only_orbit"}
+    for view in views:
+        start_s, end_s = view.source_window_s
+        if not (math.isfinite(start_s) and math.isfinite(end_s) and 0.0 <= start_s <= end_s):
+            raise ValueError(f"technical view {view.id} has an invalid source window")
+        if view.selection_mode not in allowed_modes or view.temporal_mode not in allowed_temporal:
+            raise ValueError(f"technical view {view.id} has an unsupported selection or temporal mode")
+        if view.maximum_points <= 0 or view.history_stride_scans <= 0:
+            raise ValueError(f"technical view {view.id} has invalid point bounds")
+        if view.rgb_context and view.temporal_mode != "current_window":
+            raise ValueError("RGB context is permitted only for a camera-aligned current window")
     return profiles, views
 
 
@@ -286,6 +376,15 @@ def _inspect_source_bundle_with_catalog(
         ("map", "slam/slam_map.ply"),
         ("trajectory", "slam/slam_map_poses.csv"),
         ("inventory", "perception/estimated_inventory.csv"),
+        ("raw_lidar_bag", "capture/sensors_bag/sensors_bag_0.db3"),
+        ("bag_metadata", "capture/bag_metadata.json"),
+        ("camera_info", "capture/camera_info.json"),
+        ("sensor_transforms", "capture/sensor_transforms.json"),
+        ("effective_config", "capture/effective_config.json"),
+        ("scene_manifest", "capture/scene_manifest.json"),
+        ("rgb_video", "capture/rgb_camera.mp4"),
+        ("rgb_frames", "capture/rgb_frames.jsonl"),
+        ("frame_annotations", "perception/frame_annotations.jsonl"),
     ):
         binding = source_artifacts.get(artifact_name)
         if not isinstance(binding, dict):
@@ -337,15 +436,43 @@ def _inspect_source_bundle_with_catalog(
         binding = manifests.get(producer)
         if not isinstance(binding, dict) or binding.get("path") != str(paths[hash_key].relative_to(run)).replace("\\", "/") or binding.get("sha256") != hashes[hash_key]:
             raise ValueError(f"{producer} manifest does not match the reviewed source catalog")
-    for artifact_name in ("map", "trajectory", "inventory"):
+    for artifact_name in (
+        "map", "trajectory", "inventory", "raw_lidar_bag", "bag_metadata", "camera_info",
+        "sensor_transforms", "effective_config", "scene_manifest", "rgb_video", "rgb_frames",
+        "frame_annotations",
+    ):
         binding = artifacts.get(artifact_name)
         if not isinstance(binding, dict) or binding.get("path") != str(paths[artifact_name].relative_to(run)).replace("\\", "/") or binding.get("sha256") != hashes[artifact_name]:
             raise ValueError(f"{artifact_name} artifact does not match the reviewed source catalog")
+    capture_files = {
+        item.get("path"): item for item in capture.get("files", [])
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    for artifact_name in (
+        "raw_lidar_bag", "bag_metadata", "camera_info", "sensor_transforms", "effective_config",
+        "scene_manifest", "rgb_video", "rgb_frames",
+    ):
+        relative = paths[artifact_name].relative_to(run / "capture").as_posix()
+        record = capture_files.get(relative)
+        if (
+            not isinstance(record, dict)
+            or record.get("sha256") != hashes[artifact_name]
+            or int(record.get("size_bytes", -1)) != paths[artifact_name].stat().st_size
+        ):
+            raise ValueError(f"capture manifest does not bind the exact {artifact_name} bytes")
     trajectory_relative = paths["trajectory"].relative_to(run / "slam").as_posix()
     trajectory_entries = [
         item for item in slam.get("artifacts", [])
         if isinstance(item, dict) and item.get("path") == trajectory_relative
     ]
+    if not trajectory_entries:
+        legacy_artifacts = slam.get("producer", {}).get("artifacts", {})
+        legacy_entry = legacy_artifacts.get(trajectory_relative) if isinstance(legacy_artifacts, dict) else None
+        if isinstance(legacy_entry, dict):
+            trajectory_entries = [{
+                **legacy_entry,
+                "size_bytes": paths["trajectory"].stat().st_size,
+            }]
     if len(trajectory_entries) != 1:
         raise ValueError("SLAM manifest does not uniquely bind the presentation trajectory")
     trajectory_entry = trajectory_entries[0]
@@ -382,11 +509,50 @@ def _inspect_source_bundle_with_catalog(
             raise ValueError("modern perception provenance cannot use the reviewed legacy omission waiver")
         if perception.get("slam_trajectory") != perception_contract.get("slam_trajectory"):
             raise ValueError("perception manifest trajectory association does not match the reviewed source catalog")
-        validate_perception_manifest_bindings(perception, run / "capture", run / "slam", run / "perception")
         annotations = run / "perception" / str(perception.get("annotations", ""))
         if not annotations.is_file():
             raise ValueError("perception annotations named by the producer manifest are missing")
-        validate_perception_frame_coverage(perception, run / "capture", annotations)
+        legacy_capture_v0 = perception_contract.get("legacy_capture_manifest_v0") is True
+        if legacy_capture_v0:
+            if source.get("presentation_compatibility", {}).get("status") != "historical_paired_diagnostic":
+                raise ValueError("legacy capture-manifest provenance is restricted to historical diagnostics")
+            inputs = perception.get("inputs", {})
+            expected_legacy = {
+                "capture_id": capture_id,
+                "capture_sha256": capture.get("capture_sha256"),
+                "capture_manifest_sha256": hashes["capture_manifest"],
+                "raw_lidar_sha256": hashes["raw_lidar_bag"],
+                "rgb_video_sha256": hashes["rgb_video"],
+                "rgb_frames_sha256": hashes["rgb_frames"],
+                "sensor_transforms_sha256": hashes["sensor_transforms"],
+                "slam_manifest_sha256": hashes["slam_manifest"],
+                "trajectory_sha256": hashes["trajectory"],
+            }
+            bag_files = inputs.get("raw_lidar", {}).get("bag", {}).get("files", [])
+            raw_bag = next(
+                (item for item in bag_files if isinstance(item, dict) and str(item.get("path", "")).endswith(".db3")),
+                {},
+            )
+            observed_legacy = {
+                "capture_id": inputs.get("capture", {}).get("capture_id"),
+                "capture_sha256": inputs.get("capture", {}).get("capture_sha256"),
+                "capture_manifest_sha256": inputs.get("capture", {}).get("manifest", {}).get("sha256"),
+                "raw_lidar_sha256": raw_bag.get("sha256"),
+                "rgb_video_sha256": inputs.get("rgb", {}).get("video", {}).get("sha256"),
+                "rgb_frames_sha256": inputs.get("rgb", {}).get("frames", {}).get("sha256"),
+                "sensor_transforms_sha256": inputs.get("rgb", {}).get("sensor_transforms", {}).get("sha256"),
+                "slam_manifest_sha256": inputs.get("slam", {}).get("manifest", {}).get("sha256"),
+                "trajectory_sha256": inputs.get("slam", {}).get("trajectory", {}).get("sha256"),
+            }
+            if observed_legacy != expected_legacy:
+                raise ValueError("historical perception input hashes do not match the reviewed paired capture")
+            rgb_count = sum(1 for line in paths["rgb_frames"].read_text(encoding="utf-8").splitlines() if line.strip())
+            annotation_count = sum(1 for line in annotations.read_text(encoding="utf-8").splitlines() if line.strip())
+            if rgb_count != annotation_count or perception.get("frame_count") != rgb_count:
+                raise ValueError("historical perception annotations do not cover the paired RGB index")
+        else:
+            validate_perception_manifest_bindings(perception, run / "capture", run / "slam", run / "perception")
+            validate_perception_frame_coverage(perception, run / "capture", annotations)
     allowed_depth_sources = frozenset(perception_contract.get("allowed_depth_sources", []))
     if not allowed_depth_sources or not allowed_depth_sources.issubset(ALLOWED_ESTIMATED_DEPTH_SOURCES):
         raise ValueError("catalog source has no supported estimated depth source")
@@ -399,6 +565,31 @@ def _inspect_source_bundle_with_catalog(
     if not math.isclose(start_s, float(time_binding.get("start_s", math.nan)), abs_tol=1e-9) or not math.isclose(end_s, float(time_binding.get("end_s", math.nan)), abs_tol=1e-9):
         raise ValueError("trajectory simulation-time range does not match the reviewed source catalog")
     hashes["source_catalog"] = canonical_text_sha256(catalog_path)
+    compatibility = source.get("presentation_compatibility")
+    if not isinstance(compatibility, dict):
+        raise ValueError("catalog source lacks presentation compatibility status")
+    compatibility_status = str(compatibility.get("status", ""))
+    delivery_eligible = compatibility.get("delivery_eligible")
+    if compatibility_status not in {
+        "current_goal_paired_capture", "historical_paired_diagnostic", "generated_test_fixture",
+    } or not isinstance(delivery_eligible, bool):
+        raise ValueError("catalog source has an invalid presentation compatibility status")
+    if compatibility_status == "historical_paired_diagnostic" and delivery_eligible:
+        raise ValueError("historical diagnostic source cannot be delivery eligible")
+    transforms_payload = _read_json(paths["sensor_transforms"])
+    effective_payload = _read_json(paths["effective_config"])
+    sensor_contract = source.get("sensor_contract")
+    observed_sensor_contract = {
+        "lidar_topic": transforms_payload.get("topics", {}).get("lidar_points"),
+        "camera_info_topic": transforms_payload.get("topics", {}).get("rgb_camera_info"),
+        "lidar_frame_id": transforms_payload.get("frames", {}).get("lidar_link"),
+        "camera_frame_id": transforms_payload.get("frames", {}).get("camera_optical"),
+        "configured_lidar_hz": effective_payload.get("lidar", {}).get("hz"),
+        "maximum_current_age_periods": 2.0,
+        "maximum_rgb_skew_ns": 17_000_001,
+    }
+    if sensor_contract != observed_sensor_contract:
+        raise ValueError("capture sensor frames, topics, or cadence do not match the reviewed source catalog")
     return SourceBundle(
         run_root=run,
         capture_id=capture_id,
@@ -421,6 +612,17 @@ def _inspect_source_bundle_with_catalog(
         slam_manifest_path=paths["slam_manifest"],
         perception_manifest_path=paths["perception_manifest"],
         source_catalog_path=catalog_path,
+        raw_lidar_bag_path=paths["raw_lidar_bag"],
+        bag_metadata_path=paths["bag_metadata"],
+        camera_info_path=paths["camera_info"],
+        sensor_transforms_path=paths["sensor_transforms"],
+        effective_config_path=paths["effective_config"],
+        scene_manifest_path=paths["scene_manifest"],
+        rgb_video_path=paths["rgb_video"],
+        rgb_frames_path=paths["rgb_frames"],
+        annotations_path=paths["frame_annotations"],
+        compatibility_status=compatibility_status,
+        delivery_eligible=delivery_eligible,
         hashes=hashes,
     )
 
@@ -550,19 +752,15 @@ def fit_font(text: str, font_path: Path, preferred_size: int, minimum_size: int,
 
 
 class TechnicalRenderer:
-    def __init__(self, profile: RenderProfile, points: np.ndarray, trajectory: np.ndarray, inventory: tuple[InventoryRecord, ...]):
+    def __init__(self, profile: RenderProfile, source: SelectiveLidarSource, inventory: tuple[InventoryRecord, ...]):
         self.profile = profile
-        self.points = points
-        self.trajectory = trajectory
-        lower, upper = np.percentile(points, [1, 99], axis=0)
-        bounded_inventory = tuple(
-            record for record in inventory
-            if np.all(np.asarray(record.position) >= lower - 0.5) and np.all(np.asarray(record.position) <= upper + 0.5)
-        )
-        self.inventory = select_inventory(bounded_inventory)
-        self.center = np.median(points, axis=0)
-        self.center[2] = np.percentile(points[:, 2], 50)
-        self.z_low, self.z_high = np.percentile(points[:, 2], [3, 97])
+        self.source = source
+        self.trajectory = source.trajectory.positions_m.astype(np.float32)
+        self.inventory = select_inventory(inventory)
+        self._used_scans: dict[str, dict[int, PreparedScan]] = {}
+        self._used_rois: dict[str, tuple[RoiObservation, ...]] = {}
+        self._rgb_pairs: dict[str, set[tuple[int, int, int]]] = {}
+        self._history_views: dict[str, tuple[tuple[PreparedScan, ...], np.ndarray, np.ndarray, int]] = {}
         scale = profile.height / 720.0
         self.fonts = {
             "kicker": ImageFont.truetype(str(FONT_BOLD), max(13, int(15 * scale))),
@@ -571,150 +769,225 @@ class TechnicalRenderer:
             "mono": ImageFont.truetype(str(Path("C:/Windows/Fonts/consola.ttf")), max(12, int(15 * scale))),
         }
 
-    def _camera(self, view_id: str, progress: float) -> tuple[np.ndarray, np.ndarray, float]:
-        if view_id in ("sensor_activation", "lidar_environment"):
-            path_position = min(len(self.trajectory) - 1.0, (0.28 + 0.25 * progress) * (len(self.trajectory) - 1))
-            lower = int(math.floor(path_position))
-            upper = min(len(self.trajectory) - 1, lower + 1)
-            alpha = path_position - lower
-            alpha = alpha * alpha * (3.0 - 2.0 * alpha)
-            base = (1.0 - alpha) * self.trajectory[lower] + alpha * self.trajectory[upper]
-            eye = base + np.asarray([-0.4, -0.05 + 0.12 * math.sin(progress * math.pi), 1.42], dtype=np.float32)
-            target = eye + np.asarray([8.0, 0.15 * math.sin(progress * math.pi * 2), -0.15], dtype=np.float32)
-            return eye, target, 0.88
-        if view_id in ("object_association", "object_detail") and self.inventory:
-            angle = math.radians(-64.0 + 18.0 * progress)
-            focus = np.asarray(self.inventory[0].position, dtype=np.float32)
-            radius = 4.1 if view_id == "object_association" else 3.2
-            elevation = 2.0 if view_id == "object_association" else 1.6
-            focal = 0.72
-        else:
-            angle = math.radians(-96.0 + 12.0 * progress)
-            focus = np.asarray([np.median(self.trajectory[:, 0]), 0.0, 0.8], dtype=np.float32)
-            radius = 15.5 if view_id == "persistent_map" else 16.5
-            elevation = 6.4 if view_id == "persistent_map" else 7.0
-            focal = 0.68
-        eye = focus + np.asarray([radius * math.cos(angle), radius * math.sin(angle), elevation], dtype=np.float32)
-        return eye, focus, focal
-
     def _background(self) -> np.ndarray:
         height, width = self.profile.height, self.profile.width
         y = np.linspace(0.0, 1.0, height, dtype=np.float32)[:, None, None]
-        top = np.asarray([11, 18, 30], dtype=np.float32)
+        top = np.asarray([12, 20, 32], dtype=np.float32)
         bottom = np.asarray([2, 6, 12], dtype=np.float32)
-        row = top * (1.0 - y) + bottom * y
-        return np.broadcast_to(row, (height, width, 3)).copy().astype(np.uint8)
+        return np.broadcast_to(top * (1.0 - y) + bottom * y, (height, width, 3)).copy().astype(np.uint8)
 
-    def _draw_cloud(self, frame: np.ndarray, eye: np.ndarray, target: np.ndarray, focal: float, dim: float = 1.0) -> None:
-        pixels, depth, mask = project_points(self.points, eye, target, self.profile.width, self.profile.height, focal)
-        z = self.points[mask, 2]
-        z_norm = np.clip((z - self.z_low) / max(0.1, self.z_high - self.z_low), 0.0, 1.0)
-        distance_fade = np.clip(1.2 - depth / 34.0, 0.30, 1.0)
-        colors = np.stack([
-            178 + 72 * z_norm,
-            128 + 92 * z_norm,
-            42 + 35 * z_norm,
-        ], axis=1) * (distance_fade * dim)[:, None]
+    def _register_scan(self, view_id: str, scan: PreparedScan) -> None:
+        self._used_scans.setdefault(view_id, {})[scan.record.timestamp_ns] = scan
+
+    def _draw_camera_points(self, frame: np.ndarray, scan: PreparedScan, weight: float, color: tuple[int, int, int]) -> None:
+        if weight <= 0.0 or not len(scan.raw_point_indices):
+            return
+        scale_x = self.profile.width / self.source.intrinsics.width_px
+        scale_y = self.profile.height / self.source.intrinsics.height_px
+        pixels = np.column_stack((np.rint(scan.u_px * scale_x), np.rint(scan.v_px * scale_y))).astype(np.int32)
+        valid = (
+            (pixels[:, 0] >= 0) & (pixels[:, 0] < self.profile.width)
+            & (pixels[:, 1] >= 0) & (pixels[:, 1] < self.profile.height)
+        )
+        pixels = pixels[valid]
+        depths = scan.depth_m[valid]
         layer = np.zeros_like(frame)
-        order = np.argsort(depth)[::-1]
+        brightness = np.clip(1.15 - depths / 20.0, 0.42, 1.0) * weight
+        values = np.clip(np.asarray(color)[None, :] * brightness[:, None], 0, 255).astype(np.uint8)
+        order = np.argsort(depths)[::-1]
         xy = pixels[order]
-        layer[xy[:, 1], xy[:, 0]] = np.clip(colors[order], 0, 255).astype(np.uint8)
+        layer[xy[:, 1], xy[:, 0]] = values[order]
         radius = 1 if self.profile.height <= 720 else 2
         layer = cv2.dilate(layer, np.ones((radius + 1, radius + 1), dtype=np.uint8))
-        glow = cv2.GaussianBlur(layer, (0, 0), 3.0)
-        np.maximum(frame, (glow * 0.34).astype(np.uint8), out=frame)
+        glow = cv2.GaussianBlur(layer, (0, 0), 2.4)
+        np.maximum(frame, (glow * 0.28).astype(np.uint8), out=frame)
         np.maximum(frame, layer, out=frame)
 
-    def _draw_sensor_rays(self, frame: np.ndarray, eye: np.ndarray, target: np.ndarray, focal: float, progress: float) -> None:
-        pixels, depth, _mask = project_points(self.points, eye, target, self.profile.width, self.profile.height, focal)
-        candidates = np.flatnonzero((depth >= 2.0) & (depth <= 11.0))
-        if len(candidates) == 0:
+    def _paired_rgb_background(self, spec: ViewSpec, scan: PreparedScan) -> np.ndarray:
+        rgb = self.source.rgb_at(scan.record.timestamp_s)
+        skew_ns = int(round(abs(rgb.timestamp_s - scan.record.timestamp_s) * 1_000_000_000))
+        if skew_ns > 17_000_001:
+            raise ValueError("LiDAR scan has no co-timed RGB frame within half an RGB interval")
+        self._rgb_pairs.setdefault(spec.id, set()).add((scan.record.timestamp_ns, rgb.frame_index, skew_ns))
+        frame = self.source.read_rgb_frame(rgb, self.profile.width, self.profile.height)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        cool = cv2.applyColorMap(gray, cv2.COLORMAP_OCEAN)
+        return cv2.addWeighted(frame, 0.24, cool, 0.25, -7.0)
+
+    def _draw_sensor_rays(self, frame: np.ndarray, scan: PreparedScan, progress: float, weight: float) -> None:
+        if not len(scan.raw_point_indices) or weight <= 0.0:
             return
-        count = min(28, len(candidates))
+        scale_x = self.profile.width / self.source.intrinsics.width_px
+        scale_y = self.profile.height / self.source.intrinsics.height_px
+        pixels = np.column_stack((np.rint(scan.u_px * scale_x), np.rint(scan.v_px * scale_y))).astype(np.int32)
+        candidates = np.flatnonzero((scan.depth_m >= 1.5) & (scan.depth_m <= 10.0))
+        if not len(candidates):
+            return
+        count = min(30, len(candidates))
         chosen = candidates[np.linspace(0, len(candidates) - 1, count, dtype=np.int32)]
-        origin = (self.profile.width // 2, int(self.profile.height * 0.88))
+        activation = float(np.clip((progress - 0.06) / 0.32, 0.0, 1.0))
+        chosen = chosen[: max(1, int(round(count * activation)))]
+        origin = (self.profile.width // 2, int(self.profile.height * 0.90))
         overlay = frame.copy()
-        activation = float(np.clip((progress - 0.08) / 0.35, 0.0, 1.0))
-        for point_index in chosen[: max(1, int(round(count * activation)))]:
+        for point_index in chosen:
             endpoint = tuple(int(value) for value in pixels[point_index])
-            cv2.line(overlay, origin, endpoint, (255, 205, 45), max(1, self.profile.height // 720), cv2.LINE_AA)
-            cv2.circle(overlay, endpoint, max(2, self.profile.height // 360), (255, 235, 92), -1, cv2.LINE_AA)
-        cv2.addWeighted(overlay, 0.48, frame, 0.52, 0.0, dst=frame)
+            cv2.line(overlay, origin, endpoint, (238, 194, 56), max(1, self.profile.height // 720), cv2.LINE_AA)
+            cv2.circle(overlay, endpoint, max(2, self.profile.height // 420), (250, 229, 101), -1, cv2.LINE_AA)
+        cv2.addWeighted(overlay, 0.18 + 0.30 * weight, frame, 0.82 - 0.30 * weight, 0.0, dst=frame)
         scale = self.profile.height / 720.0
         housing = np.asarray([
-            (origin[0] - int(35 * scale), origin[1] + int(20 * scale)),
-            (origin[0] + int(35 * scale), origin[1] + int(20 * scale)),
-            (origin[0] + int(22 * scale), origin[1] - int(13 * scale)),
-            (origin[0] - int(22 * scale), origin[1] - int(13 * scale)),
+            (origin[0] - int(34 * scale), origin[1] + int(19 * scale)),
+            (origin[0] + int(34 * scale), origin[1] + int(19 * scale)),
+            (origin[0] + int(21 * scale), origin[1] - int(12 * scale)),
+            (origin[0] - int(21 * scale), origin[1] - int(12 * scale)),
         ], dtype=np.int32)
-        cv2.fillConvexPoly(frame, housing, (8, 20, 30), cv2.LINE_AA)
-        cv2.polylines(frame, [housing], True, (70, 219, 241), max(1, int(2 * scale)), cv2.LINE_AA)
-        cv2.circle(frame, origin, max(4, int(6 * scale)), (255, 223, 71), -1, cv2.LINE_AA)
+        cv2.fillConvexPoly(frame, housing, (7, 18, 28), cv2.LINE_AA)
+        cv2.polylines(frame, [housing], True, (68, 210, 235), max(1, int(2 * scale)), cv2.LINE_AA)
 
-    def _draw_path(self, frame: np.ndarray, eye: np.ndarray, target: np.ndarray, focal: float) -> None:
-        pixels, _depth, mask = project_points(self.trajectory + np.asarray([0, 0, 0.06], dtype=np.float32), eye, target, self.profile.width, self.profile.height, focal)
+    def _current_frame(self, spec: ViewSpec, progress: float) -> tuple[np.ndarray, float, int]:
+        start_s, end_s = spec.source_window_s
+        timestamp_s = start_s + (end_s - start_s) * progress
+        previous_record, latest_record, alpha = self.source.causal_scan_pair(timestamp_s)
+        scans = [
+            self.source.prepare_scan(previous_record, spec.selection_mode, spec.maximum_points),
+            self.source.prepare_scan(latest_record, spec.selection_mode, spec.maximum_points),
+        ]
+        for scan in scans:
+            self._register_scan(spec.id, scan)
+        composites: list[np.ndarray] = []
+        for scan in scans:
+            base = self._paired_rgb_background(spec, scan) if spec.rgb_context else self._background()
+            self._draw_camera_points(base, scan, 1.0, (247, 211, 63))
+            composites.append(base)
+        frame = cv2.addWeighted(composites[0], 1.0 - alpha, composites[1], alpha, 0.0)
+        if spec.id == "sensor_activation":
+            self._draw_sensor_rays(frame, scans[0], progress, 1.0 - alpha)
+            self._draw_sensor_rays(frame, scans[1], progress, alpha)
+        return frame, latest_record.timestamp_s, len(scans[0].raw_point_indices) + len(scans[1].raw_point_indices)
+
+    def _map_camera(self, focus: np.ndarray, progress: float, detail: bool = False) -> tuple[np.ndarray, np.ndarray, float]:
+        angle = math.radians((-67.0 if detail else -100.0) + (12.0 if detail else 18.0) * progress)
+        radius = 3.5 if detail else 16.0
+        elevation = 2.2 if detail else 6.6
+        eye = focus + np.asarray([radius * math.cos(angle), radius * math.sin(angle), elevation])
+        return eye.astype(np.float32), focus.astype(np.float32), 0.76 if detail else 0.68
+
+    def _draw_map_points(
+        self, frame: np.ndarray, points: np.ndarray, eye: np.ndarray, target: np.ndarray, focal: float,
+        color: tuple[int, int, int], dim: float = 1.0,
+    ) -> None:
+        if not len(points):
+            return
+        pixels, depth, _mask = project_points(points, eye, target, self.profile.width, self.profile.height, focal)
+        if not len(pixels):
+            return
+        layer = np.zeros_like(frame)
+        fade = np.clip(1.15 - depth / 36.0, 0.30, 1.0) * dim
+        colors = np.clip(np.asarray(color)[None, :] * fade[:, None], 0, 255).astype(np.uint8)
+        order = np.argsort(depth)[::-1]
+        xy = pixels[order]
+        layer[xy[:, 1], xy[:, 0]] = colors[order]
+        radius = 1 if self.profile.height <= 720 else 2
+        layer = cv2.dilate(layer, np.ones((radius + 1, radius + 1), dtype=np.uint8))
+        glow = cv2.GaussianBlur(layer, (0, 0), 2.5)
+        np.maximum(frame, (glow * 0.25).astype(np.uint8), out=frame)
+        np.maximum(frame, layer, out=frame)
+
+    def _draw_path(self, frame: np.ndarray, eye: np.ndarray, target: np.ndarray, focal: float, cutoff_s: float) -> None:
+        keep = self.source.trajectory.timestamps_s <= cutoff_s + 1e-9
+        path = self.trajectory[keep] + np.asarray([0, 0, 0.06], dtype=np.float32)
+        if len(path) < 2:
+            return
+        pixels, _depth, mask = project_points(path, eye, target, self.profile.width, self.profile.height, focal)
         if mask.sum() >= 2:
             cv2.polylines(frame, [pixels.reshape(-1, 1, 2)], False, (60, 224, 255), max(2, self.profile.height // 360), cv2.LINE_AA)
             cv2.circle(frame, tuple(pixels[-1]), max(5, self.profile.height // 100), (68, 241, 255), -1, cv2.LINE_AA)
 
-    def _draw_inventory(self, frame: np.ndarray, eye: np.ndarray, target: np.ndarray, focal: float, labels: int) -> list[tuple[InventoryRecord, tuple[int, int]]]:
-        if not self.inventory:
-            return []
-        centers = np.asarray([item.position for item in self.inventory], dtype=np.float32)
-        pixels, _depth, mask = project_points(centers, eye, target, self.profile.width, self.profile.height, focal)
-        visible_records = [item for item, visible in zip(self.inventory, mask) if visible]
-        result: list[tuple[InventoryRecord, tuple[int, int]]] = []
-        scale = self.profile.height / 720.0
-        for index, (record, pixel) in enumerate(zip(visible_records, pixels)):
-            x, y = int(pixel[0]), int(pixel[1])
-            radius = max(6, int((8 + min(record.observations, 20) * 0.18) * scale))
-            color = (52, 216, 255) if index else (92, 236, 164)
-            cv2.circle(frame, (x, y), radius + 5, color, 1, cv2.LINE_AA)
-            cv2.drawMarker(frame, (x, y), color, cv2.MARKER_CROSS, radius * 2, 2, cv2.LINE_AA)
-            if index < labels:
-                result.append((record, (x, y)))
-        return result
+    def _map_frame(self, spec: ViewSpec, progress: float) -> tuple[np.ndarray, float, int, list[tuple[int, tuple[int, int], int]]]:
+        start_s, end_s = spec.source_window_s
+        eased = progress * progress * (3.0 - 2.0 * progress)
+        cutoff_s = start_s + (end_s - start_s) * eased if spec.temporal_mode == "past_only_reveal" else end_s
+        prepared = self._history_views.get(spec.id)
+        if prepared is None:
+            per_scan_limit = max(400, min(2600, spec.maximum_points // 20))
+            scans = self.source.history_scans(end_s, spec.history_stride_scans, per_scan_limit)
+            if not scans:
+                raise ValueError(f"technical view {spec.id} has no past LiDAR history in its source window")
+            all_points = np.concatenate([scan.map_xyz_m for scan in scans], axis=0)
+            offsets = np.cumsum([len(scan.map_xyz_m) for scan in scans], dtype=np.int64)
+            stable_stride = max(1, int(math.ceil(len(all_points) / spec.maximum_points)))
+            prepared = (scans, all_points, offsets, stable_stride)
+            self._history_views[spec.id] = prepared
+        history, all_points, offsets, stable_stride = prepared
+        scan_count = int(np.searchsorted([scan.record.timestamp_s for scan in history], cutoff_s, side="right"))
+        if scan_count <= 0:
+            raise ValueError(f"technical view {spec.id} cutoff precedes its first available past scan")
+        for scan in history[:scan_count]:
+            self._register_scan(spec.id, scan)
+        point_end = int(offsets[scan_count - 1])
+        history_points = all_points[:point_end:stable_stride][:spec.maximum_points]
+        rois: tuple[RoiObservation, ...] = ()
+        detail = spec.temporal_mode == "snapshot_orbit"
+        if spec.selection_mode == "estimated_roi_front_surfaces":
+            rois = self.source.roi_observations(start_s, end_s, 6)
+            self._used_rois[spec.id] = rois
+            focus = np.median(rois[0].map_xyz_m, axis=0)
+        else:
+            focus = np.asarray([np.median(self.trajectory[:, 0]), 0.0, 0.8], dtype=np.float32)
+        eye, target, focal = self._map_camera(np.asarray(focus), progress, detail)
+        frame = self._background()
+        self._draw_map_points(frame, history_points, eye, target, focal, (205, 146, 46), 0.70)
+        callouts: list[tuple[int, tuple[int, int], int]] = []
+        if rois:
+            for roi_index, roi in enumerate(rois):
+                self._draw_map_points(frame, roi.map_xyz_m, eye, target, focal, (70, 225, 255) if roi_index else (90, 242, 167), 1.0)
+                center = np.mean(roi.map_xyz_m, axis=0, keepdims=True)
+                pixels, _depth, mask = project_points(center, eye, target, self.profile.width, self.profile.height, focal)
+                if mask.sum():
+                    pixel = tuple(int(value) for value in pixels[0])
+                    cv2.drawMarker(frame, pixel, (80, 235, 175), cv2.MARKER_CROSS, 22, 2, cv2.LINE_AA)
+                    callouts.append((roi.detection.track_id, pixel, len(roi.raw_point_indices)))
+        self._draw_path(frame, eye, target, focal, cutoff_s)
+        return frame, cutoff_s, len(history_points) + sum(len(item.map_xyz_m) for item in rois), callouts
 
-    def _typography(self, frame: np.ndarray, spec: ViewSpec, progress: float, callouts: list[tuple[InventoryRecord, tuple[int, int]]]) -> np.ndarray:
+    def _typography(self, frame: np.ndarray, spec: ViewSpec, progress: float, timestamp_s: float, point_count: int, callouts: list[tuple[int, tuple[int, int], int]]) -> np.ndarray:
         image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(image, "RGBA")
         width, height = image.size
         scale = height / 720.0
         pad = int(42 * scale)
         draw.rounded_rectangle((pad, pad, min(width - pad, int(650 * scale)), int(162 * scale)), radius=int(12 * scale), fill=(5, 13, 24, 214), outline=(51, 211, 241, 155), width=max(1, int(1 * scale)))
-        draw.text((pad + int(22 * scale), pad + int(14 * scale)), "SIMULATED CAPTURE · OFFLINE TECHNICAL VIEW", font=self.fonts["kicker"], fill=(96, 222, 241, 255))
+        draw.text((pad + int(22 * scale), pad + int(14 * scale)), "SIMULATED CAPTURE · SELECTIVE REAL LIDAR", font=self.fonts["kicker"], fill=(96, 222, 241, 255))
         draw.text((pad + int(22 * scale), pad + int(42 * scale)), spec.title, font=self.fonts["title"], fill=(238, 247, 250, 255))
         draw.text((pad + int(22 * scale), pad + int(94 * scale)), spec.subtitle, font=self.fonts["body"], fill=(160, 185, 199, 255))
-        footer_parts = ["MAP FRAME", f"{len(self.points):,} POINTS"]
-        if spec.id not in ("sensor_activation", "lidar_environment"):
+        frame_label = "CAMERA OPTICAL FRAME" if spec.temporal_mode == "current_window" else "ESTIMATED MAP FRAME"
+        footer_parts = [frame_label, f"{point_count:,} SELECTED RETURNS", "RIGID HEADER-STAMP SCANS", "NO DESKEW"]
+        if spec.temporal_mode != "current_window":
             footer_parts.append(f"{len(self.trajectory)} ESTIMATED POSES")
-        if spec.id in ("object_association", "object_detail", "observed_aisle_overview", "final_technical_view"):
-            footer_parts.append(f"{len(self.inventory)} SELECTED CENTERS")
-        footer = " · ".join(footer_parts) + f" · t={progress:0.2f}"
+        footer = " · ".join(footer_parts) + f" · source t={timestamp_s:0.2f}s"
         draw.text((pad, height - pad - int(21 * scale)), footer, font=self.fonts["mono"], fill=(125, 162, 178, 235))
-        for index, (record, (x, y)) in enumerate(callouts[:3]):
+        for index, (track_id, (x, y), support_count) in enumerate(callouts[:3]):
             box_x = width - int(350 * scale)
             box_y = int((84 + index * 86) * scale)
             draw.line((x, y, box_x - int(12 * scale), box_y + int(25 * scale)), fill=(70, 222, 241, 185), width=max(1, int(2 * scale)))
             draw.rounded_rectangle((box_x, box_y, width - pad, box_y + int(67 * scale)), radius=int(8 * scale), fill=(5, 14, 25, 224), outline=(62, 217, 239, 170), width=max(1, int(1 * scale)))
-            draw.text((box_x + int(14 * scale), box_y + int(8 * scale)), f"TRACK {record.track_id:05d}", font=self.fonts["kicker"], fill=(102, 233, 246, 255))
-            x_m, y_m, z_m = record.position
-            draw.text((box_x + int(14 * scale), box_y + int(32 * scale)), f"({x_m:.2f}, {y_m:.2f}, {z_m:.2f}) m  ·  {record.observations} returns", font=self.fonts["mono"], fill=(210, 226, 232, 255))
-        if spec.id == "object_detail" and self.inventory:
-            record = self.inventory[0]
+            draw.text((box_x + int(14 * scale), box_y + int(8 * scale)), f"ESTIMATED ROI · TRACK {track_id:05d}", font=self.fonts["kicker"], fill=(102, 233, 246, 255))
+            draw.text((box_x + int(14 * scale), box_y + int(32 * scale)), f"{support_count} nearest-surface raw returns", font=self.fonts["mono"], fill=(210, 226, 232, 255))
+        if spec.id == "object_detail" and callouts:
+            track_id, _pixel, support_count = callouts[0]
             card_x = width - int(520 * scale)
             card_y = height - int(260 * scale)
             draw.rounded_rectangle((card_x, card_y, width - pad, height - int(62 * scale)), radius=int(12 * scale), fill=(4, 12, 22, 232), outline=(75, 230, 248, 210), width=max(1, int(2 * scale)))
             text_x = card_x + int(20 * scale)
             text_right = width - pad - int(20 * scale)
             text_width = text_right - text_x
-            title = f"Persistent track {record.track_id}"
+            title = f"Persistent track {track_id}"
             title_font = fit_font(title, FONT_BOLD, max(30, int(42 * scale)), max(22, int(28 * scale)), text_width)
-            observation = f"Observation support · {record.observations} LiDAR associations"
+            observation = f"Front-surface support · {support_count} raw returns"
             observation_font = fit_font(observation, FONT_REGULAR, max(14, int(18 * scale)), max(12, int(14 * scale)), text_width)
-            limitation = "Class unknown · Extent not estimated"
+            limitation = "Class unknown · Full extent not estimated"
             limitation_font = fit_font(limitation, FONT_REGULAR, max(14, int(18 * scale)), max(12, int(14 * scale)), text_width)
-            draw.text((text_x, card_y + int(18 * scale)), "SELECTED ESTIMATED CENTER", font=self.fonts["kicker"], fill=(87, 229, 245, 255))
+            draw.text((text_x, card_y + int(18 * scale)), "SELECTED ESTIMATED ROI", font=self.fonts["kicker"], fill=(87, 229, 245, 255))
             draw.text((text_x, card_y + int(52 * scale)), title, font=title_font, fill=(241, 247, 249, 255))
             draw.text((text_x, card_y + int(108 * scale)), observation, font=observation_font, fill=(188, 207, 216, 255))
             draw.text((text_x, card_y + int(144 * scale)), limitation, font=limitation_font, fill=(244, 188, 91, 255))
@@ -725,22 +998,63 @@ class TechnicalRenderer:
             draw.text((line_x, int(174 * scale)), "MAPPED FROM", font=self.fonts["kicker"], fill=(91, 225, 244, 255))
             draw.text((line_x, int(214 * scale)), "SIMULATED\nSENSOR DATA.", font=self.fonts["title"], fill=(242, 247, 249, 255), spacing=int(7 * scale))
             draw.rectangle((line_x, int(344 * scale), line_x + int(90 * scale), int(348 * scale)), fill=(72, 224, 242, 255))
-            draw.text((line_x, int(378 * scale)), "FINALIZED OFFLINE MAP\nESTIMATED TRAJECTORY\nPERSISTENT ITEM CENTERS", font=self.fonts["body"], fill=(174, 197, 207, 255), spacing=int(9 * scale))
+            draw.text((line_x, int(378 * scale)), "PAST-ONLY LIDAR HISTORY\nESTIMATED TRAJECTORY\nESTIMATED ITEM LOCATIONS", font=self.fonts["body"], fill=(174, 197, 207, 255), spacing=int(9 * scale))
         return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
     def frame(self, spec: ViewSpec, index: int) -> np.ndarray:
         progress = 0.0 if spec.frames == 1 else index / (spec.frames - 1)
-        eye, target, focal = self._camera(spec.id, progress)
-        frame = self._background()
-        self._draw_cloud(frame, eye, target, focal, dim=0.82 if spec.id in ("object_association", "object_detail") else 1.0)
+        if spec.temporal_mode == "current_window":
+            frame, timestamp_s, point_count = self._current_frame(spec, progress)
+            callouts: list[tuple[int, tuple[int, int], int]] = []
+        else:
+            frame, timestamp_s, point_count, callouts = self._map_frame(spec, progress)
+        return self._typography(frame, spec, progress, timestamp_s, point_count, callouts)
+
+    def derivation(self, spec: ViewSpec) -> dict[str, object]:
+        scans = tuple(self._used_scans.get(spec.id, {}).values())
+        scans = tuple(sorted(scans, key=lambda item: item.record.timestamp_ns))
+        rgb_pairs = sorted(self._rgb_pairs.get(spec.id, set()))
+        result: dict[str, object] = {
+            "point_projection": (
+                "recorded lidar_link through recorded calibration into camera_optical_frame"
+                if spec.temporal_mode == "current_window"
+                else "recorded lidar_link through interpolated estimated sensor-rig pose into map"
+            ),
+            "selection_mode": spec.selection_mode,
+            "temporal_mode": spec.temporal_mode,
+            "source_window_s": list(spec.source_window_s),
+            "future_returns_consumed": False,
+            "causal_display_policy": "latest and previous scans only; maximum current age is 2 configured scan periods",
+            "storyboard_pixels_consumed": False,
+            "simulator_truth_consumed": False,
+            "scene_or_asset_metadata_consumed": False,
+            "selective_current_scan_status": "complete",
+            "scan_selection": self.source.scan_summary(scans),
+            "rgb_context": spec.rgb_context,
+            "scan_time_model": {
+                "per_return_timing": "absent_in_bound_PointCloud2_fields",
+                "deskew": "not_applied",
+                "rigid_pose_time": "PointCloud2 header/database timestamp",
+            },
+            "camera_calibration": self.source.camera_calibration_receipt,
+        }
+        if rgb_pairs:
+            result["cotimed_rgb_pairs"] = {
+                "pair_count": len(rgb_pairs),
+                "maximum_absolute_skew_ns": max(item[2] for item in rgb_pairs),
+                "pairs": [
+                    {"scan_timestamp_ns": item[0], "rgb_frame_index": item[1], "absolute_skew_ns": item[2]}
+                    for item in rgb_pairs
+                ],
+            }
+        if spec.id in self._used_rois:
+            result["estimated_roi_selection"] = self.source.roi_summary(self._used_rois[spec.id])
         if spec.id == "sensor_activation":
-            self._draw_sensor_rays(frame, eye, target, focal, progress)
-        if spec.id not in ("sensor_activation", "lidar_environment"):
-            self._draw_path(frame, eye, target, focal)
-        labels = 3 if spec.id in ("object_association", "observed_aisle_overview") else 1 if spec.id == "object_detail" else 0
-        inventory_views = ("object_association", "object_detail", "observed_aisle_overview", "final_technical_view")
-        callouts = self._draw_inventory(frame, eye, target, focal, labels) if spec.id in inventory_views else []
-        return self._typography(frame, spec, progress, callouts)
+            result["sensor_ray_overlay"] = (
+                "screen-space explanatory origin marker with endpoints from selected raw returns; "
+                "the marker does not claim literal visible laser emission"
+            )
+        return result
 
 
 class FfmpegWriter:
@@ -819,6 +1133,14 @@ def _validate_probe(probe: dict[str, object], profile: RenderProfile, expected_f
 
 
 def _source_receipt(bundle: SourceBundle) -> dict[str, object]:
+    transforms_payload = _read_json(bundle.sensor_transforms_path)
+    transform_frames = transforms_payload.get("frames", {})
+    transform_topics = transforms_payload.get("topics", {})
+    effective_payload = _read_json(bundle.effective_config_path)
+    lidar_frame_id = str(transform_frames.get("lidar_link", ""))
+    camera_frame_id = str(transform_frames.get("camera_optical", ""))
+    if not lidar_frame_id or not camera_frame_id:
+        raise ValueError("recorded transform graph lacks LiDAR or camera optical frame identity")
     return {
         "source_id": bundle.source_id,
         "capture_id": bundle.capture_id,
@@ -853,6 +1175,26 @@ def _source_receipt(bundle: SourceBundle) -> dict[str, object]:
             "depth_sources": list(bundle.depth_sources),
             "ground_truth_consumed": False,
         },
+        "paired_capture_state": {
+            "compatibility_status": bundle.compatibility_status,
+            "delivery_eligible": bundle.delivery_eligible,
+            "raw_lidar_bag_sha256": bundle.hashes["raw_lidar_bag"],
+            "rgb_video_sha256": bundle.hashes["rgb_video"],
+            "rgb_frames_sha256": bundle.hashes["rgb_frames"],
+            "camera_info_sha256": bundle.hashes["camera_info"],
+            "sensor_transforms_sha256": bundle.hashes["sensor_transforms"],
+            "scene_manifest_sha256": bundle.hashes["scene_manifest"],
+            "effective_config_sha256": bundle.hashes["effective_config"],
+            "trajectory_sha256": bundle.hashes["trajectory"],
+            "capture_manifest_sha256": bundle.hashes["capture_manifest"],
+            "lidar_frame_id": lidar_frame_id,
+            "camera_frame_id": camera_frame_id,
+            "lidar_topic": transform_topics.get("lidar_points"),
+            "camera_info_topic": transform_topics.get("rgb_camera_info"),
+            "configured_lidar_hz": effective_payload.get("lidar", {}).get("hz"),
+            "maximum_current_age_periods": 2.0,
+            "maximum_rgb_skew_ns": 17_000_001,
+        },
         "artifacts": {
             "map": {"sha256": bundle.hashes["map"], "semantics": "finalized offline LiDAR-SLAM point cloud"},
             "trajectory": {"sha256": bundle.hashes["trajectory"], "semantics": "estimated SLAM trajectory in map frame"},
@@ -861,6 +1203,15 @@ def _source_receipt(bundle: SourceBundle) -> dict[str, object]:
             "slam_manifest": {"sha256": bundle.hashes["slam_manifest"]},
             "perception_manifest": {"sha256": bundle.hashes["perception_manifest"]},
             "source_catalog": {"sha256": bundle.hashes["source_catalog"]},
+            "raw_lidar_bag": {"sha256": bundle.hashes["raw_lidar_bag"], "semantics": "recorded CDR PointCloud2 messages"},
+            "bag_metadata": {"sha256": bundle.hashes["bag_metadata"]},
+            "camera_info": {"sha256": bundle.hashes["camera_info"]},
+            "sensor_transforms": {"sha256": bundle.hashes["sensor_transforms"]},
+            "effective_config": {"sha256": bundle.hashes["effective_config"]},
+            "scene_manifest": {"sha256": bundle.hashes["scene_manifest"]},
+            "rgb_video": {"sha256": bundle.hashes["rgb_video"], "semantics": "recorded RGB from the same capture"},
+            "rgb_frames": {"sha256": bundle.hashes["rgb_frames"]},
+            "frame_annotations": {"sha256": bundle.hashes["frame_annotations"], "semantics": "ground-truth-free estimated RGB regions"},
         },
     }
 
@@ -873,32 +1224,34 @@ def _write_view_receipt(
     spec: ViewSpec,
     bundle: SourceBundle,
     renderer_hash: str,
+    dependency_hashes: dict[str, str],
     plan_hash: str,
+    derivation: dict[str, object],
 ) -> Path:
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "artifact_type": "technical_source_view_receipt",
         "status": "complete",
-        "producer": {"id": PRODUCER_ID, "renderer_sha256": renderer_hash, "plan_sha256": plan_hash},
+        "producer": {
+            "id": PRODUCER_ID,
+            "renderer_sha256": renderer_hash,
+            "implementation_sha256": dependency_hashes,
+            "plan_sha256": plan_hash,
+        },
         "view_id": spec.id,
         "presentation_role": spec.presentation_role,
         "source": _source_receipt(bundle),
         "video": {"path": video_path.name, "sha256": video_hash, **probe},
         "derivation": {
-            "point_projection": "deterministic perspective projection of finalized map XYZ",
-            "trajectory_overlay": spec.id not in ("sensor_activation", "lidar_environment"),
-            "inventory_overlay": spec.id in ("object_association", "object_detail", "observed_aisle_overview", "final_technical_view"),
-            "sensor_ray_overlay": "selected projected finalized-map points; explanatory rays are not a timestamped current scan" if spec.id == "sensor_activation" else None,
+            **derivation,
+            "trajectory_overlay": spec.temporal_mode != "current_window",
             "estimated_extents_rendered": False,
-            "storyboard_pixels_consumed": False,
             "capability_focus": spec.capability_focus,
             "point_source": spec.point_source,
-            "selective_current_scan_status": spec.selective_current_scan_status,
-            "new_goal_qualification": "unfinished; retained legacy finalized-map visualization is not evidence of feature-specific current-scan selection",
         },
         "presentation_integration": {
             "adapter_required": True,
-            "note": "integration must translate this receipt into the presentation role-bundle schema after the branches merge",
+            "note": "validated technical source view; presentation consumes the bound video without reinterpreting sensor provenance",
         },
     }
     receipt_path = output / f"{spec.id}_receipt.json"
@@ -907,13 +1260,30 @@ def _write_view_receipt(
 
 
 def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBundle, output_dir: str | Path, ffmpeg: str, ffprobe: str, plan_path: Path) -> dict[str, object]:
+    from simulator.technical_lidar import SelectiveLidarSource
+
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    points = load_ascii_ply(bundle.map_path)
-    trajectory = load_trajectory(bundle.trajectory_path)
+    if profile.name == "delivery" and not bundle.delivery_eligible:
+        raise ValueError(
+            "technical delivery requires a current-goal paired RGB/LiDAR capture; "
+            f"source is {bundle.compatibility_status}"
+        )
     inventory_all = load_inventory(bundle.inventory_path)
-    renderer = TechnicalRenderer(profile, points, trajectory, inventory_all)
+    lidar_source = SelectiveLidarSource(
+        database_path=bundle.raw_lidar_bag_path,
+        trajectory_path=bundle.trajectory_path,
+        camera_info_path=bundle.camera_info_path,
+        sensor_transforms_path=bundle.sensor_transforms_path,
+        effective_config_path=bundle.effective_config_path,
+        rgb_video_path=bundle.rgb_video_path,
+        rgb_frames_path=bundle.rgb_frames_path,
+        annotations_path=bundle.annotations_path,
+        ffmpeg=ffmpeg,
+    )
+    renderer = TechnicalRenderer(profile, lidar_source, inventory_all)
     renderer_hash = canonical_text_sha256(Path(__file__).resolve())
+    dependency_hashes = implementation_hashes(Path(__file__).resolve().parents[1])
     plan_hash = canonical_text_sha256(plan_path.resolve())
     started = time.perf_counter()
     outputs: list[dict[str, object]] = []
@@ -956,7 +1326,11 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
             video_hash = sha256_file(video_path)
             probe = probe_video(video_path, ffprobe)
             _validate_probe(probe, profile, spec.frames)
-            receipt_path = _write_view_receipt(output, video_path, video_hash, probe, spec, bundle, renderer_hash, plan_hash)
+            receipt_path = _write_view_receipt(
+                output, video_path, video_hash, probe, spec, bundle, renderer_hash, dependency_hashes,
+                plan_hash,
+                renderer.derivation(spec),
+            )
             outputs.append({
                 "path": video_path.name,
                 "sha256": video_hash,
@@ -966,9 +1340,16 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
                 "probe": probe,
                 "receipt": {"path": receipt_path.name, "sha256": sha256_file(receipt_path)},
             })
+    _verify_bound_input_snapshot(bundle)
+    if canonical_text_sha256(Path(__file__).resolve()) != renderer_hash:
+        raise ValueError("technical renderer changed during rendering")
+    if implementation_hashes(Path(__file__).resolve().parents[1]) != dependency_hashes:
+        raise ValueError("technical LiDAR implementation changed during rendering")
+    if canonical_text_sha256(plan_path.resolve()) != plan_hash:
+        raise ValueError("technical render plan changed during rendering")
     elapsed = time.perf_counter() - started
     manifest: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
         "producer": PRODUCER_ID,
         "profile": profile.name,
@@ -991,19 +1372,27 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
         "object_state_version": bundle.object_state_version,
         "source": _source_receipt(bundle),
         "renderer": {"path": str(Path(__file__).resolve()), "sha256": renderer_hash},
+        "implementation_sha256": dependency_hashes,
         "plan": {"path": str(plan_path.resolve()), "sha256": plan_hash},
-        "render_graph_sources": ["map", "trajectory", "inventory"],
+        "render_graph_sources": [
+            "raw_lidar_bag", "rgb_video", "rgb_frames", "camera_info", "sensor_transforms",
+            "trajectory", "inventory", "frame_annotations",
+        ],
         "selective_current_scan_goal": {
-            "status": "unfinished",
-            "current_implementation": "legacy finalized-map projection",
-            "required_replacement": "feature-specific point selection from spatially aligned current scans",
+            "status": "complete",
+            "representation": "feature-specific selections from timestamped raw PointCloud2 returns",
+            "spatial_registration": "recorded camera/LiDAR calibration and estimated map-frame pose interpolation",
+            "temporal_policy": "current scans or bounded past-only scan history; future scans are rejected",
+            "ground_truth_consumed": False,
         },
         "storyboard_content_used": False,
         "storyboard_exclusion_basis": "all render inputs are enumerated and hashed; storyboard paths and known reference hashes are rejected before decode",
         "selected_inventory_centers": len(renderer.inventory),
         "localized_inventory_rows": len(inventory_all),
-        "point_count": len(points),
-        "trajectory_pose_count": len(trajectory),
+        "raw_lidar_scan_count": len(lidar_source.scan_records),
+        "trajectory_pose_count": len(lidar_source.trajectory.timestamps_s),
+        "input_snapshot_verification": "post_render_sha256_match",
+        "view_derivations": {view.id: renderer.derivation(view) for view in views},
         "outputs": outputs,
         "elapsed_wall_s": round(elapsed, 3),
         "frames_per_wall_s": round(sum(item["frames"] for item in outputs) / max(elapsed, 1e-6), 3),
@@ -1014,6 +1403,7 @@ def render(profile: RenderProfile, views: tuple[ViewSpec, ...], bundle: SourceBu
         manifest["representative_frames"] = representative_frames
     manifest_path = output / f"technical_views_{profile.name}_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lidar_source.close()
     return manifest
 
 

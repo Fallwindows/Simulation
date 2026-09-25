@@ -527,6 +527,20 @@ class CompletePresentationTests(unittest.TestCase):
             ffprobe=str(FFPROBE),
         )
 
+    def _mutated_technical_receipt(self, name: str, output_index: int, mutate):
+        manifest_path = self.fixture["technical_manifest"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        output = manifest["outputs"][output_index]
+        receipt_path = manifest_path.parent / output["receipt"]["path"]
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        mutate(receipt)
+        forged_receipt = manifest_path.parent / f"{name}_receipt.json"
+        forged_receipt.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+        output["receipt"] = {"path": forged_receipt.name, "sha256": sha256_path(forged_receipt)}
+        forged_manifest = manifest_path.parent / f"{name}_manifest.json"
+        forged_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        return forged_manifest
+
     def test_repaired_producers_feed_the_1350_frame_presentation_contract(self):
         capture = json.loads(self.fixture["capture_manifest"].read_text(encoding="utf-8"))
         self.assertEqual(capture["manifest_version"], 1)
@@ -629,6 +643,41 @@ class CompletePresentationTests(unittest.TestCase):
         forged_classification.write_text(json.dumps(complete_value), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "classification is forged"):
             self._report(forged_classification)
+
+    def test_technical_scan_timing_frame_and_roi_receipts_are_required(self):
+        bad_frame = self._mutated_technical_receipt(
+            "bad_scan_frame", 0,
+            lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].update(
+                source_frame_id="camera_optical_frame"
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "selected-return receipt"):
+            validate_technical_delivery(bad_frame, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        bad_timing = self._mutated_technical_receipt(
+            "bad_scan_timing", 1,
+            lambda receipt: receipt["derivation"]["scan_selection"]["scans"][0].pop("per_return_timing"),
+        )
+        with self.assertRaisesRegex(ValueError, "selected-return receipt"):
+            validate_technical_delivery(bad_timing, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        bad_roi = self._mutated_technical_receipt(
+            "bad_roi_skew", 3,
+            lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                absolute_rgb_skew_ns=18_000_000
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "co-timed RGB"):
+            validate_technical_delivery(bad_roi, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        manifest = json.loads(self.fixture["technical_manifest"].read_text(encoding="utf-8"))
+        manifest["implementation_sha256"]["simulator/technical_lidar.py"] = "0" * 64
+        bad_implementation = self.fixture["technical_manifest"].with_name("bad_implementation_manifest.json")
+        bad_implementation.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "implementation hashes"):
+            validate_technical_delivery(
+                bad_implementation, ROOT, str(FFPROBE), self.fixture["technical_catalog"]
+            )
 
     def test_complete_preview_is_exact_and_applies_declared_rgb_hflip(self):
         output = self.root / "preview"

@@ -29,6 +29,30 @@ TECHNICAL_VIEWS = (
     (12, "final_technical_view", "reconstruction", 150),
 )
 
+SELECTIVE_SCAN_GOAL = {
+    "status": "complete",
+    "representation": "feature-specific selections from timestamped raw PointCloud2 returns",
+    "spatial_registration": "recorded camera/LiDAR calibration and estimated map-frame pose interpolation",
+    "temporal_policy": "current scans or bounded past-only scan history; future scans are rejected",
+    "ground_truth_consumed": False,
+}
+
+RAW_SOURCE_ARTIFACTS = (
+    "raw_lidar_bag", "bag_metadata", "camera_info", "sensor_transforms", "effective_config",
+    "scene_manifest", "rgb_video", "rgb_frames", "frame_annotations",
+)
+IMPLEMENTATION_SOURCES = (
+    "simulator/technical_lidar.py",
+    "simulator/sensors/scan_projection.py",
+    "simulator/sensors/feature_selection.py",
+)
+PER_RETURN_TIMING = "absent_in_point_fields; rigid_header_stamp_projection_without_deskew"
+SCAN_TIME_MODEL = {
+    "per_return_timing": "absent_in_bound_PointCloud2_fields",
+    "deskew": "not_applied",
+    "rigid_pose_time": "PointCloud2 header/database timestamp",
+}
+
 
 @dataclass(frozen=True)
 class TechnicalShotSource:
@@ -167,6 +191,7 @@ def _validate_source_binding(
         "slam_manifest": catalog_manifests.get("slam", {}).get("sha256"),
         "perception_manifest": catalog_manifests.get("perception", {}).get("sha256"),
         "source_catalog": catalog_hash,
+        **{name: catalog_artifacts.get(name, {}).get("sha256") for name in RAW_SOURCE_ARTIFACTS},
     }
     for name, expected in expected_hashes.items():
         if artifacts.get(name, {}).get("sha256") != expected:
@@ -195,6 +220,45 @@ def _validate_source_binding(
         raise ValueError("technical object state must be ground-truth-free")
     if object_state.get("depth_sources") != ["lidar_projected_with_slam_pose"]:
         raise ValueError("technical object state must use the reviewed estimated depth source")
+    compatibility = catalog_source.get("presentation_compatibility")
+    paired = source.get("paired_capture_state")
+    if not isinstance(compatibility, dict) or not isinstance(paired, dict):
+        raise ValueError("technical paired RGB/LiDAR compatibility binding is missing")
+    expected_status = compatibility.get("status")
+    expected_eligible = compatibility.get("delivery_eligible")
+    if expected_status not in ("current_goal_paired_capture", "generated_test_fixture") or expected_eligible is not True:
+        raise ValueError("technical delivery source is not a current-goal paired RGB/LiDAR capture")
+    sensor_contract = catalog_source.get("sensor_contract")
+    if not isinstance(sensor_contract, dict) or set(sensor_contract) != {
+        "lidar_topic", "camera_info_topic", "lidar_frame_id", "camera_frame_id",
+        "configured_lidar_hz", "maximum_current_age_periods", "maximum_rgb_skew_ns",
+    }:
+        raise ValueError("technical source catalog lacks its exact sensor contract")
+    if (
+        not all(isinstance(sensor_contract[name], str) and sensor_contract[name] for name in (
+            "lidar_topic", "camera_info_topic", "lidar_frame_id", "camera_frame_id",
+        ))
+        or float(sensor_contract["configured_lidar_hz"]) <= 0.0
+        or sensor_contract["maximum_current_age_periods"] != 2.0
+        or sensor_contract["maximum_rgb_skew_ns"] != 17_000_001
+    ):
+        raise ValueError("technical source catalog sensor contract is invalid")
+    expected_paired = {
+        "compatibility_status": expected_status,
+        "delivery_eligible": True,
+        "raw_lidar_bag_sha256": catalog_artifacts.get("raw_lidar_bag", {}).get("sha256"),
+        "rgb_video_sha256": catalog_artifacts.get("rgb_video", {}).get("sha256"),
+        "rgb_frames_sha256": catalog_artifacts.get("rgb_frames", {}).get("sha256"),
+        "camera_info_sha256": catalog_artifacts.get("camera_info", {}).get("sha256"),
+        "sensor_transforms_sha256": catalog_artifacts.get("sensor_transforms", {}).get("sha256"),
+        "scene_manifest_sha256": catalog_artifacts.get("scene_manifest", {}).get("sha256"),
+        "effective_config_sha256": catalog_artifacts.get("effective_config", {}).get("sha256"),
+        "trajectory_sha256": catalog_artifacts.get("trajectory", {}).get("sha256"),
+        "capture_manifest_sha256": catalog_manifests.get("capture", {}).get("sha256"),
+        **sensor_contract,
+    }
+    if paired != expected_paired:
+        raise ValueError("technical paired capture state does not match the reviewed source catalog")
     if manifest.get("capture_id") != source.get("capture_id"):
         raise ValueError("technical delivery capture_id does not match its receipt source")
     if manifest.get("simulation_time") != {
@@ -217,7 +281,7 @@ def validate_technical_delivery(
     manifest = _json(path)
     expected_order = [view_id for _, view_id, _, _ in TECHNICAL_VIEWS]
     expected_counts = {view_id: count for _, view_id, _, count in TECHNICAL_VIEWS}
-    if manifest.get("schema_version") != 1 or manifest.get("status") != "complete":
+    if manifest.get("schema_version") != 2 or manifest.get("status") != "complete":
         raise ValueError("technical delivery manifest is incomplete")
     if manifest.get("producer") != TECHNICAL_PRODUCER_ID or manifest.get("profile") != "delivery":
         raise ValueError("technical delivery producer/profile is invalid")
@@ -229,18 +293,19 @@ def validate_technical_delivery(
         raise ValueError("technical delivery total frame count is invalid")
     if manifest.get("storyboard_content_used") is not False:
         raise ValueError("technical delivery must exclude storyboard content")
-    if manifest.get("selective_current_scan_goal") != {
-        "status": "unfinished",
-        "current_implementation": "legacy finalized-map projection",
-        "required_replacement": "feature-specific point selection from spatially aligned current scans",
-    }:
-        raise ValueError("technical delivery must disclose that selective current-scan visualization is unfinished")
+    if manifest.get("selective_current_scan_goal") != SELECTIVE_SCAN_GOAL:
+        raise ValueError("technical delivery must use the completed selective real-scan contract")
     renderer_hash = _sha256_lf_text(root / "simulator" / "technical_views.py")
+    implementation_hashes = {name: _sha256_lf_text(root / name) for name in IMPLEMENTATION_SOURCES}
     plan_hash = _sha256_lf_text(root / "config" / "technical_views.json")
     if manifest.get("renderer", {}).get("sha256") != renderer_hash:
         raise ValueError("technical delivery renderer hash does not match repository code")
+    if manifest.get("implementation_sha256") != implementation_hashes:
+        raise ValueError("technical delivery LiDAR implementation hashes do not match repository code")
     if manifest.get("plan", {}).get("sha256") != plan_hash:
         raise ValueError("technical delivery plan hash does not match repository configuration")
+    plan_payload = _json(root / "config" / "technical_views.json")
+    plan_views = {str(item.get("id")): item for item in plan_payload.get("views", []) if isinstance(item, dict)}
     source = manifest.get("source")
     if not isinstance(source, dict):
         raise ValueError("technical delivery source receipt is missing")
@@ -250,6 +315,8 @@ def validate_technical_delivery(
     catalog_hash = _sha256_lf_text(catalog_path)
     catalog_source = _catalog_source(catalog_path, capture_id, source_id)
     _validate_source_binding(source, manifest, catalog_source, catalog_hash, root)
+    if manifest.get("input_snapshot_verification") != "post_render_sha256_match":
+        raise ValueError("technical delivery lacks post-render input snapshot verification")
     presentation_classification = validate_presentation_classification(
         catalog_source.get("presentation_classification"),
         allow_legacy_production=True,
@@ -288,7 +355,7 @@ def validate_technical_delivery(
             raise ValueError(f"technical manifest probe is forged for {view_id}")
         receipt = _json(receipt_path)
         if (
-            receipt.get("schema_version") != 1
+            receipt.get("schema_version") != 2
             or receipt.get("artifact_type") != "technical_source_view_receipt"
             or receipt.get("status") != "complete"
             or receipt.get("view_id") != view_id
@@ -296,7 +363,12 @@ def validate_technical_delivery(
         ):
             raise ValueError(f"technical receipt identity is invalid for {view_id}")
         producer = receipt.get("producer", {})
-        if producer != {"id": TECHNICAL_PRODUCER_ID, "renderer_sha256": renderer_hash, "plan_sha256": plan_hash}:
+        if producer != {
+            "id": TECHNICAL_PRODUCER_ID,
+            "renderer_sha256": renderer_hash,
+            "implementation_sha256": implementation_hashes,
+            "plan_sha256": plan_hash,
+        }:
             raise ValueError(f"technical receipt producer binding is invalid for {view_id}")
         if receipt.get("source") != source:
             raise ValueError(f"technical receipt source binding differs for {view_id}")
@@ -306,11 +378,91 @@ def validate_technical_delivery(
         derivation = receipt.get("derivation", {})
         if derivation.get("storyboard_pixels_consumed") is not False:
             raise ValueError(f"technical receipt lacks storyboard exclusion for {view_id}")
-        if derivation.get("selective_current_scan_status") != "unfinished" or not str(
-            derivation.get("new_goal_qualification", "")
-        ).startswith("unfinished;"):
-            raise ValueError(f"technical receipt must disclose the unfinished selective current-scan goal for {view_id}")
-        source_time = source["simulation_time"]
+        expected_plan = plan_views.get(view_id, {})
+        for field in ("selection_mode", "temporal_mode"):
+            if derivation.get(field) != expected_plan.get(field):
+                raise ValueError(f"technical receipt {field} is invalid for {view_id}")
+        expected_window = expected_plan.get("source_window_s")
+        if derivation.get("source_window_s") != expected_window:
+            raise ValueError(f"technical receipt source window is invalid for {view_id}")
+        if (
+            derivation.get("selective_current_scan_status") != "complete"
+            or derivation.get("future_returns_consumed") is not False
+            or derivation.get("simulator_truth_consumed") is not False
+            or derivation.get("scene_or_asset_metadata_consumed") is not False
+        ):
+            raise ValueError(f"technical receipt violates selective real-scan isolation for {view_id}")
+        if derivation.get("scan_time_model") != SCAN_TIME_MODEL:
+            raise ValueError(f"technical receipt lacks exact rigid scan-time disclosure for {view_id}")
+        if derivation.get("causal_display_policy") != (
+            "latest and previous scans only; maximum current age is 2 configured scan periods"
+        ):
+            raise ValueError(f"technical receipt lacks bounded causal scan policy for {view_id}")
+        calibration = derivation.get("camera_calibration")
+        expected_camera_topic = source["paired_capture_state"]["camera_info_topic"]
+        if not isinstance(calibration, dict) or calibration.get("topic") != expected_camera_topic:
+            raise ValueError(f"technical camera calibration receipt is invalid for {view_id}")
+        if calibration.get("representation") == "configured_intrinsics":
+            if calibration != {
+                "representation": "configured_intrinsics",
+                "observed_ros_message": False,
+                "distortion_handling": "ideal_pinhole_declared_by_capture",
+                "topic": expected_camera_topic,
+            }:
+                raise ValueError(f"technical configured calibration disclosure is invalid for {view_id}")
+        elif calibration.get("representation") == "observed_ros_camera_info":
+            if (
+                calibration.get("observed_ros_message") is not True
+                or calibration.get("distortion_handling") != "zero_coefficients_no_rectification_required"
+                or not isinstance(calibration.get("stamp_s"), (int, float))
+            ):
+                raise ValueError(f"technical observed calibration disclosure is invalid for {view_id}")
+        else:
+            raise ValueError(f"technical camera calibration provenance is unsupported for {view_id}")
+        scan_selection = derivation.get("scan_selection")
+        if not isinstance(scan_selection, dict) or int(scan_selection.get("scan_count", 0)) <= 0:
+            raise ValueError(f"technical receipt has no selected raw scans for {view_id}")
+        scan_rows = scan_selection.get("scans")
+        if not isinstance(scan_rows, list) or len(scan_rows) != scan_selection.get("scan_count"):
+            raise ValueError(f"technical scan receipt list is invalid for {view_id}")
+        for scan in scan_rows:
+            fields = scan.get("point_fields") if isinstance(scan, dict) else None
+            if (
+                not isinstance(scan, dict)
+                or int(scan.get("raw_point_count", 0)) <= 0
+                or int(scan.get("selected_return_count", 0)) <= 0
+                or not SHA256_PATTERN.fullmatch(str(scan.get("selected_raw_indices_sha256", "")))
+                or scan.get("source_frame_id") != source["paired_capture_state"]["lidar_frame_id"]
+                or not isinstance(fields, list)
+                or not {"x", "y", "z"}.issubset(fields)
+                or any(name in {"time", "t", "timestamp", "offset_time", "time_offset", "timestamp_ns"} for name in fields)
+                or scan.get("per_return_timing") != PER_RETURN_TIMING
+            ):
+                raise ValueError(f"technical selected-return receipt is invalid for {view_id}")
+        if bool(expected_plan.get("rgb_context")):
+            pairs = derivation.get("cotimed_rgb_pairs")
+            if (
+                not isinstance(pairs, dict)
+                or int(pairs.get("pair_count", 0)) <= 0
+                or int(pairs.get("maximum_absolute_skew_ns", 99_999_999)) > 17_000_001
+            ):
+                raise ValueError(f"technical current scan lacks co-timed RGB binding for {view_id}")
+        if expected_plan.get("selection_mode") == "estimated_roi_front_surfaces":
+            rois = derivation.get("estimated_roi_selection")
+            roi_rows = rois.get("rois") if isinstance(rois, dict) else None
+            if (
+                not isinstance(rois, dict)
+                or int(rois.get("roi_count", 0)) <= 0
+                or not isinstance(roi_rows, list)
+                or len(roi_rows) != int(rois.get("roi_count", 0))
+            ):
+                raise ValueError(f"technical estimated ROI support is missing for {view_id}")
+            if any(
+                not isinstance(roi, dict) or int(roi.get("absolute_rgb_skew_ns", 99_999_999)) > 17_000_001
+                for roi in roi_rows
+            ):
+                raise ValueError(f"technical estimated ROI lacks co-timed RGB binding for {view_id}")
+        source_window = tuple(float(value) for value in expected_window)
         shots.append(
             TechnicalShotSource(
                 shot_number,
@@ -319,7 +471,7 @@ def validate_technical_delivery(
                 video_path,
                 video_hash,
                 frame_count,
-                (float(source_time["start_s"]), float(source_time["end_s"])),
+                source_window,
                 receipt_path,
                 receipt_hash,
             )

@@ -85,7 +85,9 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
     write_json(transforms, {
         "units": "m", "rotation_order": "xyzw_ros", "transforms": [{"parent": "sensor_rig", "child": "camera_optical_frame"}],
         "topics": {"rgb_camera_info": "/sim/camera/rgb/camera_info", "lidar_points": "/sim/lidar/points"},
-        "frames": {"camera_optical": "camera_optical_frame"},
+        "frames": {
+            "camera_optical": "camera_optical_frame", "lidar_link": "lidar_link", "sensor_rig": "sensor_rig",
+        },
         "intrinsics": {"width_px": 1920, "height_px": 1080, "fx_px": 960.0, "fy_px": 960.0, "cx_px": 959.5, "cy_px": 539.5},
     })
     camera_info = capture / "camera_info.json"
@@ -172,6 +174,16 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         "schema_version": 1, "status": "reviewed_source_catalog", "sources": [{
             "source_id": "generated-complete-presentation-fixture-v1", "capture_id": capture_id,
             "presentation_classification": GENERATED_TEST_FIXTURE_CLASSIFICATION,
+            "presentation_compatibility": {
+                "status": "generated_test_fixture", "delivery_eligible": True,
+                "scene_generation": "synthetic-test", "trajectory_generation": "synthetic-test",
+            },
+            "sensor_contract": {
+                "lidar_topic": "/sim/lidar/points", "camera_info_topic": "/sim/camera/rgb/camera_info",
+                "lidar_frame_id": "lidar_link", "camera_frame_id": "camera_optical_frame",
+                "configured_lidar_hz": 10.0, "maximum_current_age_periods": 2.0,
+                "maximum_rgb_skew_ns": 17000001,
+            },
             "run_directory_name": capture_id, "capture_sha256": capture_value["capture_sha256"],
             "producer_revisions": {"capture": revision, "slam": revision, "perception": revision},
             "producer_manifests": {
@@ -183,6 +195,15 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                 "map": {"path": "slam/slam_map.ply", "sha256": digest("map"), "version": "fixture-map-v1"},
                 "trajectory": {"path": "slam/slam_map_poses.csv", "sha256": digest("trajectory"), "version": "fixture-trajectory-v1"},
                 "inventory": {"path": "perception/estimated_inventory.csv", "sha256": digest("inventory"), "version": "fixture-object-v1"},
+                "raw_lidar_bag": {"path": "capture/sensors_bag/sensors_bag_0.db3", "sha256": digest("raw lidar bag"), "version": "fixture-lidar-v1"},
+                "bag_metadata": {"path": "capture/bag_metadata.json", "sha256": digest("bag metadata"), "version": "fixture-bag-index-v1"},
+                "camera_info": {"path": "capture/camera_info.json", "sha256": digest("camera info"), "version": "fixture-camera-v1"},
+                "sensor_transforms": {"path": "capture/sensor_transforms.json", "sha256": digest("sensor transforms"), "version": "fixture-transforms-v1"},
+                "effective_config": {"path": "capture/effective_config.json", "sha256": digest("effective config"), "version": "fixture-config-v1"},
+                "scene_manifest": {"path": "capture/scene_manifest.json", "sha256": digest("scene manifest"), "version": "fixture-scene-v1"},
+                "rgb_video": {"path": "capture/rgb_camera.mp4", "sha256": digest("rgb video"), "version": "fixture-rgb-v1"},
+                "rgb_frames": {"path": "capture/rgb_frames.jsonl", "sha256": digest("rgb frames"), "version": "fixture-rgb-index-v1"},
+                "frame_annotations": {"path": "perception/frame_annotations.jsonl", "sha256": digest("annotations"), "version": "fixture-annotations-v1"},
             },
             "simulation_time": {"source": "slam/slam_map_poses.csv:timestamp_s", "start_s": 0.2, "end_s": 20.4},
             "perception_contract": {
@@ -200,6 +221,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         _source_receipt as renderer_source_receipt,
         _write_view_receipt,
         canonical_text_sha256,
+        implementation_hashes,
         load_plan as load_technical_plan,
     )
     crlf_text = root / "crlf_repository_text"
@@ -213,6 +235,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         normalized = source_path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
         mirror_path.write_bytes(normalized.replace("\n", "\r\n").encode("utf-8"))
     renderer_hash = canonical_text_sha256(crlf_renderer)
+    dependency_hashes = implementation_hashes(repo_root)
     plan_hash = canonical_text_sha256(crlf_plan)
     source_entry = technical_catalog_value["sources"][0]
     source_artifacts = source_entry["artifacts"]
@@ -239,6 +262,17 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         slam_manifest_path=root / source_manifests["slam"]["path"],
         perception_manifest_path=root / source_manifests["perception"]["path"],
         source_catalog_path=technical_catalog,
+        raw_lidar_bag_path=root / source_artifacts["raw_lidar_bag"]["path"],
+        bag_metadata_path=root / source_artifacts["bag_metadata"]["path"],
+        camera_info_path=root / source_artifacts["camera_info"]["path"],
+        sensor_transforms_path=root / source_artifacts["sensor_transforms"]["path"],
+        effective_config_path=root / source_artifacts["effective_config"]["path"],
+        scene_manifest_path=root / source_artifacts["scene_manifest"]["path"],
+        rgb_video_path=root / source_artifacts["rgb_video"]["path"],
+        rgb_frames_path=root / source_artifacts["rgb_frames"]["path"],
+        annotations_path=root / source_artifacts["frame_annotations"]["path"],
+        compatibility_status="generated_test_fixture",
+        delivery_eligible=True,
         hashes={
             "map": source_artifacts["map"]["sha256"],
             "trajectory": source_artifacts["trajectory"]["sha256"],
@@ -247,6 +281,10 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
             "slam_manifest": source_manifests["slam"]["sha256"],
             "perception_manifest": source_manifests["perception"]["sha256"],
             "source_catalog": canonical_text_sha256(technical_catalog),
+            **{name: source_artifacts[name]["sha256"] for name in (
+                "raw_lidar_bag", "bag_metadata", "camera_info", "sensor_transforms", "effective_config",
+                "scene_manifest", "rgb_video", "rgb_frames", "frame_annotations",
+            )},
         },
     )
     source = renderer_source_receipt(renderer_bundle)
@@ -260,7 +298,55 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         probe = {"width": 1920, "height": 1080, "fps": 30.0, "frame_count": frame_count}
         receipt_path = _write_view_receipt(
             technical_dir, view_video, video_hash, probe, specs_by_id[view_id],
-            renderer_bundle, renderer_hash, plan_hash,
+            renderer_bundle, renderer_hash, dependency_hashes, plan_hash,
+            {
+                "point_projection": "generated fixture projection",
+                "selection_mode": specs_by_id[view_id].selection_mode,
+                "temporal_mode": specs_by_id[view_id].temporal_mode,
+                "source_window_s": list(specs_by_id[view_id].source_window_s),
+                "future_returns_consumed": False,
+                "causal_display_policy": "latest and previous scans only; maximum current age is 2 configured scan periods",
+                "storyboard_pixels_consumed": False,
+                "simulator_truth_consumed": False,
+                "scene_or_asset_metadata_consumed": False,
+                "selective_current_scan_status": "complete",
+                "scan_selection": {
+                    "scan_count": 1, "selected_return_count": 3,
+                    "scans": [{
+                        "message_id": 1, "timestamp_ns": 200000000, "raw_point_count": 6,
+                        "selected_return_count": 3, "selected_raw_indices_sha256": digest(f"scan {view_id}"),
+                        "selection_mode": specs_by_id[view_id].selection_mode,
+                        "source_frame_id": "lidar_link", "point_fields": ["x", "y", "z", "intensity"],
+                        "per_return_timing": "absent_in_point_fields; rigid_header_stamp_projection_without_deskew",
+                    }],
+                },
+                "rgb_context": specs_by_id[view_id].rgb_context,
+                "scan_time_model": {
+                    "per_return_timing": "absent_in_bound_PointCloud2_fields", "deskew": "not_applied",
+                    "rigid_pose_time": "PointCloud2 header/database timestamp",
+                },
+                "camera_calibration": {
+                    "representation": "observed_ros_camera_info", "observed_ros_message": True,
+                    "stamp_s": 0.0, "distortion_model": "plumb_bob",
+                    "distortion_handling": "zero_coefficients_no_rectification_required",
+                    "topic": "/sim/camera/rgb/camera_info",
+                },
+                **({
+                    "cotimed_rgb_pairs": {"pair_count": 1, "maximum_absolute_skew_ns": 0, "pairs": [
+                        {"scan_timestamp_ns": 200000000, "rgb_frame_index": 3, "absolute_skew_ns": 0}
+                    ]}
+                } if specs_by_id[view_id].rgb_context else {}),
+                **({
+                    "estimated_roi_selection": {"roi_count": 1, "rois": [{
+                        "scan_message_id": 1, "scan_timestamp_ns": 200000000, "rgb_frame_index": 3,
+                        "rgb_timestamp_s": 0.2, "track_id": 7, "raw_track_id": 11,
+                        "absolute_rgb_skew_ns": 0,
+                        "bbox_xyxy": [1, 1, 4, 4], "selected_return_count": 3,
+                        "selected_raw_indices_sha256": digest(f"roi {view_id}"),
+                        "selection": "bbox_nearest_front_surface",
+                    }]}
+                } if specs_by_id[view_id].selection_mode == "estimated_roi_front_surfaces" else {}),
+            },
         )
         outputs.append({
             "path": view_video.name, "sha256": video_hash, "frames": frame_count, "view_ids": [view_id],
@@ -269,7 +355,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         })
     technical_manifest = technical_dir / "technical_views_delivery_manifest.json"
     write_json(technical_manifest, {
-        "schema_version": 1, "status": "complete", "producer": "grocery_sim.technical_views.cpu.v1",
+        "schema_version": 2, "status": "complete", "producer": "grocery_sim.technical_views.cpu.v1",
         "profile": "delivery", "width": 1920, "height": 1080, "fps": 30,
         "ordered_views": [item[0] for item in VIEWS], "view_frame_counts": {item[0]: item[2] for item in VIEWS},
         "total_frames": sum(item[2] for item in VIEWS), "capture_id": capture_id,
@@ -277,11 +363,16 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         "simulation_time": {"start_s": 0.2, "end_s": 20.4}, "map_version": "fixture-map-v1",
         "trajectory_version": "fixture-trajectory-v1", "object_state_version": "fixture-object-v1", "source": source,
         "renderer": {"path": "simulator/technical_views.py", "sha256": renderer_hash},
+        "implementation_sha256": dependency_hashes,
         "plan": {"path": "config/technical_views.json", "sha256": plan_hash},
         "storyboard_content_used": False, "storyboard_exclusion_basis": "generated test fixture uses only synthetic colors",
+        "input_snapshot_verification": "post_render_sha256_match",
         "selective_current_scan_goal": {
-            "status": "unfinished", "current_implementation": "legacy finalized-map projection",
-            "required_replacement": "feature-specific point selection from spatially aligned current scans",
+            "status": "complete",
+            "representation": "feature-specific selections from timestamped raw PointCloud2 returns",
+            "spatial_registration": "recorded camera/LiDAR calibration and estimated map-frame pose interpolation",
+            "temporal_policy": "current scans or bounded past-only scan history; future scans are rejected",
+            "ground_truth_consumed": False,
         },
         "outputs": outputs,
     })
