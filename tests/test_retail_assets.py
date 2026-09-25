@@ -145,9 +145,14 @@ class RetailAssetTests(unittest.TestCase):
                 self.assertGreater(geometric_normal[1], 0.0, label)
                 self.assertEqual(normal, (0.0, 1.0, 0.0), label)
                 # U increases with local X and V with local Z at every corner.
+                uv_bounds = (
+                    packaging_generator._hero_wrap_regions(spec)["front"]
+                    if asset.asset_key in packaging_generator.HERO_ART_DIRECTIONS
+                    else (0.0, 0.0, 1.0, 1.0)
+                )
                 for point, (u, v) in zip(points, uvs):
-                    self.assertAlmostEqual(u, 1.0 if point[0] > 0.0 else 0.0, places=7, msg=label)
-                    self.assertAlmostEqual(v, 1.0 if point[2] > 0.0 else 0.0, places=7, msg=label)
+                    self.assertAlmostEqual(u, uv_bounds[2] if point[0] > 0.0 else uv_bounds[0], places=6, msg=label)
+                    self.assertAlmostEqual(v, uv_bounds[3] if point[2] > 0.0 else uv_bounds[1], places=6, msg=label)
 
     def test_generated_usd_uses_supported_schema_properties_and_types(self):
         usd_by_key = {asset.asset_key: asset.usd_path for asset in self.catalog.assets}
@@ -581,6 +586,51 @@ class RetailAssetTests(unittest.TestCase):
             "banana_bunch", "pear", "broccoli", "carrot_bunch",
             "angled_produce_bin", "wicker_basket", "shelf_divider", "bottle_rack",
         })
+
+    def test_hero_packages_use_distinct_full_wrap_art_and_surface_maps(self):
+        try:
+            from PIL import Image as PillowImage
+        except ImportError as error:
+            self.skipTest(f"Pillow image inspection unavailable: {error}")
+        hero_directions = packaging_generator.HERO_ART_DIRECTIONS
+        expected = {
+            "cereal_sunrise", "cereal_harvest", "cereal_grain", "cereal_berry",
+            "cereal_honey", "cereal_morning", "juice_citrus", "coffee_bag",
+        }
+        self.assertEqual(set(hero_directions), expected)
+        self.assertEqual(len({direction[0] for direction in hero_directions.values()}), len(expected))
+        self.assertEqual(len({direction[3] for direction in hero_directions.values()}), len(expected))
+
+        front_hashes = set()
+        for asset_key in sorted(expected):
+            asset = self.catalog_by_key[asset_key]
+            source = asset.usd_path.read_text(encoding="utf-8")
+            self.assertIn('def Mesh "HeroLeftPrintPanel"', source, asset_key)
+            self.assertIn('def Mesh "HeroRightPrintPanel"', source, asset_key)
+            self.assertIn('def Mesh "HeroBackPrintPanel"', source, asset_key)
+            self.assertEqual(source.count('def Mesh "Hero'), 3, asset_key)
+            self.assertIsNotNone(asset.normal_texture_path, asset_key)
+            self.assertIsNotNone(asset.roughness_texture_path, asset_key)
+            self.assertIn("normal_map", asset.material_classes)
+            self.assertIn("roughness_map", asset.material_classes)
+
+            spec = next(spec for spec in packaging_generator.ASSET_SPECS if spec.asset_key == asset_key)
+            regions = packaging_generator._hero_wrap_regions(spec)
+            self.assertLess(regions["left"][2], regions["front"][2])
+            self.assertLessEqual(regions["front"][2], regions["right"][0] + 1e-12)
+            self.assertLessEqual(regions["right"][2], regions["back"][0] + 1e-12)
+            with PillowImage.open(asset.texture_path) as image:
+                self.assertGreater(image.width, image.height, asset_key)
+                bounds = regions["front"]
+                crop = image.crop((
+                    int(bounds[0] * image.width), int(bounds[1] * image.height),
+                    int(bounds[2] * image.width), int(bounds[3] * image.height),
+                ))
+                colors = crop.convert("RGB").getcolors(maxcolors=crop.width * crop.height)
+                self.assertIsNotNone(colors, asset_key)
+                self.assertGreater(len(colors), 180, asset_key)
+                front_hashes.add(hashlib.sha256(crop.tobytes()).hexdigest())
+        self.assertEqual(len(front_hashes), len(expected))
 
     def test_register_parts_match_upgraded_organic_and_fixture_geometry(self):
         expectations = {

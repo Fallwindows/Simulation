@@ -1034,9 +1034,9 @@
         "roughness_map"
       ],
       "introduced_in": "G02-A",
-      "usd_sha256": "f7b30dbe77c9d4b28d50f6ba82b8ba8362844e01ef8ee9dea3fb3db35649bdbb",
-      "texture_sha256": "390f1d35f2cda251e28f303abe40561c3274dc40bba46958b8ce61034b675907",
-      "geometry_scope_sha256": "b786523aa0ed374fa2c67e7d8876fbfb9fc357754f22410905b2b1f4656d5893",
+      "usd_sha256": "3e496eaad16217dc2e4c2800d7a12a5b01e562cc125ee0b9be00208befeaf48a",
+      "texture_sha256": "7d73a0a485e167349ba510c7e5fb25825bab5a3072c9706a2f9202f2ef5d23b7",
+      "geometry_scope_sha256": "ddb67fac64f2e92e5a5c7a3238f317f2ce54c5242b7c14ad661bbfa4589d33d9",
       "appearance_scope_sha256": "0d1f8550f8a13715b5a627fcfe6eb59d905d15b2d88cb296fd888b4298eb563c",
       "normal_texture_path": "textures/coffee_bag_normal.png",
       "normal_texture_sha256": "9acbe0171f7cb8e47a3a2680a24ef169f2e64d765599f361f53bd6fbc6d75ee3",
