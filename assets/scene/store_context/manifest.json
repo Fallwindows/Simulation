@@ -14,10 +14,10 @@
       "sha256": "f02f040f6db72d68be92286dac069187e86c24f3a85a51c0c83d3e1f4d5cad1e"
     },
     {
-      "bytes": 79488,
+      "bytes": 89221,
       "path": "shopping_cart.usda",
       "role": "render_asset",
-      "sha256": "ecc123bfdcb3c27af7e4fca4b5b903e7c263413d3acb99e47668730644f4243d"
+      "sha256": "d525807fa0d6f09a3a19ff9496db9c5891a5a40a5aabd29d44cd9759cb315be9"
     },
     {
       "bytes": 14662,
@@ -30,7 +30,7 @@
     "hash_basis": "UTF-8 with LF line endings",
     "path": "tools/generate_shopping_cart.py",
     "runtime": "Python >= 3.10, standard library only",
-    "sha256": "a52db8df5edb7d6ad14d5abf7f38e4d371719fad77bbb470c3628ff92bc34770"
+    "sha256": "2f66ef62b111c86883dd8ac49ca5808b7982cc91b0343c4adbfc93de78389ea0"
   },
   "schema_version": 1,
   "source_references": [

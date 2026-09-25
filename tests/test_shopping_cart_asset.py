@@ -167,6 +167,41 @@ def test_four_casters_handle_and_pbr_materials_are_authored() -> None:
     assert 'rel material:binding = </ShoppingCart/Looks/Rubber>' in usda
 
 
+def test_committed_usda_opens_with_expected_schemas_and_bindings() -> None:
+    try:
+        from pxr import Usd, UsdGeom, UsdPhysics, UsdShade
+    except ImportError as exc:
+        raise AssertionError("USD Python bindings are required for asset validation") from exc
+
+    stage = Usd.Stage.Open(str(ASSET_DIR / "shopping_cart.usda"))
+    assert stage is not None
+    assert stage.GetDefaultPrim().GetPath().pathString == "/ShoppingCart"
+    assert UsdGeom.GetStageMetersPerUnit(stage) == 1.0
+    assert UsdGeom.GetStageUpAxis(stage) == UsdGeom.Tokens.z
+
+    cylinders = [prim for prim in stage.Traverse() if prim.IsA(UsdGeom.Cylinder)]
+    assert len(cylinders) == 118
+    material_paths = {f"/ShoppingCart/Looks/{name}" for name in ("Steel", "ZincWire", "HandlePolymer", "Rubber")}
+    assert {prim.GetPath().pathString for prim in stage.Traverse() if prim.IsA(UsdShade.Material)} == material_paths
+    for prim in cylinders:
+        assert "MaterialBindingAPI" in prim.GetAppliedSchemas(), prim.GetPath()
+        binding_targets = prim.GetRelationship("material:binding").GetTargets()
+        assert len(binding_targets) == 1, prim.GetPath()
+        assert binding_targets[0].pathString in material_paths, prim.GetPath()
+        bound_material, binding_relationship = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+        assert bound_material.GetPath().pathString == binding_targets[0].pathString, prim.GetPath()
+        assert binding_relationship, prim.GetPath()
+
+    collision_root = stage.GetPrimAtPath("/ShoppingCart/Collision")
+    collision_cubes = [prim for prim in collision_root.GetChildren() if prim.IsA(UsdGeom.Cube)]
+    assert len(collision_cubes) == 13
+    for prim in collision_cubes:
+        assert prim.HasAPI(UsdPhysics.CollisionAPI), prim.GetPath()
+        assert UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is True
+        assert UsdGeom.Imageable(prim).GetPurposeAttr().Get() == UsdGeom.Tokens.guide
+        assert UsdGeom.Imageable(prim).GetVisibilityAttr().Get() == UsdGeom.Tokens.invisible
+
+
 def test_cpu_preview_is_self_contained_and_identifies_scale() -> None:
     preview = (ASSET_DIR / "shopping_cart_preview.svg").read_text(encoding="utf-8")
     assert preview.startswith('<svg xmlns="http://www.w3.org/2000/svg"')

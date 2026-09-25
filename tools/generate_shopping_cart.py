@@ -226,8 +226,10 @@ def _usd_tube(tube: Tube) -> str:
     midpoint = tuple((tube.start[index] + tube.end[index]) * 0.5 for index in range(3))
     length = math.sqrt(sum((tube.end[index] - tube.start[index]) ** 2 for index in range(3)))
     quaternion = _orientation_from_z(tube.start, tube.end)
-    quat_text = f"({_f(quaternion[0])}, ({_f(quaternion[1])}, {_f(quaternion[2])}, {_f(quaternion[3])}))"
-    return f'''            def Cylinder "{tube.name}"
+    quat_text = f"({_f(quaternion[0])}, {_f(quaternion[1])}, {_f(quaternion[2])}, {_f(quaternion[3])})"
+    return f'''            def Cylinder "{tube.name}" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
             {{
                 uniform token axis = "Z"
                 double height = {_f(length)}
@@ -241,7 +243,9 @@ def _usd_tube(tube: Tube) -> str:
 
 
 def _usd_collision_box(box: CollisionBox) -> str:
-    return f'''            def Cube "{box.name}"
+    return f'''            def Cube "{box.name}" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
             {{
                 uniform token purpose = "guide"
                 token visibility = "invisible"
