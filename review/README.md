@@ -2,9 +2,9 @@
 
 ## Master review checkpoint (2026-09-25)
 
-- The reviewed code/test checkpoint is `7270528eb85dded4ba4ff559cd04bd4e882af894` (tree `db6b966a8084537268fe3c9a26c9061b08b46009`); this review-index/journal update follows it. The checkpoint includes the G02 trial, Scene R13, standalone cart, M5 capture-validation WIP, dynamic technical-consumer WIP, SLAM replay-safety WIP, and Hero R4.
-- Hero R4 R2 source is independently approved; the M5 strict-RGB test fixture and presentation fixture fixes are independently approved, and the storyboard path test is independently approved. The integrated full suite passed 268 tests with two expected skips (170.273 seconds) on this checkpoint. See the latest entry in the [implementation journal](../IMPLEMENTATION_JOURNAL.md) for exact candidate identities and scope.
-- This source/test approval does not claim visual acceptance or production delivery. The fresh current-scene RGB/LiDAR capture, completed SLAM and perception, seven technical clips, and 1,350-frame final film remain open. A corrected SLAM R13 candidate is under exact review separately. Generated runs and temporary review scratch are kept out of Git.
+- The combined code/test checkpoint is `6f24f38edf9f009db56f44a858f3e49565df6e85` (tree `d1280efd3fdf6dab86f07f316f0350ad544b0947`); this review-index/journal update follows it. It includes the G02 trial, Scene R13, standalone cart, M5 capture-validation WIP, dynamic technical-consumer WIP, SLAM replay-safety WIP, Hero R4, and approved fixture repairs.
+- Hero R4 R2, the strict-RGB and presentation fixture fixes, the storyboard-path fix, and the SLAM R13 R2 series are independently approved. The integrated full suite passed 269 tests with two expected skips (173.174 seconds) on this checkpoint. Exact review of the combined tree is pending. See the latest entry in the [implementation journal](../IMPLEMENTATION_JOURNAL.md) for candidate identities and scope.
+- These source/test results do not claim visual acceptance or production delivery. The fresh current-scene RGB/LiDAR capture, completed SLAM and perception, seven technical clips, and 1,350-frame final film remain open. Generated runs and temporary review scratch are kept out of Git.
 
 ## Production-quality grocery demo (G02, in progress)
 
