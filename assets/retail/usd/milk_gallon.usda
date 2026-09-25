@@ -55,7 +55,7 @@ def Xform "Asset" (
             double height = 0.01305
             double3 xformOp:translate = (0.03240, 0.00000, 0.13847)
             uniform token[] xformOpOrder = ["xformOp:translate"]
-            rel material:binding = </Asset/Looks/Front>
+            rel material:binding = </Asset/Looks/Accent>
         }
         def Xform "HandleTop" {
             double3 xformOp:translate = (-0.03960, 0.00000, 0.10440)
@@ -95,6 +95,39 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
+        def Xform "SidePrintLeft" {
+            double3 xformOp:translate = (-0.08700, 0.00000, -0.01160)
+            double3 xformOp:scale = (0.00300, 0.04680, 0.07830)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
+        def Xform "SidePrintRight" {
+            double3 xformOp:translate = (0.08700, 0.00000, -0.01160)
+            double3 xformOp:scale = (0.00300, 0.04680, 0.07830)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
+        def Xform "BackColorBand" {
+            double3 xformOp:translate = (0.00000, -0.06200, -0.08990)
+            double3 xformOp:scale = (0.05220, 0.00300, 0.01740)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
     }
     def Scope "Looks" {
         def Material "Body" {
@@ -102,7 +135,7 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.93333, 0.94510, 0.90980)
-                float inputs:roughness = 0.6200
+                float inputs:roughness = 0.4800
                 float inputs:metallic = 0.0000
                 token outputs:surface
             }
@@ -123,7 +156,7 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.19216, 0.44314, 0.72157)
-                float inputs:roughness = 0.5400
+                float inputs:roughness = 0.5200
                 float inputs:metallic = 0.0000
                 color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
                 token outputs:surface
@@ -188,6 +221,16 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
                 float inputs:roughness = 0.3800
                 float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+        def Material "Accent" {
+            token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.19216, 0.44314, 0.72157)
+                float inputs:roughness = 0.5200
+                float inputs:metallic = 0.0000
                 token outputs:surface
             }
         }

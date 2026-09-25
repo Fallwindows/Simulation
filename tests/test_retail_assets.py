@@ -10,6 +10,7 @@ import unittest
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 from simulator.config.loader import load_scenario
 from simulator.environment.aisle_builder import (
@@ -19,6 +20,7 @@ from simulator.environment.aisle_builder import (
 )
 from simulator.environment.retail_catalog import load_retail_catalog
 from tools.retail_assets.generate_packaging import ASSET_SPECS, _asset_usda, generate_library
+import tools.retail_assets.generate_packaging as packaging_generator
 
 
 def _authored_z_bounds(source, asset_key):
@@ -272,6 +274,10 @@ class RetailAssetTests(unittest.TestCase):
         self.assertEqual(placed_new_keys, {asset.asset_key for asset in new_assets})
 
     def test_checked_in_library_matches_deterministic_regeneration(self):
+        try:
+            packaging_generator._validate_texture_toolchain()
+        except RuntimeError as error:
+            self.skipTest(f"documented generation runtime required: {error}")
         root = Path(__file__).resolve().parents[1]
         scratch = root / "review" / f".test-retail-{os.getpid()}-regeneration"
         shutil.rmtree(scratch, ignore_errors=True)
@@ -403,6 +409,88 @@ class RetailAssetTests(unittest.TestCase):
             objects.sort()
             for first, second in zip(objects, objects[1:]):
                 self.assertGreaterEqual(second[0] - second[1] - (first[0] + first[1]), -0.001, (first[2], second[2]))
+
+    def test_regular_products_do_not_intersect_produce_displays(self):
+        def bounds(asset):
+            record = self.catalog_by_key[asset.asset_key]
+            yaw = math.radians(asset.rotation_rpy_deg[2])
+            width = record.dimensions_m[0] * asset.scale_xyz[0]
+            depth = record.dimensions_m[1] * asset.scale_xyz[1]
+            half_x = abs(math.cos(yaw)) * width / 2.0 + abs(math.sin(yaw)) * depth / 2.0
+            half_y = abs(math.sin(yaw)) * width / 2.0 + abs(math.cos(yaw)) * depth / 2.0
+            local_bottom, local_top = _authored_z_bounds(record.usd_path.read_text(encoding="utf-8"), asset.asset_key)
+            return (
+                asset.position_m[0] - half_x, asset.position_m[0] + half_x,
+                asset.position_m[1] - half_y, asset.position_m[1] + half_y,
+                asset.position_m[2] + local_bottom * asset.scale_xyz[2],
+                asset.position_m[2] + local_top * asset.scale_xyz[2],
+            )
+
+        products = [asset for asset in self.layout.assets if asset.name.startswith("product_")]
+        produce = [
+            asset for asset in self.layout.assets
+            if asset.name.startswith("produce_bin_") or asset.name.startswith("fruit_")
+        ]
+        intersections = []
+        for product in products:
+            product_bounds = bounds(product)
+            for display in produce:
+                display_bounds = bounds(display)
+                overlaps = all(
+                    min(product_bounds[axis + 1], display_bounds[axis + 1])
+                    - max(product_bounds[axis], display_bounds[axis]) > 0.001
+                    for axis in (0, 2, 4)
+                )
+                if overlaps:
+                    intersections.append((product.semantic_id, display.semantic_id))
+        self.assertEqual(intersections, [])
+
+    def test_texture_generation_fails_closed_without_pinned_prerequisites(self):
+        root = Path(__file__).resolve().parents[1]
+        destination = root / "review" / ".must-not-be-created"
+        with mock.patch.object(packaging_generator, "PIL", None), \
+                mock.patch.object(packaging_generator, "Image", None), \
+                self.assertRaisesRegex(RuntimeError, "(?s)Pillow==12.3.0.*No assets were generated"):
+            generate_library(destination)
+        self.assertFalse(destination.exists())
+
+    def test_new_texture_bindings_are_uv_authored_and_art_is_varied(self):
+        try:
+            from PIL import Image as PillowImage
+        except ImportError as error:
+            self.skipTest(f"Pillow image inspection unavailable: {error}")
+        new_assets = [asset for asset in self.catalog.assets if asset.introduced_in == "G02-A"]
+        sizes = set()
+        texture_hashes = set()
+
+        for asset in new_assets:
+            source = asset.usd_path.read_text(encoding="utf-8")
+            geometry = source.split('def Scope "Looks"', 1)[0]
+            front_bindings = geometry.count("</Asset/Looks/Front>")
+            uv_sets = geometry.count("primvars:st")
+            self.assertEqual(front_bindings, uv_sets, asset.asset_key)
+            if "UsdUVTexture" in source:
+                self.assertGreater(front_bindings, 0, asset.asset_key)
+            if asset.asset_key == "price_display":
+                self.assertGreater(front_bindings, 0)
+            with PillowImage.open(asset.texture_path) as image:
+                sizes.add(image.size)
+            texture_hashes.add(hashlib.sha256(asset.texture_path.read_bytes()).hexdigest())
+
+        self.assertEqual(len(texture_hashes), 45)
+        self.assertGreaterEqual(len(sizes), 8)
+
+    def test_register_parts_match_upgraded_organic_and_fixture_geometry(self):
+        expectations = {
+            "banana_bunch": (r'def (?:Xform|Mesh) "Finger[^\"]*"', 15),
+            "broccoli": (r'def (?:Xform|Mesh) "Branch[^\"]*"', 5),
+            "wicker_basket": (r'def (?:Xform|Mesh) "FrontWeave[^\"]*"', 8),
+            "angled_produce_bin": (r'def (?:Xform|Mesh) "[^\"]*Rail"', 2),
+        }
+        for asset_key, (pattern, count) in expectations.items():
+            record = self.catalog_by_key[asset_key]
+            source = record.usd_path.read_text(encoding="utf-8")
+            self.assertEqual(len(re.findall(pattern, source)), count, asset_key)
 
     def test_every_physical_object_has_one_unique_identity(self):
         ids = [asset.instance_id for asset in self.layout.assets]

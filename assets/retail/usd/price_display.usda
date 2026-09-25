@@ -38,6 +38,22 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Paper>
             }
         }
+        def Mesh "FrontPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.10067, 0.01100, -0.01856), (0.10067, 0.01100, -0.01856), (0.10067, 0.01100, 0.01856), (-0.10067, 0.01100, 0.01856)]
+            int[] faceVertexCounts = [4]
+            # Winding and the authored +Y normal must agree; viewed from the
+            # local front (+Y), this order faces outward and preserves upright UVs.
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(0, 1, 0)] (
+                interpolation = "uniform"
+            )
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "vertex"
+            )
+            rel material:binding = </Asset/Looks/Front>
+        }
     }
     def Scope "Looks" {
         def Material "Body" {
@@ -45,7 +61,7 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.18824, 0.21569, 0.23137)
-                float inputs:roughness = 0.6200
+                float inputs:roughness = 0.3400
                 float inputs:metallic = 0.0000
                 token outputs:surface
             }
@@ -66,7 +82,7 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.86667, 0.87843, 0.83922)
-                float inputs:roughness = 0.5400
+                float inputs:roughness = 0.3000
                 float inputs:metallic = 0.0000
                 color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
                 token outputs:surface
@@ -131,6 +147,16 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
                 float inputs:roughness = 0.3800
                 float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+        def Material "Accent" {
+            token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.86667, 0.87843, 0.83922)
+                float inputs:roughness = 0.3000
+                float inputs:metallic = 0.0000
                 token outputs:surface
             }
         }

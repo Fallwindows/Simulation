@@ -8,9 +8,9 @@ def Xform "Asset" (
     kind = "component"
 ) {
     def Xform "Geometry" {
-        def Xform "Banana0" {
-            double3 xformOp:translate = (-0.06000, 0.00000, -0.00840)
-            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+        def Xform "Finger0Segment0" {
+            double3 xformOp:translate = (-0.07545, -0.00945, -0.03465)
+            double3 xformOp:scale = (0.04180, 0.02520, 0.03570)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Sphere "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -19,9 +19,9 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Body>
             }
         }
-        def Xform "Banana1" {
-            double3 xformOp:translate = (-0.02000, 0.00000, -0.00840)
-            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+        def Xform "Finger0Segment1" {
+            double3 xformOp:translate = (-0.06500, -0.00945, -0.02100)
+            double3 xformOp:scale = (0.04180, 0.02520, 0.03570)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Sphere "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -30,9 +30,9 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Body>
             }
         }
-        def Xform "Banana2" {
-            double3 xformOp:translate = (0.02000, 0.00000, -0.00840)
-            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+        def Xform "Finger0Segment2" {
+            double3 xformOp:translate = (-0.05455, -0.00945, -0.00105)
+            double3 xformOp:scale = (0.04180, 0.02520, 0.03570)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Sphere "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -41,9 +41,130 @@ def Xform "Asset" (
                 rel material:binding = </Asset/Looks/Body>
             }
         }
-        def Xform "Banana3" {
-            double3 xformOp:translate = (0.06000, 0.00000, -0.00840)
-            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+        def Xform "Finger1Segment0" {
+            double3 xformOp:translate = (-0.04321, -0.00473, -0.03465)
+            double3 xformOp:scale = (0.04180, 0.02646, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger1Segment1" {
+            double3 xformOp:translate = (-0.03200, -0.00473, -0.02100)
+            double3 xformOp:scale = (0.04180, 0.02646, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger1Segment2" {
+            double3 xformOp:translate = (-0.02079, -0.00473, -0.00105)
+            double3 xformOp:scale = (0.04180, 0.02646, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger2Segment0" {
+            double3 xformOp:translate = (-0.01197, 0.00000, -0.03465)
+            double3 xformOp:scale = (0.04180, 0.02772, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger2Segment1" {
+            double3 xformOp:translate = (0.00000, 0.00000, -0.02100)
+            double3 xformOp:scale = (0.04180, 0.02772, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger2Segment2" {
+            double3 xformOp:translate = (0.01197, 0.00000, -0.00105)
+            double3 xformOp:scale = (0.04180, 0.02772, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger3Segment0" {
+            double3 xformOp:translate = (0.01927, 0.00473, -0.03465)
+            double3 xformOp:scale = (0.04180, 0.02898, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger3Segment1" {
+            double3 xformOp:translate = (0.03200, 0.00473, -0.02100)
+            double3 xformOp:scale = (0.04180, 0.02898, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger3Segment2" {
+            double3 xformOp:translate = (0.04473, 0.00473, -0.00105)
+            double3 xformOp:scale = (0.04180, 0.02898, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger4Segment0" {
+            double3 xformOp:translate = (0.05151, 0.00945, -0.03465)
+            double3 xformOp:scale = (0.04180, 0.03024, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger4Segment1" {
+            double3 xformOp:translate = (0.06500, 0.00945, -0.02100)
+            double3 xformOp:scale = (0.04180, 0.03024, 0.03570)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Finger4Segment2" {
+            double3 xformOp:translate = (0.07849, 0.00945, -0.00105)
+            double3 xformOp:scale = (0.04180, 0.03024, 0.03570)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Sphere "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
@@ -53,14 +174,14 @@ def Xform "Asset" (
             }
         }
         def Xform "Crown" {
-            double3 xformOp:translate = (0.00000, 0.00000, 0.02310)
-            double3 xformOp:scale = (0.05320, 0.03570, 0.03360)
+            double3 xformOp:translate = (0.00000, 0.00000, 0.01890)
+            double3 xformOp:scale = (0.05320, 0.03570, 0.02310)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
             def Sphere "Shape" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
             ) {
                 double radius = 0.5
-                rel material:binding = </Asset/Looks/Front>
+                rel material:binding = </Asset/Looks/Accent>
             }
         }
         def Cylinder "Stem" (
@@ -80,30 +201,18 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.88235, 0.75294, 0.21569)
-                float inputs:roughness = 0.6200
+                float inputs:roughness = 0.8200
                 float inputs:metallic = 0.0000
                 token outputs:surface
             }
         }
         def Material "Front" {
             token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
-            def Shader "StReader" {
-                uniform token info:id = "UsdPrimvarReader_float2"
-                token inputs:varname = "st"
-                float2 outputs:result
-            }
-            def Shader "Texture" {
-                uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../textures/banana_bunch.png@
-                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
-                float3 outputs:rgb
-            }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.37255, 0.47451, 0.21176)
-                float inputs:roughness = 0.5400
+                float inputs:roughness = 0.8000
                 float inputs:metallic = 0.0000
-                color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
                 token outputs:surface
             }
         }
@@ -166,6 +275,16 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
                 float inputs:roughness = 0.3800
                 float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+        def Material "Accent" {
+            token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.37255, 0.47451, 0.21176)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
                 token outputs:surface
             }
         }

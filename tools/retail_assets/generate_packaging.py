@@ -20,9 +20,48 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 try:
+    import PIL
     from PIL import Image, ImageDraw, ImageFont
-except ImportError:  # pragma: no cover - the Isaac/Pixi runtime supplies Pillow
-    Image = ImageDraw = ImageFont = None
+except ImportError:  # pragma: no cover - fail-closed validation reports this runtime mismatch
+    PIL = Image = ImageDraw = ImageFont = None
+
+
+REQUIRED_PILLOW_VERSION = "12.3.0"
+REQUIRED_ZLIB_VERSION = "1.3.2"
+REQUIRED_FONTS = {
+    False: (
+        Path(r"C:\Windows\Fonts\segoeui.ttf"),
+        "8134dbcd09e7b123c9a7f229d49cffbcb01352cc72ea5e1076b65d0dca9f73cd",
+    ),
+    True: (
+        Path(r"C:\Windows\Fonts\segoeuib.ttf"),
+        "aeb9e4a6ec5cc59f4d72df8189032d7dbb28f45161cf1552174818b5465dac4e",
+    ),
+}
+
+
+def _validate_texture_toolchain() -> None:
+    """Fail before writing when the byte-reproducible texture stack is absent."""
+    errors: list[str] = []
+    if PIL is None or Image is None or ImageDraw is None or ImageFont is None:
+        errors.append(f"Pillow=={REQUIRED_PILLOW_VERSION} is required")
+    elif PIL.__version__ != REQUIRED_PILLOW_VERSION:
+        errors.append(f"Pillow=={REQUIRED_PILLOW_VERSION} required; found {PIL.__version__}")
+    if zlib.ZLIB_RUNTIME_VERSION != REQUIRED_ZLIB_VERSION:
+        errors.append(f"zlib runtime {REQUIRED_ZLIB_VERSION} required; found {zlib.ZLIB_RUNTIME_VERSION}")
+    for _, (path, expected_hash) in REQUIRED_FONTS.items():
+        if not path.is_file():
+            errors.append(f"required font missing: {path}")
+            continue
+        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual_hash != expected_hash:
+            errors.append(f"required font hash mismatch: {path} ({actual_hash})")
+    if errors:
+        raise RuntimeError(
+            "Retail texture generation prerequisites are not reproducible:\n- "
+            + "\n- ".join(errors)
+            + "\nSee tools/retail_assets/GENERATION_REQUIREMENTS.md. No assets were generated."
+        )
 
 
 @dataclass(frozen=True)
@@ -127,9 +166,9 @@ ASSET_SPECS: tuple[AssetSpec, ...] = (
     _spec("flour_sack", "bagged_goods", (0.14, 0.085, 0.235), "paper_sack", (228, 218, 190), (158, 61, 45), "BAKER FLOUR", parts=("paper_sack", "pinched_top", "folded_base", "side_gussets")),
     _spec("bread_loaf", "bakery", (0.24, 0.105, 0.13), "bread_bag", (208, 144, 65), (79, 121, 168), "GRAIN LOAF", "bakery", parts=("loaf", "clear_bag", "twisted_neck", "closure")),
     _spec("chips_bag", "snack_bag", (0.155, 0.07, 0.255), "pillow_bag", (186, 62, 50), (234, 196, 68), "KETTLE CHIPS", parts=("inflated_pouch", "top_crimp", "bottom_crimp", "side_seams")),
-    _spec("banana_bunch", "fresh_produce", (0.19, 0.105, 0.105), "banana_bunch", (225, 192, 55), (95, 121, 54), "BANANA BUNCH", "produce", parts=("four_curved_fingers", "crown", "stem")),
+    _spec("banana_bunch", "fresh_produce", (0.19, 0.105, 0.105), "banana_bunch", (225, 192, 55), (95, 121, 54), "BANANA BUNCH", "produce", parts=("five_three_segment_curved_fingers", "crown", "stem")),
     _spec("pear", "fresh_produce", (0.095, 0.09, 0.13), "pear", (149, 177, 66), (111, 76, 40), "GREEN PEAR", "produce", parts=("bulb", "tapered_top", "stem", "leaf")),
-    _spec("broccoli", "fresh_produce", (0.14, 0.12, 0.15), "broccoli", (53, 112, 60), (117, 157, 74), "BROCCOLI", "produce", parts=("stalk", "three_branches", "five_florets")),
+    _spec("broccoli", "fresh_produce", (0.14, 0.12, 0.15), "broccoli", (53, 112, 60), (117, 157, 74), "BROCCOLI", "produce", parts=("stalk", "five_branches", "fifteen_florets")),
     _spec("carrot_bunch", "fresh_produce", (0.14, 0.08, 0.22), "carrot_bunch", (225, 113, 37), (63, 126, 61), "CARROT BUNCH", "produce", parts=("three_tapered_roots", "binding_band", "leaf_cluster")),
     _spec("jam_jar", "jars", (0.085, 0.085, 0.12), "jam_jar", (154, 46, 67), (232, 191, 87), "BERRY JAM", parts=("faceted_glass", "fruit_fill", "twist_lid", "neck_label")),
     _spec("spice_jar", "jars", (0.055, 0.055, 0.12), "spice_jar", (171, 89, 42), (237, 206, 96), "SMOKED PAPRIKA", parts=("small_jar", "shaker_insert", "ribbed_cap")),
@@ -140,7 +179,7 @@ ASSET_SPECS: tuple[AssetSpec, ...] = (
     _spec("sponge_pack", "household", (0.15, 0.045, 0.19), "blister_pack", (226, 189, 61), (70, 135, 87), "SCRUB SPONGES", "household", parts=("card_backer", "clear_blister", "two_sponges", "hang_slot")),
     _spec("trash_bags", "household", (0.19, 0.105, 0.22), "handled_box", (55, 73, 84), (86, 153, 171), "STRONG BAGS", "household", parts=("carton", "carry_handle", "dispensing_slot")),
     _spec("angled_produce_bin", "produce_fixture", (0.46, 0.36, 0.24), "angled_bin", (112, 87, 59), (154, 119, 69), "PRODUCE BIN", "produce", "shelf", ("sloped_base", "low_front", "high_back", "side_cheeks", "rails")),
-    _spec("wicker_basket", "produce_fixture", (0.42, 0.31, 0.20), "wicker_basket", (142, 101, 58), (191, 145, 81), "MARKET BASKET", "produce", "shelf", ("woven_base", "four_posts", "sixteen_slats", "rim")),
+    _spec("wicker_basket", "produce_fixture", (0.42, 0.31, 0.20), "wicker_basket", (142, 101, 58), (191, 145, 81), "MARKET BASKET", "produce", "shelf", ("woven_base", "four_posts", "eight_diagonal_ribbons", "four_cross_slats", "rim")),
     _spec("shelf_divider", "shelf_fixture", (0.012, 0.42, 0.14), "shelf_divider", (205, 211, 209), (92, 139, 166), "SHELF DIVIDER", "fixtures", "shelf", ("base_clip", "vertical_fin", "front_stop")),
     _spec("bottle_rack", "shelf_fixture", (0.34, 0.42, 0.07), "bottle_rack", (90, 96, 98), (171, 178, 180), "BOTTLE RACK", "fixtures", "shelf", ("base", "four_channels", "front_stops", "rear_stop")),
     _spec("price_display", "shelf_fixture", (0.26, 0.018, 0.065), "price_display", (48, 55, 59), (221, 224, 214), "PRICE DISPLAY", "fixtures", "shelf_edge", ("rail_clip", "eink_panel", "bezel")),
@@ -165,25 +204,16 @@ def _blend(a: tuple[int, int, int], b: tuple[int, int, int], amount: float) -> t
 
 
 def _font(size: int, bold: bool = False):
-    if ImageFont is None:
-        return None
-    candidates = (
-        r"C:\Windows\Fonts\segoeuib.ttf" if bold else r"C:\Windows\Fonts\segoeui.ttf",
-        r"C:\Windows\Fonts\arialbd.ttf" if bold else r"C:\Windows\Fonts\arial.ttf",
-    )
-    for candidate in candidates:
-        try:
-            return ImageFont.truetype(candidate, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
+    path, _ = REQUIRED_FONTS[bold]
+    return ImageFont.truetype(path, size)
 
 
 def _write_rich_texture(path: Path, spec: AssetSpec, size: int = 768) -> None:
     """Write a dense, readable fictional package face with no trademarked art."""
     if Image is None:
-        _write_png(path, 256, 256, _fallback_texture(spec))
-        return
+        raise RuntimeError(
+            f"Pillow=={REQUIRED_PILLOW_VERSION} is required; refusing to write fallback texture {path}"
+        )
     base = tuple(int(round(v * 255)) for v in spec.color)
     accent = tuple(int(round(v * 255)) for v in spec.accent)
     dark = _blend(base, (12, 18, 24), 0.62)
@@ -255,17 +285,197 @@ def _write_rich_texture(path: Path, spec: AssetSpec, size: int = 768) -> None:
     image.save(path, format="PNG", optimize=True)
 
 
-def _fallback_texture(spec: AssetSpec, size: int = 256) -> list[list[tuple[int, int, int]]]:
-    base = tuple(int(round(v * 255)) for v in spec.color)
-    accent = tuple(int(round(v * 255)) for v in spec.accent)
-    pixels = [[base for _ in range(size)] for _ in range(size)]
-    for y in range(size):
-        for x in range(size):
-            if y < 28 or y > size - 30:
-                pixels[y][x] = accent
-            elif (x // 24 + y // 24) % 2 == 0 and y > 55:
-                pixels[y][x] = _blend(base, (255, 255, 255), .08)
-    return pixels
+def _new_art_system(spec: AssetSpec) -> str:
+    if spec.department == "fixtures":
+        return "fixture"
+    if spec.department == "produce":
+        return "produce"
+    if spec.department == "household":
+        return "household"
+    if spec.department == "refrigerated":
+        return "chilled"
+    if spec.department == "bakery":
+        return "bakery"
+    if spec.model_type in {
+        "oil_bottle", "handled_bottle", "grip_bottle", "longneck_bottle",
+        "squeeze_bottle", "flip_bottle", "pump_bottle", "trigger_spray",
+        "detergent_jug", "bleach_jug",
+    }:
+        return "bottle"
+    if spec.model_type in {"short_can", "rectangular_tin", "canister", "jam_jar", "wide_jar", "spice_jar"}:
+        return "wrap"
+    if spec.model_type in {"gusset_bag", "valve_bag", "paper_sack", "pillow_bag", "bread_bag"}:
+        return "soft_pack"
+    return "carton"
+
+
+def _new_artwork_size(spec: AssetSpec) -> tuple[int, int]:
+    """Match bitmap aspect to its physical label instead of stretching a square."""
+    if spec.department == "fixtures":
+        return (768, 256)
+    width, _, height = spec.dimensions_m
+    ratio = max(0.50, min(2.40, width / max(height, 1e-6)))
+    if ratio >= 1.0:
+        return (768, max(320, int(round(768 / ratio))))
+    return (max(384, int(round(768 * ratio))), 768)
+
+
+def _write_category_texture(path: Path, spec: AssetSpec) -> None:
+    """Create item-specific art using a category-appropriate packaging system."""
+    if Image is None:
+        raise RuntimeError(
+            f"Pillow=={REQUIRED_PILLOW_VERSION} is required; refusing to write fallback texture {path}"
+        )
+    width, height = _new_artwork_size(spec)
+    system = _new_art_system(spec)
+    base = tuple(int(round(value * 255)) for value in spec.color)
+    accent = tuple(int(round(value * 255)) for value in spec.accent)
+    ink = _blend(base, (8, 14, 18), 0.72)
+    paper = _blend(base, (255, 252, 239), 0.62)
+    seed = hashlib.sha256(spec.asset_key.encode("utf-8")).digest()
+    image = Image.new("RGB", (width, height), paper)
+    draw = ImageDraw.Draw(image)
+
+    # Category systems use different background print processes.  The seed
+    # varies rhythm within a system without turning label color into identity.
+    if system == "carton":
+        stripe = max(8, width // (11 + seed[0] % 7))
+        for index, x in enumerate(range(-height, width + height, stripe * 3)):
+            tone = _blend(base, accent, 0.22 + 0.10 * ((index + seed[1]) % 3))
+            draw.polygon(((x, 0), (x + stripe, 0), (x + height + stripe, height), (x + height, height)), fill=tone)
+    elif system == "chilled":
+        for index in range(7):
+            y = index * height // 7
+            draw.rectangle((0, y, width, y + max(5, height // 28)), fill=_blend(base, accent, .12 + .05 * (index % 3)))
+    elif system == "bakery":
+        image.paste(_blend(base, (245, 224, 182), .55), (0, 0, width, height))
+        for index in range(9):
+            x = (index * width // 8 + seed[0]) % width
+            draw.line((x, 0, x - width * .18, height), fill=_blend(base, ink, .22), width=max(4, width // 80))
+    elif system == "bottle":
+        for y in range(height):
+            draw.line((0, y, width, y), fill=_blend(paper, base, .10 + .30 * y / height))
+    elif system == "wrap":
+        for index, x in enumerate(range(0, width, max(18, width // 14))):
+            draw.rectangle((x, 0, x + max(6, width // 42), height), fill=_blend(base, accent, .18 + .08 * (index % 2)))
+    elif system == "soft_pack":
+        image.paste(_blend(base, (232, 214, 174), .62), (0, 0, width, height))
+        for index in range(70):
+            x = (seed[index % len(seed)] * (index + 7)) % width
+            y = (seed[(index + 9) % len(seed)] * (index + 13)) % height
+            draw.ellipse((x, y, x + 3, y + 3), fill=_blend(ink, base, .55))
+    elif system == "household":
+        image.paste(_blend(base, (238, 247, 246), .48), (0, 0, width, height))
+    elif system == "produce":
+        tile = max(24, min(width, height) // 8)
+        for y in range(0, height, tile):
+            for x in range(0, width, tile):
+                if (x // tile + y // tile + seed[0]) % 2:
+                    draw.rectangle((x, y, x + tile, y + tile), fill=_blend(base, accent, .16))
+    else:
+        image.paste((188, 190, 183), (0, 0, width, height))
+
+    margin = max(18, int(min(width, height) * 0.055))
+    title_size = max(28, int(min(width, height) * (0.105 if len(spec.product_name) < 15 else 0.078)))
+    small_size = max(16, int(min(width, height) * 0.039))
+    brand_names = {
+        "fixture": "MERIDIAN STOREWORKS",
+        "produce": "CEDAR ROW FARM",
+        "household": "BRIGHTROOM HOME",
+        "chilled": "MEADOW CREAMERY",
+        "bakery": "MILLHOUSE BAKERY",
+        "bottle": "RIVERGLASS",
+        "wrap": "HEARTH PANTRY",
+        "soft_pack": "FIELD & FLOUR",
+        "carton": "TABLELAND GOODS",
+    }
+    taglines = {
+        "fixture": ("AISLE HARDWARE", "MERCHANDISING SYSTEM", "RETAIL FIXTURE"),
+        "produce": ("FARM LOT", "HARVESTED TODAY", "MARKET SELECT"),
+        "household": ("HOME CARE", "CLEAN ROUTINE", "UTILITY SERIES"),
+        "chilled": ("KEEP CHILLED", "CREAMERY BATCH", "FRESH DAIRY"),
+        "bakery": ("BAKED & SEALED", "DAILY BAKE", "BAKERY LOAF"),
+        "bottle": ("BOTTLED IN SMALL RUNS", "SERVE COLD", "PANTRY POUR"),
+        "wrap": ("PANTRY LOT", "SEALED FRESH", "SMALL BATCH"),
+        "soft_pack": ("FRESH PACK", "PANTRY STAPLE", "SEALED AT SOURCE"),
+        "carton": ("CUPBOARD SERIES", "FAMILY SIZE", "EVERYDAY TABLE"),
+    }
+    tagline = taglines[system][seed[2] % 3]
+    if system == "bottle" and spec.category == "beverage":
+        tagline = ("ELECTROLYTE BLEND", "SERVE COLD", "ACTIVE REFRESH")[seed[2] % 3]
+
+    if system == "fixture":
+        draw.rounded_rectangle((margin, margin, width - margin, height - margin), radius=18, fill=(28, 34, 39), outline=accent, width=5)
+        for x in range(margin * 2, width - margin * 2, max(28, width // 16)):
+            draw.line((x, height * .22, x, height * .78), fill=(72, 82, 88), width=2)
+        if spec.asset_key == "price_display":
+            draw.text((width * .58, height * .28), "$3.49", font=_font(int(height * .34), True), fill=(236, 244, 226))
+    elif system == "produce":
+        draw.rectangle((margin, margin, width - margin, height - margin), outline=ink, width=5)
+        for index in range(5 + seed[3] % 4):
+            radius = int(min(width, height) * (0.045 + 0.008 * (index % 3)))
+            cx = margin * 2 + (index * (width - margin * 4) // max(1, 4 + seed[3] % 3))
+            cy = int(height * (0.62 + 0.09 * ((index + seed[4]) % 2)))
+            draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=accent, outline=ink, width=3)
+            draw.line((cx, cy - radius, cx + radius // 3, cy - radius - radius // 2), fill=ink, width=4)
+    elif system == "household":
+        draw.polygon(((0, int(height * .58)), (width, int(height * .34)), (width, height), (0, height)), fill=accent)
+        for index in range(4):
+            radius = int(min(width, height) * (0.055 + index * .014))
+            cx = int(width * (.70 + .06 * ((index + seed[5]) % 2)))
+            cy = int(height * (.18 + index * .11))
+            draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), outline=(250, 250, 245), width=5)
+        draw.rounded_rectangle((margin, int(height * .74), width - margin, int(height * .90)), radius=12, fill=(244, 247, 239))
+        draw.text((margin * 1.4, int(height * .77)), "DIRECTIONS  •  TESTED FOR HOME USE", font=_font(small_size, True), fill=ink)
+    elif system in {"chilled", "bakery"}:
+        draw.rectangle((0, 0, width, int(height * .18)), fill=accent)
+        draw.ellipse((int(width * .57), int(height * .42), int(width * .94), int(height * .79)), fill=_blend(accent, (255, 255, 255), .28), outline=ink, width=5)
+        for offset in range(3):
+            y = int(height * (.68 + offset * .055))
+            draw.arc((margin, y - height * .18, width * .55, y + height * .10), 195, 342, fill=ink, width=5)
+    elif system == "bottle":
+        draw.rectangle((0, 0, int(width * .16), height), fill=ink)
+        draw.rectangle((int(width * .84), 0, width, height), fill=accent)
+        for offset in range(4):
+            y = int(height * (.45 + offset * .075))
+            draw.arc((int(width * .25), y - int(height * .16), int(width * .82), y + int(height * .12)), 195, 345, fill=accent, width=6)
+        draw.ellipse((int(width * .62), int(height * .15), int(width * .87), int(height * .36)), outline=ink, width=5)
+    elif system == "wrap":
+        draw.rectangle((0, int(height * .08), width, int(height * .22)), fill=ink)
+        draw.rectangle((0, int(height * .78), width, int(height * .94)), fill=accent)
+        for index in range(7):
+            x = int(width * (.08 + index * .14))
+            draw.line((x, int(height * .30), x + int(width * .08), int(height * .68)), fill=_blend(ink, accent, .45), width=4)
+    elif system == "soft_pack":
+        draw.rectangle((margin, margin, width - margin, height - margin), outline=ink, width=4)
+        draw.line((margin, int(height * .15), width - margin, int(height * .15)), fill=accent, width=10)
+        draw.line((margin, int(height * .87), width - margin, int(height * .87)), fill=accent, width=10)
+        for index in range(5):
+            x = int(width * (.18 + index * .15))
+            draw.ellipse((x - 12, int(height * .62), x + 12, int(height * .72)), fill=ink)
+    else:
+        draw.rectangle((0, 0, width, int(height * .17)), fill=ink)
+        draw.rectangle((0, int(height * .82), width, height), fill=accent)
+        badge_radius = int(min(width, height) * .13)
+        badge_x, badge_y = int(width * .76), int(height * .46)
+        draw.regular_polygon((badge_x, badge_y, badge_radius), 6, rotation=30, fill=accent, outline=ink)
+
+    title_y = int(height * (.30 if system != "fixture" else .18))
+    text_x = int(width * .20) if system == "bottle" else margin
+    brand_y = int(height * .105) if system == "wrap" else margin
+    brand_fill = (247, 246, 235) if system in {"fixture", "carton", "wrap"} else ink
+    draw.text((text_x, brand_y), brand_names[system], font=_font(small_size, True), fill=brand_fill)
+    draw.multiline_text((text_x, title_y), spec.product_name.replace(" ", "\n", 1), font=_font(title_size, True), fill=(246, 247, 239) if system == "fixture" else ink, spacing=2)
+    draw.text((text_x, int(height * .68)), tagline, font=_font(small_size, True), fill=(246, 247, 239) if system == "fixture" else ink)
+    if system not in {"produce", "fixture"}:
+        # Item-specific lot bars give each wrap/label a different side rhythm.
+        bar_y = int(height * .91)
+        for index in range(18):
+            bar_width = 1 + seed[index % len(seed)] % 4
+            x = margin + index * max(4, (width - 2 * margin) // 22)
+            draw.rectangle((x, bar_y, x + bar_width, min(height - margin // 2, bar_y + int(height * .055))), fill=ink)
+    draw.text((width - margin, height - margin // 2), spec.asset_key.upper(), font=_font(max(12, small_size // 2)), fill=ink, anchor="rs")
+    image.save(path, format="PNG", optimize=True)
 
 
 def _material(
@@ -429,6 +639,64 @@ def _ellipsoid(
                 double radius = 0.5
                 rel material:binding = </Asset/Looks/{material}>
             }}
+        }}'''
+
+
+def _oval_prism(
+    name: str,
+    size: tuple[float, float, float],
+    material: str,
+    translate_z: float = 0.0,
+    vertices: int = 32,
+) -> str:
+    """Closed oval tub/cup mesh with straight walls and explicit bounds."""
+    width, depth, height = size
+    lower = [
+        (width / 2.0 * math.cos(2.0 * math.pi * index / vertices),
+         depth / 2.0 * math.sin(2.0 * math.pi * index / vertices),
+         translate_z - height / 2.0)
+        for index in range(vertices)
+    ]
+    upper = [(x, y, translate_z + height / 2.0) for x, y, _ in lower]
+    points = lower + upper
+    faces = [list(reversed(range(vertices))), list(range(vertices, 2 * vertices))]
+    faces.extend(
+        [index, (index + 1) % vertices, (index + 1) % vertices + vertices, index + vertices]
+        for index in range(vertices)
+    )
+    counts = ", ".join(str(len(face)) for face in faces)
+    indices = ", ".join(str(vertex) for face in faces for vertex in face)
+    point_text = ", ".join(f"({x:.6f}, {y:.6f}, {z:.6f})" for x, y, z in points)
+    return f'''        def Mesh "{name}" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {{
+            point3f[] points = [{point_text}]
+            int[] faceVertexCounts = [{counts}]
+            int[] faceVertexIndices = [{indices}]
+            rel material:binding = </Asset/Looks/{material}>
+        }}'''
+
+
+def _woven_strip(name: str, width: float, depth: float, height: float, index: int, material: str) -> str:
+    """Diagonal front/back wicker ribbon; alternating slope creates a weave."""
+    y = depth / 2.0 - 0.004
+    half_strip = 0.008
+    start_x = -width / 2.0 + 0.02 + index * (width - 0.04) / 7.0
+    slope = height * (0.42 if index % 2 == 0 else -0.42)
+    x0 = max(-width / 2.0 + 0.008, start_x - width * 0.18)
+    x1 = min(width / 2.0 - 0.008, start_x + width * 0.18)
+    z0 = max(-height / 2.0 + 0.02, -slope / 2.0)
+    z1 = min(height / 2.0 - 0.02, slope / 2.0)
+    points = ((x0, y, z0 - half_strip), (x1, y, z1 - half_strip),
+              (x1, y, z1 + half_strip), (x0, y, z0 + half_strip))
+    point_text = ", ".join(f"({x:.5f}, {py:.5f}, {z:.5f})" for x, py, z in points)
+    return f'''        def Mesh "{name}" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {{
+            point3f[] points = [{point_text}]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            rel material:binding = </Asset/Looks/{material}>
         }}'''
 
 
@@ -642,10 +910,11 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
         ])
     elif spec.model_type == "oval_tub":
         geometry.extend([
-            _ellipsoid("OvalTub", (width, depth, height * 0.88), (0.0, 0.0, -height * 0.04), "Body"),
-            _cube("TubBase", (width * 0.80, depth * 0.80, height * 0.04), (0.0, 0.0, -height * 0.48), "Body"),
-            _ellipsoid("DomedLid", (width, depth, height * 0.22), (0.0, 0.0, height * 0.39), "Front"),
-            _cube("RolledRim", (width, depth * 0.88, height * 0.035), (0.0, 0.0, height * 0.36), "Metal"),
+            _oval_prism("OvalTub", (width * 0.96, depth * 0.96, height * 0.82), "Body", -height * 0.07, vertices=40),
+            _oval_prism("TubFoot", (width * 0.82, depth * 0.82, height * 0.05), "Body", -height * 0.475, vertices=40),
+            _oval_prism("SnapLid", (width, depth, height * 0.14), "Front", height * 0.43, vertices=40),
+            _oval_prism("RolledRim", (width, depth * 0.96, height * 0.035), "Metal", height * 0.35, vertices=40),
+            _front_panel(width * 0.82, depth, height * 0.48),
         ])
     elif spec.model_type in {"oil_bottle", "longneck_bottle"}:
         square = spec.model_type == "oil_bottle"
@@ -733,11 +1002,13 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
                 _cylinder("Overcap", width * 0.51, height * 0.12, "Front", height * 0.44, vertices=48),
                 _cube("GripBand", (width * 0.94, depth * 0.08, height * 0.08), (0.0, depth * 0.48, height * 0.36), "Dark"),
             ])
+        geometry.append(_front_panel(width * 0.88, depth, height * 0.66))
     elif spec.model_type == "rectangular_tin":
         geometry.extend([
             _beveled_box("RoundedTin", spec.dimensions_m, 0.012, "Metal"),
             _cube("RolledSeam", (width * 0.94, depth * 0.94, height * 0.16), (0.0, 0.0, height * 0.42), "Front"),
             _ellipsoid("KeyTab", (width * 0.24, depth * 0.18, height * 0.08), (width * 0.24, 0.0, height * 0.43), "Dark"),
+            _front_panel(width * 0.88, depth, height * 0.62),
         ])
     elif spec.model_type in {"hinged_box", "window_box", "long_box", "handled_box", "tissue_box"}:
         geometry.append(_beveled_box("Carton", spec.dimensions_m, min(width, depth) * 0.08, "Paper"))
@@ -794,12 +1065,23 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
             _ellipsoid("ClearBag", (width, depth, height * 0.84), (0.0, 0.0, -height * 0.08), "Clear"),
             _frustum("TwistedNeck", width * 0.22, width * 0.10, height * 0.20, "Clear", height * 0.36, vertices=20),
             _cube("Closure", (width * 0.12, depth * 0.16, height * 0.04), (0.0, 0.0, height * 0.43), "Front"),
+            _front_panel(width * 0.72, depth, height * 0.48),
         ])
     elif spec.model_type == "banana_bunch":
-        for index, x in enumerate((-0.06, -0.02, 0.02, 0.06)):
-            geometry.append(_ellipsoid(f"Banana{index}", (width * 0.43, depth * 0.42, height * 0.84), (x, 0.0, -height * 0.08), "Body"))
+        # Three overlapping tapered segments per finger form an actual arc;
+        # offsets differ per finger so the bunch reads organically in profile.
+        for finger, x in enumerate((-0.065, -0.032, 0.0, 0.032, 0.065)):
+            for segment in range(3):
+                t = segment / 2.0
+                segment_x = x + (t - 0.5) * width * (0.11 + finger * 0.008)
+                segment_z = -height * 0.36 + t * height * 0.32 + (t - 0.5) ** 2 * height * 0.12
+                geometry.append(_ellipsoid(
+                    f"Finger{finger}Segment{segment}",
+                    (width * 0.22, depth * (0.24 + finger * 0.012), height * 0.34),
+                    (segment_x, (finger - 2) * depth * 0.045, segment_z), "Body",
+                ))
         geometry.extend([
-            _ellipsoid("Crown", (width * 0.28, depth * 0.34, height * 0.32), (0.0, 0.0, height * 0.22), "Front"),
+            _ellipsoid("Crown", (width * 0.28, depth * 0.34, height * 0.22), (0.0, 0.0, height * 0.18), "Front"),
             _cylinder("Stem", width * 0.04, height * 0.24, "Stem", height * 0.37, vertices=14),
         ])
     elif spec.model_type == "pear":
@@ -811,12 +1093,20 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
         ])
     elif spec.model_type == "broccoli":
         geometry.append(_frustum("Stalk", width * 0.20, width * 0.30, height * 0.55, "Stem", -height * 0.22, vertices=20))
-        for index, (x, y, z) in enumerate((
+        branch_centers = (
             (-width * .22, 0, height * .18), (width * .22, 0, height * .20),
             (0, depth * .20, height * .27), (-width * .32, -depth * .16, height * .32),
             (width * .32, -depth * .16, height * .32),
-        )):
-            geometry.append(_ellipsoid(f"Floret{index}", (width * 0.48, depth * 0.46, height * 0.34), (x, y, z), "Body"))
+        )
+        for index, (x, y, z) in enumerate(branch_centers):
+            geometry.append(_frustum(f"Branch{index}", width * 0.075, width * 0.105, height * 0.34, "Stem", z - height * 0.18, vertices=14, translate_x=x, translate_y=y))
+            for bud in range(3):
+                geometry.append(_ellipsoid(
+                    f"Floret{index}_{bud}",
+                    (width * 0.25, depth * 0.24, height * 0.18),
+                    (x + (bud - 1) * width * 0.075, y + (bud % 2) * depth * 0.055, z + (bud % 2) * height * 0.035),
+                    "Body",
+                ))
     elif spec.model_type == "carrot_bunch":
         for index, x in enumerate((-width * 0.26, 0.0, width * 0.26)):
             geometry.append(_frustum(f"Root{index}", width * 0.11, width * 0.025, height * 0.72, "Body", -height * 0.14, vertices=20, translate_x=x))
@@ -864,13 +1154,18 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
                 _cube("HighBack", (width, 0.025, height), (0.0, -depth * 0.46, 0.0), "Body"),
                 _wedge("LeftCheek", (0.025, depth, height), "Body", (-width * 0.47, 0.0, 0.0)),
                 _wedge("RightCheek", (0.025, depth, height), "Body", (width * 0.47, 0.0, 0.0)),
+                _cube("FrontRail", (width * 0.88, 0.018, height * 0.08), (0.0, depth * 0.44, height * 0.02), "Front"),
+                _cube("RearRail", (width * 0.88, 0.018, height * 0.08), (0.0, -depth * 0.44, height * 0.28), "Body"),
             ])
         else:
             geometry.append(_cube("WovenBase", (width, depth, 0.025), (0.0, 0.0, -height * 0.4375), "Body"))
-            for index, x in enumerate((-width * .46, -width * .30, -width * .15, 0.0, width * .15, width * .30, width * .46)):
-                geometry.append(_cube(f"LongSlat{index}", (0.012, depth, height * 0.58), (x, 0.0, 0.0), "Front"))
-            for index, y in enumerate((-depth * .45, -depth * .22, 0.0, depth * .22, depth * .45)):
-                geometry.append(_cube(f"CrossSlat{index}", (width, 0.012, height * 0.58), (0.0, y, 0.0), "Body"))
+            for index in range(8):
+                geometry.append(_woven_strip(f"FrontWeave{index}", width, depth, height * 0.76, index, "Front" if index % 2 else "Body"))
+            for index, x in enumerate((-width * .46, width * .46)):
+                for side, y in enumerate((-depth * .45, depth * .45)):
+                    geometry.append(_cube(f"CornerPost{index}{side}", (0.018, 0.018, height * 0.82), (x, y, 0.0), "Dark"))
+            for index, y in enumerate((-depth * .45, -depth * .15, depth * .15, depth * .45)):
+                geometry.append(_cube(f"CrossSlat{index}", (width, 0.012, height * 0.10), (0.0, y, -height * 0.18 + index * height * 0.12), "Body"))
             geometry.append(_cube("Rim", (width, depth, height * 0.06), (0.0, 0.0, height * 0.47), "Dark"))
     elif spec.model_type == "shelf_divider":
         geometry.extend([
@@ -889,9 +1184,59 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
             _cube("RailClip", (width, depth, height * 0.24), (0.0, -depth * 0.20, -height * 0.38), "Metal"),
             _beveled_box("Bezel", (width, depth, height), 0.006, "Dark"),
             _cube("EInkPanel", (width * 0.88, depth * 0.10, height * 0.68), (0.0, depth * 0.48, 0.0), "Paper"),
+            _front_panel(width * 0.88, depth, height * 0.68),
         ])
     else:
         raise ValueError(spec.model_type)
+
+    is_new_asset = bool(spec.assembly_parts)
+    texture_exempt = spec.department == "produce" or spec.model_type in {
+        "angled_bin", "wicker_basket", "shelf_divider", "bottle_rack",
+    }
+    if is_new_asset and not texture_exempt and not any("primvars:st" in fragment for fragment in geometry):
+        geometry.append(_front_panel(width * 0.86, depth, height * 0.62))
+
+    # Front is the one textured material and belongs only on explicit UV
+    # meshes.  Colored caps, seams, rails, and closures use Accent instead.
+    if is_new_asset:
+        geometry = [
+            fragment if "primvars:st" in fragment else fragment.replace("</Asset/Looks/Front>", "</Asset/Looks/Accent>")
+            for fragment in geometry
+        ]
+        if any("primvars:st" in fragment for fragment in geometry) and spec.department not in {"produce", "fixtures"}:
+            geometry.extend([
+                _cube("SidePrintLeft", (0.006, depth * 0.72, height * 0.54), (-width / 2.0 + 0.003, 0.0, -height * 0.04), "Accent"),
+                _cube("SidePrintRight", (0.006, depth * 0.72, height * 0.54), (width / 2.0 - 0.003, 0.0, -height * 0.04), "Accent"),
+                _cube("BackColorBand", (width * 0.58, 0.006, height * 0.12), (0.0, -depth / 2.0 + 0.003, -height * 0.31), "Accent"),
+            ])
+
+    has_uv_label = any("primvars:st" in fragment for fragment in geometry)
+    body_roughness = 0.62
+    front_roughness = 0.54
+    if is_new_asset:
+        system = _new_art_system(spec)
+        body_roughness = {
+            "produce": 0.82,
+            "fixture": 0.34,
+            "household": 0.40,
+            "chilled": 0.48,
+            "bakery": 0.76,
+            "bottle": 0.30,
+            "wrap": 0.36,
+            "soft_pack": 0.86,
+            "carton": 0.74,
+        }[system]
+        front_roughness = {
+            "produce": 0.80,
+            "fixture": 0.30,
+            "household": 0.42,
+            "chilled": 0.52,
+            "bakery": 0.66,
+            "bottle": 0.38,
+            "wrap": 0.48,
+            "soft_pack": 0.72,
+            "carton": 0.64,
+        }[system]
     extended_materials = ""
     if spec.assembly_parts:
         extended_materials = "\n" + "\n".join((
@@ -899,6 +1244,7 @@ def _asset_usda(spec: AssetSpec, texture_name: str) -> str:
             _material("Paper", (0.82, 0.79, 0.69), None, 0.78, 0.0),
             _material("Clear", (0.74, 0.86, 0.91), None, 0.12, 0.0, 0.38),
             _material("Dark", (0.055, 0.065, 0.075), None, 0.38, 0.05),
+            _material("Accent", spec.accent, None, front_roughness, 0.0),
         ))
     return f'''#usda 1.0
 (
@@ -913,8 +1259,8 @@ def Xform "Asset" (
 {chr(10).join(geometry)}
     }}
     def Scope "Looks" {{
-{_material(body_material, spec.color, None, 0.62, 0.0)}
-{_material(front_material, spec.accent, texture_path, 0.54, 0.0)}
+{_material(body_material, spec.color, None, body_roughness, 0.0)}
+{_material(front_material, spec.accent, texture_path if (has_uv_label or not is_new_asset) else None, front_roughness, 0.0)}
 {_material("Metal", (0.48, 0.52, 0.55), None, 0.28, 0.7)}
 {_material("Stem", (0.12, 0.23, 0.08), None, 0.72, 0.0)}{extended_materials}
     }}
@@ -979,6 +1325,7 @@ def _material_classes(spec: AssetSpec) -> tuple[str, ...]:
 
 
 def generate_library(root: Path | None = None) -> Path:
+    _validate_texture_toolchain()
     repo = root or Path(__file__).resolve().parents[2]
     asset_root = repo / "assets" / "retail"
     usd_root = asset_root / "usd"
@@ -990,7 +1337,11 @@ def generate_library(root: Path | None = None) -> Path:
         texture_name = f"{spec.asset_key}.png"
         texture_path = texture_root / texture_name
         usd_path = usd_root / f"{spec.asset_key}.usda"
-        _write_rich_texture(texture_path, spec)
+        if spec.assembly_parts:
+            _write_category_texture(texture_path, spec)
+        else:
+            # Preserve the repaired baseline library byte-for-byte.
+            _write_rich_texture(texture_path, spec)
         usd_path.write_text(_asset_usda(spec, texture_name), encoding="utf-8")
         entries.append({
             "asset_key": spec.asset_key,
@@ -1024,6 +1375,10 @@ def generate_library(root: Path | None = None) -> Path:
         "generation": {
             "generator": "tools/retail_assets/generate_packaging.py",
             "deterministic": True,
+            "requirements": "tools/retail_assets/GENERATION_REQUIREMENTS.md",
+            "pillow_version": REQUIRED_PILLOW_VERSION,
+            "zlib_version": REQUIRED_ZLIB_VERSION,
+            "font_sha256": {str(path): digest for path, digest in REQUIRED_FONTS.values()},
             "geometry_signature_excludes": ["asset_key", "product_name", "color", "accent", "texture"],
         },
         "assets": entries,

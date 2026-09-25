@@ -52,30 +52,18 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.58431, 0.69412, 0.25882)
-                float inputs:roughness = 0.6200
+                float inputs:roughness = 0.8200
                 float inputs:metallic = 0.0000
                 token outputs:surface
             }
         }
         def Material "Front" {
             token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
-            def Shader "StReader" {
-                uniform token info:id = "UsdPrimvarReader_float2"
-                token inputs:varname = "st"
-                float2 outputs:result
-            }
-            def Shader "Texture" {
-                uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../textures/pear.png@
-                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
-                float3 outputs:rgb
-            }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.43529, 0.29804, 0.15686)
-                float inputs:roughness = 0.5400
+                float inputs:roughness = 0.8000
                 float inputs:metallic = 0.0000
-                color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
                 token outputs:surface
             }
         }
@@ -138,6 +126,16 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
                 float inputs:roughness = 0.3800
                 float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+        def Material "Accent" {
+            token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.43529, 0.29804, 0.15686)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
                 token outputs:surface
             }
         }

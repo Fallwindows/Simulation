@@ -94,9 +94,11 @@ def _zone_categories(zone: str, level: int) -> tuple[str, ...]:
         plan = (("milk",), ("refrigerated",), ("frozen",), ("beverage",), ("juice",), ("water", "soda"))
         return plan[level % len(plan)]
     if zone == "produce":
-        # The lowest shelf is occupied by explicit produce crates and fruit.
-        # Upper shelves in the final bays remain useful beverage shelving.
-        plan = ((), ("fresh_produce",), ("fresh_produce",), ("beverage",), ("refrigerated",), ("juice",))
+        # Level zero is reserved for the fixture bins and the top level is
+        # reserved for the four camera-visible crate/fruit displays.  Keeping
+        # both footprints out of the regular product pass prevents two
+        # independently populated families from sharing the same shelf volume.
+        plan = ((), ("fresh_produce",), ("fresh_produce",), ("beverage",), (), ("juice",))
         return plan[level % len(plan)]
     raise ValueError(f"Unknown aisle merchandising zone: {zone}")
 

@@ -33,7 +33,7 @@ def Xform "Asset" (
             point3f[] points = [(-0.05000, -0.04500, 0.06720), (0.00000, -0.04500, 0.06720), (-0.05000, -0.04500, 0.12000), (-0.05000, 0.04500, 0.06720), (0.00000, 0.04500, 0.06720), (-0.05000, 0.04500, 0.12000)]
             int[] faceVertexCounts = [3, 3, 4, 4, 4]
             int[] faceVertexIndices = [0, 1, 2, 3, 5, 4, 0, 3, 4, 1, 1, 4, 5, 2, 2, 5, 3, 0]
-            rel material:binding = </Asset/Looks/Front>
+            rel material:binding = </Asset/Looks/Accent>
         }
         def Mesh "GableRight" (
             prepend apiSchemas = ["MaterialBindingAPI"]
@@ -51,7 +51,7 @@ def Xform "Asset" (
                 prepend apiSchemas = ["MaterialBindingAPI"]
             ) {
                 double size = 2.0
-                rel material:binding = </Asset/Looks/Front>
+                rel material:binding = </Asset/Looks/Accent>
             }
         }
         def Cylinder "PourCap" (
@@ -81,6 +81,39 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
+        def Xform "SidePrintLeft" {
+            double3 xformOp:translate = (-0.04700, 0.00000, -0.00960)
+            double3 xformOp:scale = (0.00300, 0.03240, 0.06480)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
+        def Xform "SidePrintRight" {
+            double3 xformOp:translate = (0.04700, 0.00000, -0.00960)
+            double3 xformOp:scale = (0.00300, 0.03240, 0.06480)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
+        def Xform "BackColorBand" {
+            double3 xformOp:translate = (0.00000, -0.04200, -0.07440)
+            double3 xformOp:scale = (0.02900, 0.00300, 0.01440)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
     }
     def Scope "Looks" {
         def Material "Body" {
@@ -88,7 +121,7 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.92549, 0.94902, 0.92157)
-                float inputs:roughness = 0.6200
+                float inputs:roughness = 0.4800
                 float inputs:metallic = 0.0000
                 token outputs:surface
             }
@@ -109,7 +142,7 @@ def Xform "Asset" (
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.20392, 0.55686, 0.41176)
-                float inputs:roughness = 0.5400
+                float inputs:roughness = 0.5200
                 float inputs:metallic = 0.0000
                 color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
                 token outputs:surface
@@ -174,6 +207,16 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
                 float inputs:roughness = 0.3800
                 float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+        def Material "Accent" {
+            token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.20392, 0.55686, 0.41176)
+                float inputs:roughness = 0.5200
+                float inputs:metallic = 0.0000
                 token outputs:surface
             }
         }
