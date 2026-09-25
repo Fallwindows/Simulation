@@ -21,7 +21,7 @@
       "selective_current_scan_status": "complete", "selection_mode": "camera_occlusion_surfaces",
       "temporal_mode": "current_window", "source_window_s": [2.0, 5.9], "display_window_s": [2.0, 5.9], "rgb_context": true,
       "maximum_points": 1000, "history_stride_scans": 1,
-      "camera_motion_role": "recorded_camera_optical", "camera_pose_window_s": [2.0, 5.9], "final_hold_frames": 0
+      "camera_motion_role": "recorded_camera_optical", "camera_guide_timestamp_window_s": [2.0, 5.9], "camera_pose_dependency_window_s": [2.0, 5.9], "final_hold_frames": 0
     },
     {
       "id": "lidar_environment", "presentation_role": "lidar", "frames": 90,
@@ -31,7 +31,7 @@
       "selective_current_scan_status": "complete", "selection_mode": "navigation_boundaries",
       "temporal_mode": "current_window", "source_window_s": [5.9, 8.8], "display_window_s": [5.9, 8.8], "rgb_context": false,
       "maximum_points": 3000, "history_stride_scans": 1,
-      "camera_motion_role": "recorded_camera_optical", "camera_pose_window_s": [5.9, 8.8], "final_hold_frames": 0
+      "camera_motion_role": "recorded_camera_optical", "camera_guide_timestamp_window_s": [5.9, 8.8], "camera_pose_dependency_window_s": [5.9, 8.8], "final_hold_frames": 0
     },
     {
       "id": "persistent_map", "presentation_role": "map", "frames": 90,
@@ -41,7 +41,7 @@
       "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
       "temporal_mode": "past_only_reveal", "source_window_s": [0.2, 11.7], "display_window_s": [8.8, 11.7], "rgb_context": false,
       "maximum_points": 22000, "history_stride_scans": 3,
-      "camera_motion_role": "continuous_estimated_map_path", "camera_pose_window_s": [8.8, 10.5], "final_hold_frames": 0
+      "camera_motion_role": "continuous_estimated_map_path", "camera_guide_timestamp_window_s": [8.8, 10.5], "camera_pose_dependency_window_s": [2.0, 18.5], "final_hold_frames": 0
     },
     {
       "id": "object_association", "presentation_role": "reconstruction", "frames": 120,
@@ -51,7 +51,7 @@
       "selective_current_scan_status": "complete", "selection_mode": "estimated_roi_front_surfaces",
       "temporal_mode": "snapshot_orbit", "source_window_s": [0.2, 12.8], "display_window_s": [10.8, 12.8], "rgb_context": false,
       "maximum_points": 8000, "history_stride_scans": 4,
-      "camera_motion_role": "continuous_estimated_map_path", "camera_pose_window_s": [10.5, 12.8], "final_hold_frames": 0
+      "camera_motion_role": "continuous_estimated_map_path", "camera_guide_timestamp_window_s": [10.5, 12.8], "camera_pose_dependency_window_s": [2.0, 18.5], "final_hold_frames": 0
     },
     {
       "id": "object_detail", "presentation_role": "reconstruction", "frames": 120,
@@ -61,7 +61,7 @@
       "selective_current_scan_status": "complete", "selection_mode": "estimated_roi_front_surfaces",
       "temporal_mode": "snapshot_orbit", "source_window_s": [0.2, 12.8], "display_window_s": [10.8, 12.8], "rgb_context": false,
       "maximum_points": 3600, "history_stride_scans": 4,
-      "camera_motion_role": "continuous_estimated_map_path", "camera_pose_window_s": [12.8, 15.7], "final_hold_frames": 0
+      "camera_motion_role": "continuous_estimated_map_path", "camera_guide_timestamp_window_s": [12.8, 15.7], "camera_pose_dependency_window_s": [2.0, 18.5], "final_hold_frames": 0
     },
     {
       "id": "observed_aisle_overview", "presentation_role": "reconstruction", "frames": 120,
@@ -71,7 +71,7 @@
       "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
       "temporal_mode": "past_only_orbit", "source_window_s": [0.2, 17.4], "display_window_s": [12.8, 17.4], "rgb_context": false,
       "maximum_points": 26000, "history_stride_scans": 3,
-      "camera_motion_role": "continuous_estimated_map_path", "camera_pose_window_s": [15.7, 17.4], "final_hold_frames": 0
+      "camera_motion_role": "continuous_estimated_map_path", "camera_guide_timestamp_window_s": [15.7, 17.4], "camera_pose_dependency_window_s": [2.0, 18.5], "final_hold_frames": 0
     },
     {
       "id": "final_technical_view", "presentation_role": "reconstruction", "frames": 150,
@@ -81,7 +81,7 @@
       "selective_current_scan_status": "complete", "selection_mode": "past_structural_history",
       "temporal_mode": "past_only_orbit", "source_window_s": [0.2, 18.5], "display_window_s": [17.4, 18.5], "rgb_context": false,
       "maximum_points": 18000, "history_stride_scans": 3,
-      "camera_motion_role": "continuous_estimated_map_path", "camera_pose_window_s": [17.4, 18.5], "final_hold_frames": 24
+      "camera_motion_role": "continuous_estimated_map_path", "camera_guide_timestamp_window_s": [17.4, 18.5], "camera_pose_dependency_window_s": [2.0, 18.5], "final_hold_frames": 24
     }
   ]
 }

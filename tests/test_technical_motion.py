@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import tempfile
 import unittest
 from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
 from types import MethodType
 
@@ -12,9 +16,11 @@ import numpy as np
 from simulator.technical_views import (
     TechnicalCameraPath,
     _activation_ray_opacities,
+    camera_motion_receipt,
     load_plan,
 )
 from simulator.technical_lidar import EstimatedTrajectory, RgbFrameRecord, SelectiveLidarSource
+from simulator.presentation.technical_bundle import CAMERA_TRACE_BASIS, _validate_camera_motion_trace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +67,10 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertEqual(len(self.trace), 810)
         self.assertEqual(self.views[0].title, "EARLIER RECORDED SENSOR REPLAY")
         self.assertEqual(self.views[0].subtitle, "RECORDED t=2.0–5.9s · CO-TIMED RGB + LIDAR")
+        self.assertEqual(
+            [view.camera_pose_dependency_window_s for view in self.views],
+            [(2.0, 5.9), (5.9, 8.8)] + [(2.0, 18.5)] * 5,
+        )
 
     def test_camera_pose_time_and_rendered_data_cutoff_are_distinct_and_in_declared_windows(self):
         by_id = {view.id: view for view in self.views}
@@ -68,13 +78,40 @@ class TechnicalMotionTests(unittest.TestCase):
             spec = by_id[row["view_id"]]
             pose_time = row["camera_guide_pose_timestamp_s"]
             cutoff = row["rendered_data_cutoff_s"]
-            self.assertGreaterEqual(pose_time, spec.camera_pose_window_s[0] - 1e-9)
-            self.assertLessEqual(pose_time, spec.camera_pose_window_s[1] + 1e-9)
+            self.assertGreaterEqual(pose_time, spec.camera_guide_timestamp_window_s[0] - 1e-9)
+            self.assertLessEqual(pose_time, spec.camera_guide_timestamp_window_s[1] + 1e-9)
+            self.assertGreaterEqual(pose_time, spec.camera_pose_dependency_window_s[0] - 1e-9)
+            self.assertLessEqual(pose_time, spec.camera_pose_dependency_window_s[1] + 1e-9)
             self.assertGreaterEqual(cutoff, spec.display_window_s[0] - 1e-9)
             self.assertLessEqual(cutoff, spec.display_window_s[1] + 1e-9)
         detail = [row for row in self.trace if row["view_id"] == "object_detail"]
         self.assertGreater(detail[-1]["camera_guide_pose_timestamp_s"], 12.8)
         self.assertTrue(all(row["rendered_data_cutoff_s"] == 12.8 for row in detail))
+        receipt = camera_motion_receipt(self.views[0], self.trace[:120], type("Focus", (), {
+            "track_id": 7, "position": (5.2, 1.4, 1.25),
+        })())
+        self.assertEqual(receipt["render_application"], "not_applied; trace audits recorded camera pose for the timestamped sensor replay")
+        self.assertIn("no presentation camera applied", receipt["path"])
+
+    def test_recorded_replay_pose_has_no_future_trajectory_dependency(self):
+        timestamps = np.asarray([2.0, 5.9, 8.8, 12.0, 18.5])
+        base_positions = np.column_stack((timestamps, np.zeros_like(timestamps), np.ones_like(timestamps)))
+        changed_positions = base_positions.copy()
+        changed_positions[2:, 1] += 40.0
+        quaternions = np.tile(np.asarray([0.0, 0.0, 0.0, 1.0]), (len(timestamps), 1))
+        base = TechnicalCameraPath(
+            self.views, EstimatedTrajectory(timestamps, base_positions, quaternions),
+            np.eye(4), np.asarray([5.2, 1.4, 1.25]),
+        ).trace_rows(self.fps)
+        changed = TechnicalCameraPath(
+            self.views, EstimatedTrajectory(timestamps, changed_positions, quaternions),
+            np.eye(4), np.asarray([5.2, 1.4, 1.25]),
+        ).trace_rows(self.fps)
+        self.assertEqual(
+            [row["eye_m"] for row in base[:120]],
+            [row["eye_m"] for row in changed[:120]],
+        )
+        self.assertNotEqual(base[300]["eye_m"], changed[300]["eye_m"])
 
     def test_camera_steps_and_velocity_stay_continuous_at_every_boundary(self):
         eyes = np.asarray([row["eye_m"] for row in self.trace], dtype=np.float64)
@@ -110,6 +147,42 @@ class TechnicalMotionTests(unittest.TestCase):
         self.assertTrue(all(row["eye_acceleration_mps2"] == [0.0, 0.0, 0.0] for row in held[2:]))
         pre_hold_speed = np.linalg.norm(np.asarray(final_rows[-25]["eye_velocity_mps"], dtype=np.float64))
         self.assertLess(pre_hold_speed, 0.02)
+        self.assertNotEqual(final_rows[-25]["eye_m"], held[0]["eye_m"])
+
+    def test_validator_rejects_a_self_consistent_25_frame_hold(self):
+        long_hold_views = (*self.views[:-1], replace(self.views[-1], final_hold_frames=25))
+        rows = TechnicalCameraPath(
+            long_hold_views,
+            _SyntheticTrajectory(),
+            np.eye(4, dtype=np.float64),
+            np.asarray([5.2, 1.4, 1.25], dtype=np.float64),
+        ).trace_rows(self.fps)
+        plan = json.loads(PLAN.read_text(encoding="utf-8"))
+        plan_views = {item["id"]: item for item in plan["views"]}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            trace = directory / "technical_camera_trace.jsonl"
+            trace.write_text(
+                "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            info = {
+                "path": trace.name,
+                "sha256": hashlib.sha256(trace.read_bytes()).hexdigest(),
+                "frame_count": 810,
+                "basis": CAMERA_TRACE_BASIS,
+            }
+            with self.assertRaisesRegex(ValueError, "exceeds the exact declared frame count"):
+                _validate_camera_motion_trace(
+                    info,
+                    directory=directory,
+                    plan_views=plan_views,
+                    expected_order=[view.id for view in self.views],
+                    expected_counts={view.id: view.frames for view in self.views},
+                    simulation_window_s=(0.2, 20.4),
+                    fps=self.fps,
+                    expected_rows=rows,
+                )
 
     def test_activation_rays_fade_continuously_instead_of_integer_popping(self):
         samples = np.stack([_activation_ray_opacities(index / 120.0) for index in range(121)])

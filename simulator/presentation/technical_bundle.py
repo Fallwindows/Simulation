@@ -12,6 +12,8 @@ from fractions import Fraction
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import numpy as np
+
 from .provenance import (
     SHA256_PATTERN,
     sha256_path,
@@ -55,8 +57,9 @@ SCAN_TIME_MODEL = {
     "rigid_pose_time": "PointCloud2 header/database timestamp",
 }
 CAMERA_TRACE_BASIS = (
-    "C3 camera-pose timestamp schedule and smooth fit of timestamped estimated sensor-rig poses; "
-    "presentation-only camera guide, independent of rendered scan projection and data cutoff"
+    "shots 6-7 audit direct recorded camera_optical poses without applying a presentation guide; "
+    "shots 8-12 apply a C3 presentation guide fit to the disclosed estimated-trajectory dependency; "
+    "both remain independent of rendered scan cutoff"
 )
 CAMERA_TRACE_FIELDS = {
     "global_frame", "view_id", "view_frame", "boundary_from_previous", "camera_motion_role",
@@ -266,9 +269,12 @@ def _validate_camera_motion_trace(
     expected_counts: dict[str, int],
     simulation_window_s: tuple[float, float],
     fps: int,
+    expected_rows: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(trace_info, dict) or set(trace_info) != {"path", "sha256", "frame_count", "basis"}:
         raise ValueError("technical delivery camera motion trace receipt is missing or malformed")
+    if trace_info.get("path") != "technical_camera_trace.jsonl":
+        raise ValueError("technical delivery camera motion trace path is not canonical")
     trace_path = _safe_child(directory, trace_info.get("path"), "camera_motion_trace.path")
     if not trace_path.is_file() or sha256_path(trace_path) != trace_info.get("sha256"):
         raise ValueError("technical delivery camera motion trace hash mismatch")
@@ -285,6 +291,8 @@ def _validate_camera_motion_trace(
             rows.append(value)
     if len(rows) != trace_info["frame_count"]:
         raise ValueError("technical camera motion trace row count is invalid")
+    if rows != expected_rows:
+        raise ValueError("technical camera motion trace does not match deterministic source-derived camera motion")
 
     expected_sequence: list[tuple[str, int]] = []
     for view_id in expected_order:
@@ -301,7 +309,8 @@ def _validate_camera_motion_trace(
     for global_frame, (row, (view_id, view_frame)) in enumerate(zip(rows, expected_sequence)):
         plan = plan_views.get(view_id, {})
         role = plan.get("camera_motion_role")
-        pose_window = plan.get("camera_pose_window_s")
+        guide_window = plan.get("camera_guide_timestamp_window_s")
+        dependency_window = plan.get("camera_pose_dependency_window_s")
         timestamp = row.get("camera_guide_pose_timestamp_s")
         cutoff = row.get("rendered_data_cutoff_s")
         phase = row.get("motion_phase")
@@ -324,8 +333,10 @@ def _validate_camera_motion_trace(
             or row.get("view_frame") != view_frame
             or row.get("boundary_from_previous") is not (view_frame == 0 and global_frame > 0)
             or row.get("camera_motion_role") != role
-            or not isinstance(pose_window, list)
-            or len(pose_window) != 2
+            or not isinstance(guide_window, list)
+            or len(guide_window) != 2
+            or not isinstance(dependency_window, list)
+            or len(dependency_window) != 2
             or not isinstance(timestamp, (int, float))
             or isinstance(timestamp, bool)
             or not math.isfinite(float(timestamp))
@@ -336,7 +347,8 @@ def _validate_camera_motion_trace(
             or not isinstance(phase, (int, float))
             or isinstance(phase, bool)
             or not math.isfinite(float(phase))
-            or not (float(pose_window[0]) - 1e-9 <= float(timestamp) <= float(pose_window[1]) + 1e-9)
+            or not (float(guide_window[0]) - 1e-9 <= float(timestamp) <= float(guide_window[1]) + 1e-9)
+            or not (float(dependency_window[0]) - 1e-9 <= float(timestamp) <= float(dependency_window[1]) + 1e-9)
             or not (simulation_window_s[0] - 1e-9 <= float(timestamp) <= simulation_window_s[1] + 1e-9)
             or float(timestamp) < previous_timestamp - 1e-9
             or float(phase) < previous_phase - 1e-9
@@ -388,31 +400,50 @@ def _validate_camera_motion_trace(
     held = final_rows[-hold:]
     if any(row["eye_m"] != held[0]["eye_m"] or row["target_m"] != held[0]["target_m"] for row in held):
         raise ValueError("technical final camera hold is not stable")
+    preceding = final_rows[-hold - 1]
+    if preceding["eye_m"] == held[0]["eye_m"] and preceding["target_m"] == held[0]["target_m"]:
+        raise ValueError("technical final camera hold exceeds the exact declared frame count")
     return by_view
 
 
 def _expected_camera_motion(
     plan: dict[str, Any],
     rows: list[dict[str, Any]],
+    focus_inventory: object,
 ) -> dict[str, Any]:
     timestamps = [float(row["camera_guide_pose_timestamp_s"]) for row in rows]
     cutoffs = [float(row["rendered_data_cutoff_s"]) for row in rows]
     path = (
-        "presentation guide fitted to recorded camera_optical poses"
+        "direct recorded camera_optical pose audit; no presentation camera applied"
         if plan.get("camera_motion_role") == "recorded_camera_optical"
         else "continuous presentation orbit fitted to estimated map poses"
     )
     return {
         "role": plan.get("camera_motion_role"),
         "path": path,
+        "render_application": (
+            "not_applied; trace audits recorded camera pose for the timestamped sensor replay"
+            if plan.get("camera_motion_role") == "recorded_camera_optical"
+            else "applied to map-view projection"
+        ),
         "pose_time_basis": CAMERA_TRACE_BASIS,
-        "camera_pose_dependency_window_s": plan.get("camera_pose_window_s"),
+        "camera_guide_timestamp_window_s": plan.get("camera_guide_timestamp_window_s"),
+        "camera_pose_dependency_window_s": plan.get("camera_pose_dependency_window_s"),
         "camera_guide_pose_timestamp_range_s": [min(timestamps), max(timestamps)],
         "rendered_data_cutoff_range_s": [min(cutoffs), max(cutoffs)],
         "trace": "technical_camera_trace.jsonl",
         "trace_global_frame_range": [rows[0]["global_frame"], rows[-1]["global_frame"]],
         "trace_eye_target_sha256": _camera_trace_view_sha256(rows),
         "final_hold_frames": plan.get("final_hold_frames"),
+        "map_focus": (
+            None
+            if plan.get("camera_motion_role") == "recorded_camera_optical"
+            else {
+                "track_id": int(getattr(focus_inventory, "track_id")),
+                "position_m": [float(value) for value in getattr(focus_inventory, "position")],
+                "source": "first deterministic selected row in hash-bound estimated inventory",
+            }
+        ),
     }
 
 
@@ -654,18 +685,30 @@ def validate_technical_delivery(
         raise ValueError("technical delivery plan hash does not match repository configuration")
     plan_payload = _json(root / "config" / "technical_views.json")
     plan_views = {str(item.get("id")): item for item in plan_payload.get("views", []) if isinstance(item, dict)}
-    prior_pose_end: float | None = None
+    prior_guide_end: float | None = None
     for view_id in expected_order:
-        pose_window = plan_views.get(view_id, {}).get("camera_pose_window_s")
+        guide_window = plan_views.get(view_id, {}).get("camera_guide_timestamp_window_s")
+        dependency_window = plan_views.get(view_id, {}).get("camera_pose_dependency_window_s")
         if (
-            not isinstance(pose_window, list)
-            or len(pose_window) != 2
-            or not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) for value in pose_window)
-            or float(pose_window[0]) >= float(pose_window[1])
-            or (prior_pose_end is not None and not math.isclose(prior_pose_end, float(pose_window[0]), abs_tol=1e-9))
+            not isinstance(guide_window, list)
+            or len(guide_window) != 2
+            or not isinstance(dependency_window, list)
+            or len(dependency_window) != 2
+            or not all(
+                isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+                for value in (*guide_window, *dependency_window)
+            )
+            or float(guide_window[0]) >= float(guide_window[1])
+            or float(dependency_window[0]) >= float(dependency_window[1])
+            or float(dependency_window[0]) > float(guide_window[0])
+            or float(guide_window[1]) > float(dependency_window[1])
+            or (
+                prior_guide_end is not None
+                and not math.isclose(prior_guide_end, float(guide_window[0]), abs_tol=1e-9)
+            )
         ):
-            raise ValueError(f"technical plan camera pose dependency window is invalid for {view_id}")
-        prior_pose_end = float(pose_window[1])
+            raise ValueError(f"technical plan camera guide/dependency window is invalid for {view_id}")
+        prior_guide_end = float(guide_window[1])
     source = manifest.get("source")
     if not isinstance(source, dict):
         raise ValueError("technical delivery source receipt is missing")
@@ -681,6 +724,38 @@ def validate_technical_delivery(
     simulation_window = (float(simulation.get("start_s", math.nan)), float(simulation.get("end_s", math.nan)))
     if not all(math.isfinite(value) for value in simulation_window) or simulation_window[0] > simulation_window[1]:
         raise ValueError("technical delivery simulation window is invalid")
+    from simulator.sensors.scan_projection import resolve_transform
+    from simulator.technical_lidar import EstimatedTrajectory
+    from simulator.technical_views import TechnicalCameraPath, load_inventory, load_plan, select_inventory
+
+    trajectory_path = _verified_source_artifact(directory, catalog_source, "trajectory")
+    inventory_path = _verified_source_artifact(directory, catalog_source, "inventory")
+    transforms_path = _verified_source_artifact(directory, catalog_source, "sensor_transforms")
+    transforms = _json(transforms_path)
+    frames = transforms.get("frames")
+    transform_rows = transforms.get("transforms")
+    if not isinstance(frames, dict) or not isinstance(transform_rows, list):
+        raise ValueError("technical camera motion source transform graph is invalid")
+    rig_from_optical = resolve_transform(
+        transform_rows,
+        source_frame=str(frames.get("camera_optical", "")),
+        target_frame=str(frames.get("sensor_rig", "")),
+    )
+    _profiles, view_specs = load_plan(root / "config" / "technical_views.json")
+    focus_inventory = select_inventory(load_inventory(inventory_path))[0]
+    expected_trace_rows = TechnicalCameraPath(
+        view_specs,
+        EstimatedTrajectory.from_csv(trajectory_path),
+        rig_from_optical,
+        np.asarray(focus_inventory.position, dtype=np.float64),
+    ).trace_rows(30)
+    expected_anchor = {
+        "track_id": focus_inventory.track_id,
+        "position_m": list(focus_inventory.position),
+        "source": "first deterministic selected row in hash-bound estimated inventory",
+    }
+    if manifest.get("camera_motion_anchor") != expected_anchor:
+        raise ValueError("technical camera motion anchor is not deterministic from the bound inventory")
     trace_by_view = _validate_camera_motion_trace(
         manifest.get("camera_motion_trace"),
         directory=directory,
@@ -689,6 +764,7 @@ def validate_technical_delivery(
         expected_counts=expected_counts,
         simulation_window_s=simulation_window,
         fps=30,
+        expected_rows=expected_trace_rows,
     )
     manifest_derivations = manifest.get("view_derivations")
     if not isinstance(manifest_derivations, dict) or set(manifest_derivations) != set(expected_order):
@@ -773,7 +849,9 @@ def validate_technical_delivery(
         expected_display_window = expected_plan.get("display_window_s")
         if derivation.get("display_window_s") != expected_display_window:
             raise ValueError(f"technical receipt display window is invalid for {view_id}")
-        expected_camera_motion = _expected_camera_motion(expected_plan, trace_by_view[view_id])
+        expected_camera_motion = _expected_camera_motion(
+            expected_plan, trace_by_view[view_id], focus_inventory
+        )
         if derivation.get("camera_motion") != expected_camera_motion:
             raise ValueError(f"technical receipt camera motion binding is invalid for {view_id}")
         if derivation.get("rendered_context_point_budget") != expected_plan.get("maximum_points"):
@@ -939,6 +1017,7 @@ def validate_technical_delivery(
                 if (
                     not all(_plain_int(value) for value in (message_id, timestamp_ns, frame_index, skew_ns, track_id, count))
                     or (raw_track_id is not None and not _plain_int(raw_track_id))
+                    or (view_id == "object_detail" and track_id != focus_inventory.track_id)
                     or scan_identity not in scan_by_identity
                     or frame_index < 0
                     or count <= 0

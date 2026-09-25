@@ -596,24 +596,24 @@ class CompletePresentationTests(unittest.TestCase):
         return forged_manifest
 
     def _mutated_technical_trace(self, name: str, mutate):
-        manifest_path = self.fixture["technical_manifest"]
+        source_directory = self.fixture["technical_dir"]
+        attack_directory = source_directory.parent / f"technical_{name}"
+        shutil.copytree(source_directory, attack_directory)
+        manifest_path = attack_directory / self.fixture["technical_manifest"].name
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         trace_path = manifest_path.parent / manifest["camera_motion_trace"]["path"]
         rows = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
         mutate(rows, manifest)
-        forged_trace = manifest_path.parent / f"{name}_camera_trace.jsonl"
-        forged_trace.write_text(
+        trace_path.write_text(
             "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows),
             encoding="utf-8",
         )
         manifest["camera_motion_trace"].update(
-            path=forged_trace.name,
-            sha256=sha256_path(forged_trace),
+            sha256=sha256_path(trace_path),
             frame_count=len(rows),
         )
-        forged_manifest = manifest_path.parent / f"{name}_manifest.json"
-        forged_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
-        return forged_manifest
+        manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        return manifest_path
 
     def test_repaired_producers_feed_the_1350_frame_presentation_contract(self):
         capture = json.loads(self.fixture["capture_manifest"].read_text(encoding="utf-8"))
@@ -674,15 +674,63 @@ class CompletePresentationTests(unittest.TestCase):
             "camera_pose_outside_dependency",
             lambda rows, _manifest: rows[420].update(camera_guide_pose_timestamp_s=19.9),
         )
-        with self.assertRaisesRegex(ValueError, "identity/time binding"):
+        with self.assertRaisesRegex(ValueError, "deterministic source-derived"):
             validate_technical_delivery(wrong_pose_time, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
 
         wrong_cutoff = self._mutated_technical_trace(
             "camera_cutoff_conflation",
             lambda rows, _manifest: rows[500].update(rendered_data_cutoff_s=14.5),
         )
-        with self.assertRaisesRegex(ValueError, "identity/time binding"):
+        with self.assertRaisesRegex(ValueError, "deterministic source-derived"):
             validate_technical_delivery(wrong_cutoff, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        alternate_manifest = json.loads(self.fixture["technical_manifest"].read_text(encoding="utf-8"))
+        source_trace = self.fixture["technical_dir"] / alternate_manifest["camera_motion_trace"]["path"]
+        alternate_trace = self.fixture["technical_dir"] / "alternate_camera_trace.jsonl"
+        shutil.copyfile(source_trace, alternate_trace)
+        alternate_manifest["camera_motion_trace"].update(
+            path=alternate_trace.name, sha256=sha256_path(alternate_trace)
+        )
+        alternate_path = self.fixture["technical_dir"] / "alternate_camera_trace_manifest.json"
+        alternate_path.write_text(json.dumps(alternate_manifest), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "path is not canonical"):
+            validate_technical_delivery(alternate_path, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
+
+        def translate_rows(rows, _manifest):
+            for row in rows:
+                row["motion_phase"] = 0.0
+                row["eye_m"] = [value + 1.0 for value in row["eye_m"]]
+                row["target_m"] = [value + 1.0 for value in row["target_m"]]
+
+        translated = self._mutated_technical_trace("translated_self_rehashed_camera", translate_rows)
+        translated_manifest = json.loads(translated.read_text(encoding="utf-8"))
+        translated_rows = [
+            json.loads(line)
+            for line in (translated.parent / "technical_camera_trace.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        for output in translated_manifest["outputs"]:
+            view_id = output["view_ids"][0]
+            view_rows = [row for row in translated_rows if row["view_id"] == view_id]
+            digest = hashlib.sha256()
+            for row in view_rows:
+                digest.update(json.dumps({
+                    "global_frame": row["global_frame"],
+                    "view_frame": row["view_frame"],
+                    "camera_guide_pose_timestamp_s": row["camera_guide_pose_timestamp_s"],
+                    "rendered_data_cutoff_s": row["rendered_data_cutoff_s"],
+                    "eye_m": row["eye_m"],
+                    "target_m": row["target_m"],
+                }, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+                digest.update(b"\n")
+            receipt_path = translated.parent / output["receipt"]["path"]
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["derivation"]["camera_motion"]["trace_eye_target_sha256"] = digest.hexdigest()
+            receipt_path.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+            output["receipt"]["sha256"] = sha256_path(receipt_path)
+            translated_manifest["view_derivations"][view_id] = receipt["derivation"]
+        translated.write_text(json.dumps(translated_manifest, sort_keys=True), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "deterministic source-derived"):
+            validate_technical_delivery(translated, ROOT, str(FFPROBE), self.fixture["technical_catalog"])
 
         bad_receipt = self._mutated_technical_receipt(
             "forged_camera_motion_receipt", 4,
