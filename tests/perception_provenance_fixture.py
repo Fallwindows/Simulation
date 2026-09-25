@@ -61,7 +61,7 @@ def create_perception_run(
         (capture / "rgb_camera.mp4").write_bytes(b"native-rgb-fixture")
     write_json(capture / "rgb_video.json", {
         "status": "complete", "frame_count": frame_count, "nominal_fps": 30.0,
-        "width": width, "height": height, "first_image_stamp_s": 0.0,
+        "camera_info_count": frame_count, "width": width, "height": height, "first_image_stamp_s": 0.0,
         "last_image_stamp_s": (frame_count - 1) / 30.0,
     })
     write_json(capture / "camera_info.json", {
@@ -110,6 +110,7 @@ def create_perception_run(
             "video": "rgb_camera.mp4", "timestamp_index": "rgb_frames.jsonl",
             "camera_info": "camera_info.json",
             "metadata": "rgb_video.json", "frame_count": frame_count,
+            "width_px": width, "height_px": height, "fps": 30.0,
             "first_stamp_s": 0.0, "last_stamp_s": (frame_count - 1) / 30.0,
         },
         "ground_truth": {
