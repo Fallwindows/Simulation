@@ -142,12 +142,16 @@ def Xform "Asset" (
             def Shader "NormalTexture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/peanut_jar_normal.png@
+                token inputs:sourceColorSpace = "raw"
+                float4 inputs:scale = (2, 2, 2, 1)
+                float4 inputs:bias = (-1, -1, -1, 0)
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 float3 outputs:rgb
             }
             def Shader "RoughnessTexture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/peanut_jar_roughness.png@
+                token inputs:sourceColorSpace = "raw"
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 float outputs:r
             }
@@ -250,12 +254,16 @@ def Xform "Asset" (
             def Shader "NormalTexture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/peanut_jar_normal.png@
+                token inputs:sourceColorSpace = "raw"
+                float4 inputs:scale = (2, 2, 2, 1)
+                float4 inputs:bias = (-1, -1, -1, 0)
                 float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
                 float3 outputs:rgb
             }
             def Shader "RoughnessTexture" {
                 uniform token info:id = "UsdUVTexture"
                 asset inputs:file = @../textures/peanut_jar_roughness.png@
+                token inputs:sourceColorSpace = "raw"
                 float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
                 float outputs:r
             }

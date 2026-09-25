@@ -640,6 +640,9 @@ def _material(
             '            def Shader "NormalTexture" {',
             '                uniform token info:id = "UsdUVTexture"',
             f'                asset inputs:file = @{normal_texture_path}@',
+            '                token inputs:sourceColorSpace = "raw"',
+            '                float4 inputs:scale = (2, 2, 2, 1)',
+            '                float4 inputs:bias = (-1, -1, -1, 0)',
             '                float2 inputs:st.connect = </Asset/Looks/' + safe + '/StReader.outputs:result>',
             '                float3 outputs:rgb',
             '            }',
@@ -649,6 +652,7 @@ def _material(
             '            def Shader "RoughnessTexture" {',
             '                uniform token info:id = "UsdUVTexture"',
             f'                asset inputs:file = @{roughness_texture_path}@',
+            '                token inputs:sourceColorSpace = "raw"',
             '                float2 inputs:st.connect = </Asset/Looks/' + safe + '/StReader.outputs:result>',
             '                float outputs:r',
             '            }',
@@ -1625,21 +1629,31 @@ def generate_library(root: Path | None = None) -> Path:
     for spec in ASSET_SPECS:
         texture_name = f"{spec.asset_key}.png"
         texture_path = texture_root / texture_name
-        normal_texture_name = f"{spec.asset_key}_normal.png" if spec.assembly_parts else None
-        roughness_texture_name = f"{spec.asset_key}_roughness.png" if spec.assembly_parts else None
+        candidate_normal_name = f"{spec.asset_key}_normal.png" if spec.assembly_parts else None
+        candidate_roughness_name = f"{spec.asset_key}_roughness.png" if spec.assembly_parts else None
+        usd_source = _asset_usda(spec, texture_name, candidate_normal_name, candidate_roughness_name)
+        uses_surface_maps = 'def Shader "NormalTexture"' in usd_source
+        normal_texture_name = candidate_normal_name if uses_surface_maps else None
+        roughness_texture_name = candidate_roughness_name if uses_surface_maps else None
         normal_texture_path = texture_root / normal_texture_name if normal_texture_name else None
         roughness_texture_path = texture_root / roughness_texture_name if roughness_texture_name else None
         usd_path = usd_root / f"{spec.asset_key}.usda"
         if spec.assembly_parts:
             _write_category_texture(texture_path, spec)
-            assert normal_texture_path is not None and roughness_texture_path is not None
-            _write_surface_maps(normal_texture_path, roughness_texture_path, spec)
+            if uses_surface_maps:
+                assert normal_texture_path is not None and roughness_texture_path is not None
+                _write_surface_maps(normal_texture_path, roughness_texture_path, spec)
+            else:
+                # Organic produce and unprinted fixtures have no UV label
+                # surface. Remove old generated maps instead of registering
+                # source artifacts that no authored material consumes.
+                assert candidate_normal_name is not None and candidate_roughness_name is not None
+                (texture_root / candidate_normal_name).unlink(missing_ok=True)
+                (texture_root / candidate_roughness_name).unlink(missing_ok=True)
         else:
             # Preserve the repaired baseline library byte-for-byte.
             _write_rich_texture(texture_path, spec)
-        usd_path.write_text(
-            _asset_usda(spec, texture_name, normal_texture_name, roughness_texture_name), encoding="utf-8"
-        )
+        usd_path.write_text(usd_source, encoding="utf-8")
         entry = {
             "asset_key": spec.asset_key,
             "category": spec.category,
@@ -1658,7 +1672,7 @@ def generate_library(root: Path | None = None) -> Path:
             "assembly_parts": list(spec.assembly_parts or ("legacy_body", spec.model_type)),
             "geometry_signature": _geometry_signature(spec),
             "material_classes": list(
-                _material_classes(spec) + (("normal_map", "roughness_map") if spec.assembly_parts else ())
+                _material_classes(spec) + (("normal_map", "roughness_map") if uses_surface_maps else ())
             ),
             "introduced_in": "G02-A" if spec.assembly_parts else "baseline",
             "usd_sha256": _sha256(usd_path),

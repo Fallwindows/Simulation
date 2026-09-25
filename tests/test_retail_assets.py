@@ -522,6 +522,7 @@ class RetailAssetTests(unittest.TestCase):
         new_assets = [asset for asset in self.catalog.assets if asset.introduced_in == "G02-A"]
         sizes = set()
         texture_hashes = set()
+        assets_without_surface_maps = set()
 
         for asset in new_assets:
             source = asset.usd_path.read_text(encoding="utf-8")
@@ -530,12 +531,32 @@ class RetailAssetTests(unittest.TestCase):
             print_bindings = geometry.count("</Asset/Looks/Print>")
             uv_sets = geometry.count("primvars:st")
             self.assertEqual(front_bindings + print_bindings, uv_sets, asset.asset_key)
-            if "UsdUVTexture" in source:
+            normal_blocks = re.findall(r'def Shader "NormalTexture" \{(.*?)\n\s+\}', source, re.DOTALL)
+            roughness_blocks = re.findall(r'def Shader "RoughnessTexture" \{(.*?)\n\s+\}', source, re.DOTALL)
+            self.assertEqual(len(normal_blocks), source.count("inputs:normal.connect"), asset.asset_key)
+            self.assertEqual(len(roughness_blocks), source.count("inputs:roughness.connect"), asset.asset_key)
+            for block in normal_blocks:
+                self.assertIn('token inputs:sourceColorSpace = "raw"', block, asset.asset_key)
+                self.assertIn("float4 inputs:scale = (2, 2, 2, 1)", block, asset.asset_key)
+                self.assertIn("float4 inputs:bias = (-1, -1, -1, 0)", block, asset.asset_key)
+            for block in roughness_blocks:
+                self.assertIn('token inputs:sourceColorSpace = "raw"', block, asset.asset_key)
+            if normal_blocks:
                 self.assertGreater(front_bindings, 0, asset.asset_key)
                 self.assertIsNotNone(asset.normal_texture_path, asset.asset_key)
                 self.assertIsNotNone(asset.roughness_texture_path, asset.asset_key)
                 self.assertIn("inputs:normal.connect", source)
                 self.assertIn("inputs:roughness.connect", source)
+                self.assertIn("normal_map", asset.material_classes)
+                self.assertIn("roughness_map", asset.material_classes)
+            else:
+                assets_without_surface_maps.add(asset.asset_key)
+                self.assertIsNone(asset.normal_texture_path, asset.asset_key)
+                self.assertIsNone(asset.roughness_texture_path, asset.asset_key)
+                self.assertNotIn("normal_map", asset.material_classes)
+                self.assertNotIn("roughness_map", asset.material_classes)
+                self.assertFalse((asset.texture_path.parent / f"{asset.asset_key}_normal.png").exists())
+                self.assertFalse((asset.texture_path.parent / f"{asset.asset_key}_roughness.png").exists())
             if asset.asset_key == "price_display":
                 self.assertGreater(front_bindings, 0)
             with PillowImage.open(asset.texture_path) as image:
@@ -547,6 +568,10 @@ class RetailAssetTests(unittest.TestCase):
         self.assertEqual(len(ITEM_ART_DIRECTIONS), 45)
         self.assertEqual(len({direction[0] for direction in ITEM_ART_DIRECTIONS.values()}), 45)
         self.assertEqual({direction[2] for direction in ITEM_ART_DIRECTIONS.values()}, set(range(6)))
+        self.assertEqual(assets_without_surface_maps, {
+            "banana_bunch", "pear", "broccoli", "carrot_bunch",
+            "angled_produce_bin", "wicker_basket", "shelf_divider", "bottle_rack",
+        })
 
     def test_register_parts_match_upgraded_organic_and_fixture_geometry(self):
         expectations = {
