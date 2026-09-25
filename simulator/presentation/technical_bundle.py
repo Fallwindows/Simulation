@@ -159,6 +159,17 @@ def _plain_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _validate_camera_head_transform_receipt(
+    receipt: object,
+    expected: dict[str, object],
+    view_id: str,
+) -> None:
+    """Bind a view receipt to the transform artifact recomputed by the validator."""
+
+    if (expected.get("artifact_declared") is True or receipt is not None) and receipt != expected:
+        raise ValueError(f"technical camera head transform receipt is invalid for {view_id}")
+
+
 def _raw_indices_sha256(indices: tuple[int, ...]) -> str:
     digest = hashlib.sha256()
     for value in indices:
@@ -733,13 +744,16 @@ def validate_technical_delivery(
     if not all(math.isfinite(value) for value in simulation_window) or simulation_window[0] > simulation_window[1]:
         raise ValueError("technical delivery simulation window is invalid")
     from simulator.sensors.scan_projection import resolve_transform
-    from simulator.technical_lidar import EstimatedTrajectory
+    from simulator.technical_lidar import EstimatedTrajectory, load_camera_head_transform_artifact
     from simulator.technical_views import TechnicalCameraPath, load_inventory, load_plan, select_inventory
 
     trajectory_path = _verified_source_artifact(directory, catalog_source, "trajectory")
     inventory_path = _verified_source_artifact(directory, catalog_source, "inventory")
     transforms_path = _verified_source_artifact(directory, catalog_source, "sensor_transforms")
     transforms = _json(transforms_path)
+    _camera_head_trajectory, expected_camera_head_receipt = load_camera_head_transform_artifact(
+        transforms_path, transforms
+    )
     frames = transforms.get("frames")
     transform_rows = transforms.get("transforms")
     if not isinstance(frames, dict) or not isinstance(transform_rows, list):
@@ -912,6 +926,9 @@ def validate_technical_delivery(
                 raise ValueError(f"technical observed calibration disclosure is invalid for {view_id}")
         else:
             raise ValueError(f"technical camera calibration provenance is unsupported for {view_id}")
+        _validate_camera_head_transform_receipt(
+            derivation.get("camera_head_transform"), expected_camera_head_receipt, view_id
+        )
         source_window = tuple(float(value) for value in expected_window)
         display_window = tuple(float(value) for value in expected_display_window)
         primary_window = display_window if (

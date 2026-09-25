@@ -192,6 +192,11 @@ def emit_rgb_bundle(
     if sensor_transforms != (capture_dir / "sensor_transforms.json").resolve() or not sensor_transforms.is_file():
         raise ValueError("RGB camera calibration must bind capture/sensor_transforms.json")
     _verify_inventory_file(capture_dir, capture_inventory, sensor_transforms)
+    from simulator.technical_lidar import load_camera_head_transform_artifact
+
+    camera_head_trajectory, camera_head_receipt = load_camera_head_transform_artifact(sensor_transforms)
+    if camera_head_trajectory is not None:
+        camera_head_trajectory.validate_image_timestamps(float(frame["stamp_s"]) for frame in frames)
     acceptance_hashes = {name: sha256_path(path) for name, path in source_paths.items()}
     acceptance_hashes["sensor_transforms"] = sha256_path(sensor_transforms)
     acceptance = validate_rgb_capture_acceptance(
@@ -219,6 +224,7 @@ def emit_rgb_bundle(
         "source_time_range_s": list(source_time_range),
         "source_frame_count": len(frames),
         "source_timestamp_mapping": "rgb_frames.jsonl contiguous frame_index and 30 fps simulation stamps",
+        "camera_head_transform": camera_head_receipt,
         "presentation_transform": acceptance["presentation_transform"],
         "map_version": None,
         "object_state_version": None,

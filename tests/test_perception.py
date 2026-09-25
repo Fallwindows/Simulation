@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from evaluation.metrics import PoseSample
+from simulator.technical_lidar import CameraHeadTransformTrajectory
 from simulator.perception.rgb_tracking import (
     BlobTracker,
     Detection,
@@ -23,6 +24,7 @@ from simulator.perception.rgb_tracking import (
     _decode_pointcloud2_xyz,
     _finite_xyz_points,
     _map_estimates_to_start_relative,
+    _load_sensor_geometry,
     _load_slam_poses,
     _maximum_cardinality_minimum_cost_assignment,
     _set_canonical_track_identity,
@@ -1318,6 +1320,56 @@ class PerceptionTests(unittest.TestCase):
         rotated = _world_points_to_camera(np.asarray([[1.0, 0.0, 4.0]]), quarter_turn, geometry)
         self.assertAlmostEqual(rotated[0, 0], -0.2)
         self.assertAlmostEqual(rotated[0, 1], -1.0)
+
+    def test_world_point_projection_uses_articulated_head_at_image_time(self):
+        half_turn = 2 ** -0.5
+        trajectory = CameraHeadTransformTrajectory(
+            np.asarray([0.0, 1.0]),
+            np.zeros((2, 3)),
+            np.asarray([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, half_turn, half_turn]]),
+            {"mode": "dynamic_bound_artifact"},
+        )
+        geometry = {
+            "rig_camera_t": np.zeros(3),
+            "rig_camera_r": np.eye(3),
+            "link_optical_t": np.zeros(3),
+            "link_optical_r": np.eye(3),
+            "camera_head_trajectory": trajectory,
+        }
+        point = np.asarray([[1.0, 0.0, 4.0]])
+        base_pose = PoseSample(0.0, (0.0, 0.0, 0.0))
+        at_start = _world_points_to_camera(point, base_pose, geometry, image_timestamp_s=0.0)
+        after_head_turn = _world_points_to_camera(point, base_pose, geometry, image_timestamp_s=1.0)
+        np.testing.assert_allclose(at_start, [[1.0, 0.0, 4.0]], atol=1e-12)
+        np.testing.assert_allclose(after_head_turn, [[0.0, -1.0, 4.0]], atol=1e-12)
+
+    def test_sensor_geometry_preserves_legacy_direct_static_optical_edge(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "sensor_transforms.json"
+            path.write_text(json.dumps({
+                "frames": {
+                    "sensor_rig": "sensor_rig", "camera_optical": "camera_optical_frame",
+                    "lidar_link": "lidar_link",
+                },
+                "transforms": [
+                    {
+                        "parent": "sensor_rig", "child": "camera_optical_frame",
+                        "translation_m": [0.2, 0.0, 1.0],
+                        "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    },
+                    {
+                        "parent": "sensor_rig", "child": "lidar_link",
+                        "translation_m": [0.0, 0.0, 0.0],
+                        "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    },
+                ],
+                "intrinsics": {"fx_px": 100.0, "fy_px": 100.0, "cx_px": 50.0, "cy_px": 50.0},
+            }), encoding="utf-8")
+            geometry = _load_sensor_geometry(path)
+        np.testing.assert_allclose(geometry["rig_camera_t"], [0.2, 0.0, 1.0])
+        np.testing.assert_allclose(geometry["rig_camera_r"], np.eye(3))
+        np.testing.assert_allclose(geometry["link_optical_r"], np.eye(3))
+        self.assertIsNone(geometry["camera_head_trajectory"])
 
     def test_lidar_association_skips_scan_when_rgb_pose_interpolation_is_invalid(self):
         poses = [PoseSample(0.0, (0.0, 0.0, 0.0)), PoseSample(1.0, (1.0, 0.0, 0.0))]

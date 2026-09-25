@@ -31,6 +31,7 @@ from simulator.sensors.scan_projection import (
     quaternion_xyzw_matrix,
     read_pointcloud2_sqlite,
     resolve_transform,
+    transform_matrix,
 )
 
 
@@ -168,6 +169,368 @@ def _slerp_xyzw(first: np.ndarray, second: np.ndarray, alpha: float) -> np.ndarr
     angle = math.acos(dot)
     sine = math.sin(angle)
     return (math.sin((1.0 - alpha) * angle) / sine) * a + (math.sin(alpha * angle) / sine) * b
+
+
+def _invert_rigid(transform: np.ndarray) -> np.ndarray:
+    matrix = np.asarray(transform, dtype=np.float64)
+    if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+        raise ValueError("rigid transform must be a finite 4x4 matrix")
+    result = np.eye(4, dtype=np.float64)
+    result[:3, :3] = matrix[:3, :3].T
+    result[:3, 3] = -(result[:3, :3] @ matrix[:3, 3])
+    return result
+
+
+class CameraHeadTransformTrajectory:
+    """Hash-bound, timestamped ``sensor_rig`` to ``camera_link`` poses."""
+
+    def __init__(
+        self,
+        timestamps_s: np.ndarray,
+        translations_m: np.ndarray,
+        quaternions_xyzw: np.ndarray,
+        receipt: dict[str, object],
+    ):
+        self.timestamps_s = np.asarray(timestamps_s, dtype=np.float64)
+        self.translations_m = np.asarray(translations_m, dtype=np.float64)
+        self.quaternions_xyzw = np.asarray(quaternions_xyzw, dtype=np.float64)
+        self.receipt = dict(receipt)
+        count = len(self.timestamps_s)
+        if (
+            self.timestamps_s.ndim != 1
+            or count < 2
+            or self.translations_m.shape != (count, 3)
+            or self.quaternions_xyzw.shape != (count, 4)
+            or not np.isfinite(self.timestamps_s).all()
+            or not np.isfinite(self.translations_m).all()
+            or not np.isfinite(self.quaternions_xyzw).all()
+            or np.any(np.diff(self.timestamps_s) <= 0.0)
+        ):
+            raise ValueError("camera head transform samples must be finite and strictly increasing")
+        norms = np.linalg.norm(self.quaternions_xyzw, axis=1)
+        if not np.allclose(norms, 1.0, rtol=0.0, atol=1e-6):
+            raise ValueError("camera head transform contains a non-unit quaternion")
+
+    def rig_from_camera_link(self, timestamp_s: float) -> np.ndarray:
+        timestamp = float(timestamp_s)
+        if (
+            not math.isfinite(timestamp)
+            or timestamp < self.timestamps_s[0] - 1e-9
+            or timestamp > self.timestamps_s[-1] + 1e-9
+        ):
+            raise ValueError("image timestamp lies outside the camera head transform artifact")
+        upper = int(np.searchsorted(self.timestamps_s, timestamp, side="right"))
+        if upper == 0:
+            lower = upper = 0
+        elif upper >= len(self.timestamps_s):
+            lower = upper = len(self.timestamps_s) - 1
+        else:
+            lower = upper - 1
+        alpha = 0.0 if lower == upper else float(
+            (timestamp - self.timestamps_s[lower])
+            / (self.timestamps_s[upper] - self.timestamps_s[lower])
+        )
+        translation = (
+            (1.0 - alpha) * self.translations_m[lower]
+            + alpha * self.translations_m[upper]
+        )
+        quaternion = _slerp_xyzw(
+            self.quaternions_xyzw[lower], self.quaternions_xyzw[upper], alpha
+        )
+        return transform_matrix(translation, quaternion)
+
+    def validate_image_timestamps(
+        self, timestamps_s: Iterable[float], tolerance_s: float = 1e-6
+    ) -> None:
+        """Require every observed RGB stamp to match an exported head sample."""
+
+        timestamps = np.asarray(tuple(float(value) for value in timestamps_s), dtype=np.float64)
+        if (
+            timestamps.ndim != 1
+            or not len(timestamps)
+            or not np.isfinite(timestamps).all()
+            or np.any(np.diff(timestamps) <= 0.0)
+            or not math.isfinite(tolerance_s)
+            or tolerance_s < 0.0
+        ):
+            raise ValueError("RGB image timestamps for camera head alignment are invalid")
+        upper = np.searchsorted(self.timestamps_s, timestamps, side="left")
+        upper = np.clip(upper, 0, len(self.timestamps_s) - 1)
+        lower = np.maximum(0, upper - 1)
+        deltas = np.minimum(
+            np.abs(timestamps - self.timestamps_s[lower]),
+            np.abs(timestamps - self.timestamps_s[upper]),
+        )
+        if np.any(deltas > tolerance_s):
+            raise ValueError("RGB image timestamp has no matching camera head transform sample")
+
+
+def _canonical_relative_artifact_path(root: Path, value: object) -> Path:
+    text = str(value)
+    candidate = Path(text)
+    if (
+        not text
+        or candidate.is_absolute()
+        or "\\" in text
+        or any(part in ("", ".", "..") for part in text.split("/"))
+    ):
+        raise ValueError("camera head transform artifact path must be canonical and relative")
+    resolved = (root / candidate).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ValueError("camera head transform artifact path escapes the capture directory")
+    return resolved
+
+
+def load_camera_head_transform_artifact(
+    sensor_transforms_path: str | Path,
+    transforms_payload: dict[str, object] | None = None,
+) -> tuple[CameraHeadTransformTrajectory | None, dict[str, object]]:
+    """Load the optional articulated head stream and independently verify its binding."""
+
+    transforms_path = Path(sensor_transforms_path).resolve()
+    transforms = transforms_payload
+    if transforms is None:
+        transforms = json.loads(transforms_path.read_text(encoding="utf-8"))
+    if not isinstance(transforms, dict):
+        raise ValueError("sensor transforms must contain a JSON mapping")
+    transform_rows = transforms.get("transforms")
+    if not isinstance(transform_rows, list):
+        raise ValueError("recorded sensor transform graph is missing")
+    declarations = transforms.get("dynamic_transform_artifacts")
+    if declarations is None:
+        configured_frames = transforms.get("frames")
+        static_parent = (
+            str(configured_frames.get("sensor_rig", "sensor_rig"))
+            if isinstance(configured_frames, dict) else "sensor_rig"
+        )
+        static_child = (
+            str(configured_frames.get("camera_optical", "camera_optical_frame"))
+            if isinstance(configured_frames, dict) else "camera_optical_frame"
+        )
+        try:
+            resolve_transform(
+                transform_rows, source_frame=static_parent, target_frame=static_child
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "camera transform graph has neither a complete static path nor a dynamic artifact"
+            ) from exc
+        return None, {
+            "mode": "static_sensor_transform",
+            "artifact_declared": False,
+            "parent_frame": static_parent,
+            "child_frame": static_child,
+        }
+    if not isinstance(declarations, list):
+        raise ValueError("dynamic transform artifact declarations must be a list")
+    seen_pairs: set[tuple[str, str]] = set()
+    selected: dict[str, object] | None = None
+    for declaration in declarations:
+        if not isinstance(declaration, dict):
+            raise ValueError("dynamic transform artifact declaration must be a mapping")
+        parent = declaration.get("parent_frame")
+        child = declaration.get("child_frame")
+        if not isinstance(parent, str) or not parent or not isinstance(child, str) or not child:
+            raise ValueError("dynamic transform artifact declaration has invalid frames")
+        pair = (parent, child)
+        if pair in seen_pairs:
+            raise ValueError("dynamic transform artifact declaration duplicates a frame pair")
+        seen_pairs.add(pair)
+        if pair == ("sensor_rig", "camera_link"):
+            selected = declaration
+    if selected is None:
+        raise ValueError("dynamic transform artifacts were declared without sensor_rig to camera_link")
+    digest = selected.get("sha256")
+    size = selected.get("size_bytes")
+    if (
+        selected.get("schema_version") != 1
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or size <= 0
+    ):
+        raise ValueError("camera head transform artifact binding is malformed")
+    artifact_path = _canonical_relative_artifact_path(transforms_path.parent, selected.get("path"))
+    if not artifact_path.is_file():
+        raise ValueError("declared camera head transform artifact is missing")
+    artifact_bytes = artifact_path.read_bytes()
+    actual_digest = hashlib.sha256(artifact_bytes).hexdigest()
+    if len(artifact_bytes) != size or actual_digest != digest:
+        raise ValueError("camera head transform artifact size or SHA-256 does not match its binding")
+    capture_manifest_path = transforms_path.parent / "capture_manifest.json"
+    if not capture_manifest_path.is_file():
+        raise ValueError("dynamic camera head transform requires capture_manifest.json")
+    capture_manifest = json.loads(capture_manifest_path.read_text(encoding="utf-8"))
+    manifest_files = capture_manifest.get("files") if isinstance(capture_manifest, dict) else None
+    manifest_rows = [
+        row for row in manifest_files
+        if isinstance(row, dict) and row.get("path") == str(selected["path"])
+    ] if isinstance(manifest_files, list) else []
+    if (
+        len(manifest_rows) != 1
+        or manifest_rows[0].get("sha256") != actual_digest
+        or manifest_rows[0].get("size_bytes") != len(artifact_bytes)
+    ):
+        raise ValueError("capture manifest does not bind the dynamic camera head transform artifact")
+    artifact = json.loads(artifact_bytes.decode("utf-8"))
+    if not isinstance(artifact, dict):
+        raise ValueError("camera head transform artifact must contain a JSON mapping")
+    frames = artifact.get("frames")
+    interpolation = artifact.get("interpolation")
+    if (
+        artifact.get("schema") != "grocery.camera_head_transforms"
+        or artifact.get("version") != 1
+        or artifact.get("direction") != "parent_to_child"
+        or artifact.get("translation_units") != "m"
+        or artifact.get("timestamp_units") != "s"
+        or artifact.get("timestamp_domain") != "Isaac simulation time (/clock)"
+        or artifact.get("composition") != (
+            "q_sensor_rig_camera_link = q_configured_mount * q_head_articulation"
+        )
+        or not isinstance(frames, dict)
+        or frames.get("parent") != "sensor_rig"
+        or frames.get("child") != "camera_link"
+        or frames.get("optical_child") != "camera_optical_frame"
+        or interpolation != {
+            "translation": "linear",
+            "rotation": "shortest_arc_quaternion_slerp_xyzw",
+            "range": "closed_0_to_duration_no_extrapolation",
+        }
+    ):
+        raise ValueError("camera head transform artifact schema or frame contract is invalid")
+    configured_frames = transforms.get("frames")
+    if isinstance(configured_frames, dict) and (
+        configured_frames.get("sensor_rig") != frames["parent"]
+        or configured_frames.get("camera_link") != frames["child"]
+        or configured_frames.get("camera_optical") != frames["optical_child"]
+    ):
+        raise ValueError("camera head transform frames do not match the recorded transform graph")
+    static_child = artifact.get("static_child_transform")
+    matching_dynamic_rows = [
+        row for row in transform_rows
+        if isinstance(row, dict)
+        and row.get("parent") == "sensor_rig"
+        and row.get("child") == "camera_link"
+    ] if isinstance(transform_rows, list) else []
+    matching_static_rows = [
+        row for row in transform_rows
+        if isinstance(row, dict)
+        and row.get("parent") == "camera_link"
+        and row.get("child") == "camera_optical_frame"
+    ] if isinstance(transform_rows, list) else []
+    if (
+        not isinstance(static_child, dict)
+        or static_child != {
+            "parent": "camera_link",
+            "child": "camera_optical_frame",
+            "translation_m": [0.0, 0.0, 0.0],
+            "rotation_xyzw": [0.5, -0.5, 0.5, -0.5],
+        }
+        or matching_dynamic_rows
+        or len(matching_static_rows) != 1
+    ):
+        raise ValueError("camera head transform requires disjoint dynamic and static graph edges")
+    try:
+        declared_static = transform_matrix(
+            static_child["translation_m"], static_child["rotation_xyzw"]
+        )
+        recorded_static = transform_matrix(
+            matching_static_rows[0].get("translation_m", ()),
+            matching_static_rows[0].get("rotation_xyzw", ()),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("camera head transform static optical child contract is invalid") from exc
+    if not np.allclose(declared_static, recorded_static, rtol=0.0, atol=1e-12):
+        raise ValueError("camera head transform static optical child does not match sensor transforms")
+    sample_hz = artifact.get("sample_hz")
+    duration_s = artifact.get("duration_s")
+    samples = artifact.get("samples")
+    if (
+        not isinstance(sample_hz, (int, float))
+        or isinstance(sample_hz, bool)
+        or not math.isfinite(float(sample_hz))
+        or float(sample_hz) <= 0.0
+        or not isinstance(duration_s, (int, float))
+        or isinstance(duration_s, bool)
+        or not math.isfinite(float(duration_s))
+        or float(duration_s) <= 0.0
+        or not isinstance(samples, list)
+    ):
+        raise ValueError("camera head transform cadence or samples are invalid")
+    timestamps: list[float] = []
+    translations: list[tuple[float, float, float]] = []
+    quaternions: list[tuple[float, float, float, float]] = []
+    for sample in samples:
+        if not isinstance(sample, dict) or set(sample) != {
+            "timestamp_s", "translation_m", "rotation_xyzw"
+        }:
+            raise ValueError("camera head transform sample schema is invalid")
+        timestamp = sample["timestamp_s"]
+        translation = sample["translation_m"]
+        quaternion = sample["rotation_xyzw"]
+        if (
+            not isinstance(timestamp, (int, float))
+            or isinstance(timestamp, bool)
+            or not isinstance(translation, list)
+            or len(translation) != 3
+            or not isinstance(quaternion, list)
+            or len(quaternion) != 4
+        ):
+            raise ValueError("camera head transform sample values are invalid")
+        timestamps.append(float(timestamp))
+        translations.append(tuple(float(value) for value in translation))
+        quaternions.append(tuple(float(value) for value in quaternion))
+    trajectory = CameraHeadTransformTrajectory(
+        np.asarray(timestamps), np.asarray(translations), np.asarray(quaternions), {}
+    )
+    expected_count = int(round(float(duration_s) * float(sample_hz))) + 1
+    expected_step = 1.0 / float(sample_hz)
+    if (
+        len(trajectory.timestamps_s) != expected_count
+        or not math.isclose(float(trajectory.timestamps_s[0]), 0.0, abs_tol=1e-9)
+        or not math.isclose(float(trajectory.timestamps_s[-1]), float(duration_s), abs_tol=1e-9)
+        or not np.allclose(np.diff(trajectory.timestamps_s), expected_step, rtol=0.0, atol=1e-9)
+    ):
+        raise ValueError("camera head transform timestamps do not match the declared cadence and duration")
+    source = artifact.get("source")
+    trajectory_config = source.get("trajectory_config") if isinstance(source, dict) else None
+    if (
+        not isinstance(trajectory_config, dict)
+        or not isinstance(trajectory_config.get("path"), str)
+        or not trajectory_config.get("path")
+        or not isinstance(trajectory_config.get("sha256"), str)
+        or len(trajectory_config["sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in trajectory_config["sha256"])
+        or not isinstance(source.get("git_commit"), str)
+        or len(source["git_commit"]) != 40
+        or any(character not in "0123456789abcdef" for character in source["git_commit"])
+        or not isinstance(source.get("git_tree"), str)
+        or len(source["git_tree"]) != 40
+        or any(character not in "0123456789abcdef" for character in source["git_tree"])
+    ):
+        raise ValueError("camera head transform source provenance is invalid")
+    receipt = {
+        "mode": "dynamic_bound_artifact",
+        "artifact_declared": True,
+        "path": artifact_path.name,
+        "sha256": actual_digest,
+        "size_bytes": len(artifact_bytes),
+        "schema": artifact["schema"],
+        "schema_version": artifact["version"],
+        "parent_frame": frames["parent"],
+        "child_frame": frames["child"],
+        "optical_child_frame": frames["optical_child"],
+        "timestamp_domain": artifact["timestamp_domain"],
+        "sample_hz": float(sample_hz),
+        "sample_count": len(trajectory.timestamps_s),
+        "time_range_s": [float(trajectory.timestamps_s[0]), float(trajectory.timestamps_s[-1])],
+        "interpolation": dict(interpolation),
+        "source": source,
+    }
+    trajectory.receipt = dict(receipt)
+    return trajectory, receipt
 
 
 class EstimatedTrajectory:
@@ -425,7 +788,8 @@ class SelectiveLidarSource:
         self.rgb_timestamps_s = np.asarray([item.timestamp_s for item in self.rgb_frames])
         self.trajectory = EstimatedTrajectory.from_csv(trajectory_path)
         camera = json.loads(Path(camera_info_path).read_text(encoding="utf-8"))
-        transforms = json.loads(Path(sensor_transforms_path).read_text(encoding="utf-8"))
+        self.sensor_transforms_path = Path(sensor_transforms_path).resolve()
+        transforms = json.loads(self.sensor_transforms_path.read_text(encoding="utf-8"))
         effective = json.loads(Path(effective_config_path).read_text(encoding="utf-8"))
         frames = transforms.get("frames", {})
         camera_frame = str(frames.get("camera_optical", ""))
@@ -441,12 +805,26 @@ class SelectiveLidarSource:
         transform_records = transforms.get("transforms")
         if not isinstance(transform_records, list):
             raise ValueError("recorded sensor transform graph is missing")
-        self.optical_from_lidar = resolve_transform(
-            transform_records, source_frame=str(frames["lidar_link"]), target_frame=str(frames["camera_optical"])
-        )
         self.rig_from_lidar = resolve_transform(
             transform_records, source_frame=str(frames["lidar_link"]), target_frame=str(frames["sensor_rig"])
         )
+        self.camera_head_trajectory, self.camera_head_transform_receipt = load_camera_head_transform_artifact(
+            self.sensor_transforms_path, transforms
+        )
+        if self.camera_head_trajectory is not None:
+            self.camera_head_trajectory.validate_image_timestamps(self.rgb_timestamps_s)
+            self.optical_from_lidar = None
+            self.optical_from_camera_link = resolve_transform(
+                transform_records,
+                source_frame=str(frames["camera_link"]),
+                target_frame=str(frames["camera_optical"]),
+            )
+        else:
+            self.optical_from_lidar = resolve_transform(
+                transform_records,
+                source_frame=str(frames["lidar_link"]),
+                target_frame=str(frames["camera_optical"]),
+            )
         self.lidar_frame_id = str(frames["lidar_link"])
         lidar_config = effective.get("lidar")
         if not isinstance(lidar_config, dict):
@@ -464,8 +842,8 @@ class SelectiveLidarSource:
         self.maximum_current_scan_age_s = self.expected_scan_period_s * 2.0
         nearest_frame_indices = {self.rgb_at(record.timestamp_s).frame_index for record in self.scan_records}
         self.detections = _load_detection_frames(Path(annotations_path), nearest_frame_indices)
-        self._projected_cache: OrderedDict[int, tuple[ProjectedScan, int, tuple[str, ...]]] = OrderedDict()
-        self._selection_cache: OrderedDict[tuple[int, str, int], PreparedScan] = OrderedDict()
+        self._projected_cache: OrderedDict[tuple[int, int], tuple[ProjectedScan, int, tuple[str, ...]]] = OrderedDict()
+        self._selection_cache: OrderedDict[tuple[int, int, str, int], PreparedScan] = OrderedDict()
         self._roi_cache: dict[tuple[float, float, int], tuple[RoiObservation, ...]] = {}
         self.ffmpeg = ffmpeg or shutil.which("ffmpeg")
         if not self.ffmpeg:
@@ -477,6 +855,13 @@ class SelectiveLidarSource:
         self._rgb_frame_cache: OrderedDict[tuple[int, int, int], np.ndarray] = OrderedDict()
         self.rgb_decoder_restart_count = 0
         self.rgb_decoded_frame_count = 0
+
+    def verify_camera_head_transform_snapshot(self) -> None:
+        """Reject capture-side articulated-transform changes during rendering."""
+
+        _trajectory, receipt = load_camera_head_transform_artifact(self.sensor_transforms_path)
+        if receipt != self.camera_head_transform_receipt:
+            raise ValueError("camera head transform artifact changed during rendering")
 
     def close(self) -> None:
         if self._decoder is not None:
@@ -548,10 +933,15 @@ class SelectiveLidarSource:
             alpha = alpha * alpha * (3.0 - 2.0 * alpha)
         return previous, latest, alpha
 
-    def _projected(self, record: ScanRecord) -> tuple[ProjectedScan, int, tuple[str, ...]]:
-        cached = self._projected_cache.get(record.timestamp_ns)
+    def _projected(
+        self, record: ScanRecord, rgb_frame: RgbFrameRecord | None = None
+    ) -> tuple[ProjectedScan, int, tuple[str, ...]]:
+        rgb = rgb_frame or self.rgb_at(record.timestamp_s)
+        image_timestamp_ns = int(round(rgb.timestamp_s * 1_000_000_000.0))
+        key = (record.timestamp_ns, image_timestamp_ns)
+        cached = self._projected_cache.get(key)
         if cached is not None:
-            self._projected_cache.move_to_end(record.timestamp_ns)
+            self._projected_cache.move_to_end(key)
             return cached
         bag_record = read_pointcloud2_sqlite(
             self.database_path, topic=LIDAR_TOPIC, timestamp_ns=record.timestamp_ns,
@@ -565,28 +955,56 @@ class SelectiveLidarSource:
         projected = project_lidar_scan(
             bag_record.cloud.xyz_m,
             bag_record.cloud.raw_point_indices,
-            optical_from_lidar=self.optical_from_lidar,
+            optical_from_lidar=self._optical_from_lidar_at(record.timestamp_s, rgb.timestamp_s),
             intrinsics=self.intrinsics,
             minimum_depth_m=self.minimum_depth_m,
             maximum_depth_m=self.maximum_depth_m,
         )
         cached = (projected, len(bag_record.cloud.xyz_m), field_names)
-        self._projected_cache[record.timestamp_ns] = cached
-        self._projected_cache.move_to_end(record.timestamp_ns)
+        self._projected_cache[key] = cached
+        self._projected_cache.move_to_end(key)
         while len(self._projected_cache) > 4:
             self._projected_cache.popitem(last=False)
         return cached
 
+    def _optical_from_lidar_at(
+        self, scan_timestamp_s: float, image_timestamp_s: float
+    ) -> np.ndarray:
+        map_from_scan_rig = self.trajectory.map_from_sensor_rig(scan_timestamp_s)
+        map_from_image_rig = self.trajectory.map_from_sensor_rig(image_timestamp_s)
+        if self.camera_head_trajectory is None:
+            if self.optical_from_lidar is None:
+                raise ValueError("static camera transform graph is incomplete")
+            rig_from_optical = self.rig_from_lidar @ _invert_rigid(self.optical_from_lidar)
+            optical_from_image_rig = _invert_rigid(rig_from_optical)
+        else:
+            rig_from_camera = self.camera_head_trajectory.rig_from_camera_link(image_timestamp_s)
+            optical_from_image_rig = self.optical_from_camera_link @ _invert_rigid(rig_from_camera)
+        return (
+            optical_from_image_rig
+            @ _invert_rigid(map_from_image_rig)
+            @ map_from_scan_rig
+            @ self.rig_from_lidar
+        )
+
     def _map_from_lidar(self, timestamp_s: float) -> np.ndarray:
         return self.trajectory.map_from_sensor_rig(timestamp_s) @ self.rig_from_lidar
 
-    def prepare_scan(self, record: ScanRecord, selection_mode: str, limit: int) -> PreparedScan:
-        key = (record.timestamp_ns, selection_mode, limit)
+    def prepare_scan(
+        self,
+        record: ScanRecord,
+        selection_mode: str,
+        limit: int,
+        rgb_frame: RgbFrameRecord | None = None,
+    ) -> PreparedScan:
+        rgb = rgb_frame or self.rgb_at(record.timestamp_s)
+        image_timestamp_ns = int(round(rgb.timestamp_s * 1_000_000_000.0))
+        key = (record.timestamp_ns, image_timestamp_ns, selection_mode, limit)
         cached = self._selection_cache.get(key)
         if cached is not None:
             self._selection_cache.move_to_end(key)
             return cached
-        projected, raw_count, field_names = self._projected(record)
+        projected, raw_count, field_names = self._projected(record, rgb)
         if selection_mode == "camera_occlusion_surfaces":
             raw = projected.raw_xyz_m
             planar_range = np.linalg.norm(raw[:, :2], axis=1)
@@ -685,7 +1103,7 @@ class SelectiveLidarSource:
         candidates.sort(key=lambda item: (item[0], item[1], item[2].timestamp_ns))
         result: list[RoiObservation] = []
         for _negative_count, _distance, record, frame, detections in candidates[:8]:
-            projected, raw_count, field_names = self._projected(record)
+            projected, raw_count, field_names = self._projected(record, frame)
             ranked = sorted(
                 detections,
                 key=lambda item: -((item.bbox_xyxy[2] - item.bbox_xyxy[0] + 1.0) * (item.bbox_xyxy[3] - item.bbox_xyxy[1] + 1.0)),
