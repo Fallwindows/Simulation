@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import sqlite3
 import shutil
 import subprocess
 import tempfile
@@ -50,8 +52,8 @@ foreach ($functionName in @("Stop-ProcessTree","Invoke-ProcessProbe","Test-Requi
 $env:SLAM_TEST_CHILD_PIDS = $ChildPidPath
 $workerArgument = '"' + $WorkerPath + '"'
 $arguments = @("-NoProfile","-File",$workerArgument)
-$deadline = if ($Mode -eq "ready") { [DateTime]::UtcNow.AddSeconds(2) } else { [DateTime]::UtcNow.AddMilliseconds(450) }
-$perProbeMs = if ($Mode -eq "ready") { 1000 } else { 400 }
+$deadline = if ($Mode -eq "ready") { [DateTime]::UtcNow.AddSeconds(2) } else { [DateTime]::UtcNow.AddSeconds(3) }
+$perProbeMs = if ($Mode -eq "ready") { 1000 } else { 2500 }
 $status = Wait-ForRosNodes -ExecutablePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList $arguments -RequiredNodeNames @("/icp_odometry","/rtabmap") -DeadlineUtc $deadline -PerProbeTimeoutMilliseconds $perProbeMs -PollIntervalMilliseconds 0 -DiagnosticLogPath $DiagnosticPath -Phase $Mode
 Start-Sleep -Milliseconds 300
 $recordedPids = if (Test-Path -LiteralPath $ChildPidPath) { @(Get-Content -LiteralPath $ChildPidPath | ForEach-Object { [int]$_ }) } else { @() }
@@ -96,6 +98,134 @@ $leakedPids = @($recordedPids | Where-Object { Get-Process -Id $_ -ErrorAction S
             result = json.loads(result_path.read_text(encoding="utf-8-sig"))
             diagnostics = [json.loads(line) for line in diagnostic.read_text(encoding="utf-8-sig").splitlines()]
             return result, elapsed, diagnostics
+
+    def _run_attempt_harness(self, slam_directory: Path) -> dict:
+        result_path = slam_directory.parent / f"attempt-result-{time.time_ns()}.json"
+        harness = slam_directory.parent / f"attempt-harness-{time.time_ns()}.ps1"
+        harness.write_text(
+            r'''param(
+  [string]$LauncherPath,
+  [string]$SlamDirectory,
+  [string]$ResultPath
+)
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
+foreach ($functionName in @("Start-SlamAttempt")) {
+  $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
+  if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
+  Invoke-Expression $definition[0].Extent.Text
+}
+$attempt = Start-SlamAttempt -SlamDirectory $SlamDirectory
+[ordered]@{
+  attempt_id=$attempt.attempt_id
+  attempt_directory=$attempt.attempt_directory
+  prior_directory=$attempt.prior_directory
+  database_path=$attempt.database_path
+  rotated_prior_artifacts=@($attempt.rotated_prior_artifacts)
+  manifest_exists=(Test-Path -LiteralPath (Join-Path $SlamDirectory "slam_manifest.json"))
+  completion_temps=@(Get-ChildItem -LiteralPath $attempt.attempt_directory -Filter "completion-*.json.tmp" -ErrorAction SilentlyContinue | ForEach-Object FullName)
+} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+''',
+            encoding="utf-8",
+        )
+        process = subprocess.run(
+            [
+                self.pwsh,
+                "-NoProfile",
+                "-File",
+                str(harness),
+                "-LauncherPath",
+                str(LAUNCHER),
+                "-SlamDirectory",
+                str(slam_directory),
+                "-ResultPath",
+                str(result_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+        harness.unlink()
+        result_path.unlink()
+        return result
+
+    def _publish_attempt_harness(self, slam_directory: Path, attempt: dict) -> dict:
+        result_path = slam_directory.parent / f"publish-result-{time.time_ns()}.json"
+        harness = slam_directory.parent / f"publish-harness-{time.time_ns()}.ps1"
+        harness.write_text(
+            r'''param(
+  [string]$LauncherPath,
+  [string]$AttemptDatabase,
+  [string]$CanonicalDatabase,
+  [string]$ManifestPath,
+  [string]$StagingDirectory,
+  [string]$AttemptId,
+  [string]$ResultPath
+)
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
+foreach ($functionName in @("Publish-ValidatedDatabase","Write-AtomicJson")) {
+  $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
+  if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
+  Invoke-Expression $definition[0].Extent.Text
+}
+$publication = Publish-ValidatedDatabase -AttemptDatabasePath $AttemptDatabase -CanonicalDatabasePath $CanonicalDatabase
+$payload = [ordered]@{
+  status="complete"
+  attempt_id=$AttemptId
+  database_artifact=[ordered]@{path="rtabmap.db"; size_bytes=$publication.size_bytes; sha256=$publication.sha256}
+}
+Write-AtomicJson -Value $payload -DestinationPath $ManifestPath -StagingDirectory $StagingDirectory
+[ordered]@{
+  size_bytes=$publication.size_bytes
+  sha256=$publication.sha256
+  manifest_exists=(Test-Path -LiteralPath $ManifestPath)
+  attempt_database_exists=(Test-Path -LiteralPath $AttemptDatabase)
+  completion_temps=@(Get-ChildItem -LiteralPath $StagingDirectory -Filter "completion-*.json.tmp" -ErrorAction SilentlyContinue | ForEach-Object FullName)
+} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+''',
+            encoding="utf-8",
+        )
+        process = subprocess.run(
+            [
+                self.pwsh,
+                "-NoProfile",
+                "-File",
+                str(harness),
+                "-LauncherPath",
+                str(LAUNCHER),
+                "-AttemptDatabase",
+                attempt["database_path"],
+                "-CanonicalDatabase",
+                str(slam_directory / "rtabmap.db"),
+                "-ManifestPath",
+                str(slam_directory / "slam_manifest.json"),
+                "-StagingDirectory",
+                attempt["attempt_directory"],
+                "-AttemptId",
+                attempt["attempt_id"],
+                "-ResultPath",
+                str(result_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+        harness.unlink()
+        result_path.unlink()
+        return result
 
     def test_launcher_parses_without_powershell_errors(self):
         command = (
@@ -146,6 +276,121 @@ Wait-Process -Id $child.Id
         self.assertFalse(diagnostics[0]["timed_out"])
         self.assertEqual(diagnostics[0]["exit_code"], 0)
         self.assertEqual(diagnostics[0]["observed_nodes"], ["/icp_odometry", "/rtabmap"])
+
+    def test_fresh_attempt_rejects_seeded_old_valid_database_when_current_has_no_nodes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            slam = root / "slam"
+            slam.mkdir()
+            old_database = slam / "rtabmap.db"
+            connection = sqlite3.connect(old_database)
+            with connection:
+                connection.execute("create table Node (stamp real)")
+                connection.executemany("insert into Node values (?)", [(index * 20.5 / 17,) for index in range(18)])
+            connection.close()
+            (slam / "slam_manifest.json").write_text(json.dumps({"status": "complete"}), encoding="utf-8")
+
+            attempt = self._run_attempt_harness(slam)
+            self.assertFalse((slam / "rtabmap.db").exists())
+            self.assertFalse((slam / "slam_manifest.json").exists())
+            self.assertEqual(set(attempt["rotated_prior_artifacts"]), {"rtabmap.db", "slam_manifest.json"})
+            prior_database = Path(attempt["prior_directory"]) / "rtabmap.db"
+            old_validation = subprocess.run(
+                [
+                    str(Path(os.environ.get("ISAAC_TEST_PYTHON", os.sys.executable))),
+                    str(ROOT / "scripts/validate_rtabmap_db.py"),
+                    str(prior_database),
+                    "--minimum-node-stamp",
+                    "20.5",
+                    "--scan-period-seconds",
+                    "0.1",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(old_validation.returncode, 0, old_validation.stdout + old_validation.stderr)
+            old_receipt = json.loads(old_validation.stdout)
+            self.assertEqual(old_receipt["node_count"], 18)
+            self.assertAlmostEqual(old_receipt["last_node_stamp_s"], 20.5)
+
+            current_database = Path(attempt["database_path"])
+            connection = sqlite3.connect(current_database)
+            with connection:
+                connection.execute("create table Node (stamp real)")
+            connection.close()
+            current_validation = subprocess.run(
+                [
+                    str(Path(os.environ.get("ISAAC_TEST_PYTHON", os.sys.executable))),
+                    str(ROOT / "scripts/validate_rtabmap_db.py"),
+                    str(current_database),
+                    "--minimum-node-stamp",
+                    "20.5",
+                    "--scan-period-seconds",
+                    "0.1",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(current_validation.returncode, 0)
+            self.assertIn("contains no Node rows", current_validation.stdout + current_validation.stderr)
+            self.assertFalse((slam / "slam_manifest.json").exists(), "late validation failure must not restore stale authority")
+
+    def test_prior_complete_manifest_is_absent_after_early_and_late_attempt_failure(self):
+        for phase in ("early", "late"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                slam = Path(directory) / "slam"
+                slam.mkdir()
+                (slam / "slam_manifest.json").write_text(json.dumps({"status": "complete", "source": "old"}), encoding="utf-8")
+                attempt = self._run_attempt_harness(slam)
+                self.assertFalse((slam / "slam_manifest.json").exists())
+                self.assertTrue((Path(attempt["prior_directory"]) / "slam_manifest.json").is_file())
+                if phase == "late":
+                    (slam / "slam_observer.json").write_text(json.dumps({"status": "pending_database_validation"}), encoding="utf-8")
+                    connection = sqlite3.connect(attempt["database_path"])
+                    with connection:
+                        connection.execute("create table Node (stamp real)")
+                    connection.close()
+                self.assertFalse((slam / "slam_manifest.json").exists())
+
+    def test_fresh_attempt_can_publish_one_atomic_completion_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            slam = Path(directory) / "slam"
+            slam.mkdir()
+            attempt = self._run_attempt_harness(slam)
+            attempt_database = Path(attempt["database_path"])
+            connection = sqlite3.connect(attempt_database)
+            with connection:
+                connection.execute("create table Node (stamp real)")
+                connection.executemany("insert into Node values (?)", [(index * 20.5 / 17,) for index in range(18)])
+            connection.close()
+            validation = subprocess.run(
+                [
+                    str(Path(os.environ.get("ISAAC_TEST_PYTHON", os.sys.executable))),
+                    str(ROOT / "scripts/validate_rtabmap_db.py"),
+                    str(attempt_database),
+                    "--minimum-node-stamp",
+                    "20.5",
+                    "--scan-period-seconds",
+                    "0.1",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(validation.returncode, 0, validation.stdout + validation.stderr)
+            expected_bytes = attempt_database.read_bytes()
+            publication = self._publish_attempt_harness(slam, attempt)
+            self.assertTrue(publication["manifest_exists"])
+            self.assertFalse(publication["attempt_database_exists"])
+            self.assertEqual(publication["completion_temps"], [])
+            self.assertEqual(publication["size_bytes"], len(expected_bytes))
+            self.assertEqual(publication["sha256"], hashlib.sha256(expected_bytes).hexdigest())
+            manifest = json.loads((slam / "slam_manifest.json").read_text(encoding="utf-8-sig"))
+            self.assertEqual(manifest["status"], "complete")
+            self.assertEqual(manifest["attempt_id"], attempt["attempt_id"])
+            self.assertEqual(manifest["database_artifact"]["sha256"], publication["sha256"])
 
 
 if __name__ == "__main__":

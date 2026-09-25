@@ -20,7 +20,44 @@ $runDir = (Resolve-Path -LiteralPath $RunDir).Path
 $slamDir = Join-Path $runDir "slam"
 if ($ExperimentName -and $ExperimentName -ne "offline_slam") { $slamDir = Join-Path $slamDir $ExperimentName }
 $logsDir = Join-Path $runDir "logs"
+function Start-SlamAttempt {
+  param([string]$SlamDirectory)
+  $attemptId = ([DateTime]::UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + [Guid]::NewGuid().ToString("N"))
+  $attemptsDirectory = Join-Path $SlamDirectory "attempts"
+  $attemptDirectory = Join-Path $attemptsDirectory $attemptId
+  $priorDirectory = Join-Path $attemptDirectory "prior"
+  New-Item -ItemType Directory -Force -Path $priorDirectory | Out-Null
+
+  # Invalidate the old authority first. A failed rerun must never leave a
+  # canonical complete manifest that describes an earlier attempt.
+  $rotated = @()
+  foreach ($name in @("slam_manifest.json","rtabmap.db","rtabmap.db-wal","rtabmap.db-shm","rtabmap.db-journal")) {
+    $source = Join-Path $SlamDirectory $name
+    if (Test-Path -LiteralPath $source) {
+      Move-Item -LiteralPath $source -Destination (Join-Path $priorDirectory $name)
+      $rotated += $name
+    }
+  }
+  $attemptDatabase = Join-Path $attemptDirectory "rtabmap.db"
+  if (Test-Path -LiteralPath $attemptDatabase) { throw "Fresh SLAM attempt database path already exists: $attemptDatabase" }
+  $receipt = [ordered]@{
+    attempt_id=$attemptId
+    status="started"
+    started_utc=[DateTime]::UtcNow.ToString("o")
+    mapper_database_relative_path=("attempts/$attemptId/rtabmap.db")
+    rotated_prior_artifacts=@($rotated)
+  }
+  $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $attemptDirectory "attempt.json") -Encoding UTF8
+  return [pscustomobject]@{
+    attempt_id=$attemptId
+    attempt_directory=$attemptDirectory
+    prior_directory=$priorDirectory
+    database_path=$attemptDatabase
+    rotated_prior_artifacts=@($rotated)
+  }
+}
 New-Item -ItemType Directory -Force -Path $slamDir,$logsDir | Out-Null
+$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir
 
 $manifestPath = Join-Path $captureDir "capture_manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Capture manifest not found: $manifestPath" }
@@ -45,8 +82,6 @@ $clockStartTolerance = $scanPeriod
 $replayDiscoveryDelaySeconds = 5.0
 $database = Join-Path $slamDir "rtabmap.db"
 $mappingPath = (Join-Path $repo "config/mapping/rtabmap/params.yaml").Replace([char]92, "/")
-$databaseArg = $database.Replace([char]92, "/")
-$mappingArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"ros2","launch","grocery_sim_mapping","rtabmap_lidar.launch.py","use_sim_time:=true","database_path:=$databaseArg","mapping_params_path:=$mappingPath")
 $baseArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"ros2")
 
 $env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"
@@ -149,6 +184,35 @@ function Wait-ProcessWithTimeout($Process, [int]$TimeoutSeconds, [string]$Name) 
   if ($Process.ExitCode -ne 0) { throw "$Name exited with code $($Process.ExitCode)." }
   return $Process.ExitCode
 }
+function Write-AtomicJson {
+  param([object]$Value, [string]$DestinationPath, [string]$StagingDirectory)
+  if (Test-Path -LiteralPath $DestinationPath) { throw "Refusing to replace an existing completion artifact: $DestinationPath" }
+  $temporaryPath = Join-Path $StagingDirectory ("completion-" + [Guid]::NewGuid().ToString("N") + ".json.tmp")
+  try {
+    $Value | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+    Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath
+  } finally {
+    Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+  }
+}
+function Publish-ValidatedDatabase {
+  param([string]$AttemptDatabasePath, [string]$CanonicalDatabasePath)
+  foreach ($suffix in @("-wal","-shm","-journal")) {
+    if (Test-Path -LiteralPath ($AttemptDatabasePath + $suffix)) { throw "Fresh RTAB-Map database still has a live sidecar after mapper shutdown: $suffix" }
+  }
+  $attemptInfo = Get-Item -LiteralPath $AttemptDatabasePath
+  $attemptHash = (Get-FileHash -LiteralPath $AttemptDatabasePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if (Test-Path -LiteralPath $CanonicalDatabasePath) { throw "Canonical RTAB-Map database unexpectedly exists before attempt publication." }
+  Move-Item -LiteralPath $AttemptDatabasePath -Destination $CanonicalDatabasePath
+  $canonicalInfo = Get-Item -LiteralPath $CanonicalDatabasePath
+  $canonicalHash = (Get-FileHash -LiteralPath $CanonicalDatabasePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($canonicalInfo.Length -ne $attemptInfo.Length -or $canonicalHash -ne $attemptHash) { throw "Published RTAB-Map database differs from the validated fresh attempt database." }
+  return [pscustomobject]@{size_bytes=[long]$canonicalInfo.Length; sha256=$canonicalHash}
+}
+
+$attemptDatabase = [string]$slamAttempt.database_path
+$databaseArg = $attemptDatabase.Replace([char]92, "/")
+$mappingArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"ros2","launch","grocery_sim_mapping","rtabmap_lidar.launch.py","use_sim_time:=true","database_path:=$databaseArg","mapping_params_path:=$mappingPath")
 
 Push-Location $repo
 $router = $null; $mapping = $null; $observer = $null; $player = $null
@@ -225,17 +289,23 @@ try {
   if ([int]$observerMeta.clock_regressions -ne 0) { throw "Offline replay clock regressed $($observerMeta.clock_regressions) time(s)." }
   if ([double]$observerMeta.last_clock_s -lt [double]$observerMeta.target_clock_s - 0.001) { throw "Offline replay ended before the target simulation time." }
   if ([double]$observerMeta.last_odom_stamp_s -lt [double]$observerMeta.expected_sensor_last_stamp_s - [double]$observerMeta.sensor_scan_period_s - 0.001) { throw "SLAM odometry did not process the final captured LiDAR scan span." }
-  if (-not (Test-Path -LiteralPath $database)) { throw "RTAB-Map database was not created." }
+  if (-not (Test-Path -LiteralPath $attemptDatabase)) { throw "RTAB-Map did not create the fresh attempt database." }
   # Reopen the DB after stopping the mapper to verify persisted input-span rows.
   $mappingProcess = $mapping
   Stop-ProcessTree -RootPid $mappingProcess.Id
   if (-not $mappingProcess.WaitForExit(30000)) { throw "RTAB-Map launcher did not exit before post-shutdown database validation." }
   $mapping = $null
-  $databaseValidationOutput = @(& $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python (Join-Path $repo "scripts/validate_rtabmap_db.py") $database --minimum-node-stamp $lastLidarStamp --scan-period-seconds $scanPeriod)
+  $databaseValidationOutput = @(& $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python (Join-Path $repo "scripts/validate_rtabmap_db.py") $attemptDatabase --minimum-node-stamp $lastLidarStamp --scan-period-seconds $scanPeriod)
   if ($LASTEXITCODE -ne 0) { throw "RTAB-Map database validation failed." }
   $databaseValidationText = ($databaseValidationOutput -join "`n").Trim()
   $databaseValidation = $databaseValidationText | ConvertFrom-Json
   if ($databaseValidation.integrity_check -ne "ok" -or [int]$databaseValidation.node_count -le 0 -or [double]$databaseValidation.last_node_stamp_s -lt $lastLidarStamp - $scanPeriod - 0.001) { throw "RTAB-Map post-shutdown database receipt did not cover the captured input span." }
+  $databasePublication = Publish-ValidatedDatabase -AttemptDatabasePath $attemptDatabase -CanonicalDatabasePath $database
+  $databaseInfo = Get-Item -LiteralPath $database
+  $databaseHash = [string]$databasePublication.sha256
+  $databaseValidation | Add-Member -NotePropertyName attempt_id -NotePropertyValue ([string]$slamAttempt.attempt_id)
+  $databaseValidation | Add-Member -NotePropertyName mapper_database_relative_path -NotePropertyValue ("attempts/$($slamAttempt.attempt_id)/rtabmap.db")
+  $databaseValidation | Add-Member -NotePropertyName published_database -NotePropertyValue ([ordered]@{path="rtabmap.db"; size_bytes=[long]$databaseInfo.Length; sha256=$databaseHash})
   $databaseValidationPath = Join-Path $slamDir "database_validation.json"
   ($databaseValidation | ConvertTo-Json -Depth 5) + "`n" | Set-Content -LiteralPath $databaseValidationPath -Encoding UTF8
   $observerMeta.status = "complete"
@@ -256,10 +326,12 @@ try {
   $observerArtifactHash = (Get-FileHash -LiteralPath $observerArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
   $databaseValidationInfo = Get-Item -LiteralPath $databaseValidationPath
   $databaseValidationHash = (Get-FileHash -LiteralPath $databaseValidationPath -Algorithm SHA256).Hash.ToLowerInvariant()
-  [ordered]@{
+  $slamManifest = [ordered]@{
     status="complete"; experiment=$ExperimentName; capture_id=$manifest.capture_id; capture_sha256=$manifest.capture_sha256
     git_sha=(& git -C $repo rev-parse HEAD).Trim(); rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID
     bag_replayed=$bagUri; ground_truth_subscribed=$false; publish_map_service_acknowledged=$observerMeta.publish_map_acknowledged; database_path=$database
+    slam_attempt=[ordered]@{attempt_id=[string]$slamAttempt.attempt_id; mapper_database_relative_path=("attempts/$($slamAttempt.attempt_id)/rtabmap.db"); rotated_prior_artifacts=@($slamAttempt.rotated_prior_artifacts)}
+    database_artifact=[ordered]@{path="rtabmap.db"; size_bytes=[long]$databaseInfo.Length; sha256=$databaseHash}
     replay_clock_contract=[ordered]@{expected_first_clock_s=$firstClockStamp; target_clock_s=$targetClockStamp; start_tolerance_s=$clockStartTolerance; publisher_discovery_delay_s=$replayDiscoveryDelaySeconds}
     pre_publish_graph_version=$observerMeta.pre_publish_graph_version; pre_publish_graph_version_source=$observerMeta.pre_publish_graph_version_source; graph_pose_version=$observerMeta.graph_pose_version
     dense_pose_version=$observerMeta.dense_pose_version; map_version=$observerMeta.map_version
@@ -267,7 +339,8 @@ try {
     observer_artifact=[ordered]@{path="slam_observer.json"; size_bytes=[long]$observerArtifactInfo.Length; sha256=$observerArtifactHash}
     database_validation_artifact=[ordered]@{path="database_validation.json"; size_bytes=[long]$databaseValidationInfo.Length; sha256=$databaseValidationHash}
     artifacts=$observerMeta.files; observer=$observerRecord
-  } | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $slamDir "slam_manifest.json") -Encoding UTF8
+  }
+  Write-AtomicJson -Value $slamManifest -DestinationPath (Join-Path $slamDir "slam_manifest.json") -StagingDirectory ([string]$slamAttempt.attempt_directory)
   Write-Host "Offline SLAM complete: $slamDir"
 } finally {
   foreach ($process in @($player,$observer)) { if ($process -and -not $process.HasExited) { Stop-ProcessTree -RootPid $process.Id } }
