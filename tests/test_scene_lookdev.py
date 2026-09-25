@@ -58,19 +58,23 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertGreater(spec["ambient_intensity"], 0.9 * self.environment.lighting_lux)
         self.assertIn("floor_inlay", kinds)
 
-    def test_legacy_pizza_front_reflection_is_bounded_and_idempotent(self):
+    def test_legacy_front_reflection_is_allowlisted_bounded_and_idempotent(self):
         self.assertEqual(_catalog_render_scale("frozen_pizza", (1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
         self.assertEqual(_catalog_render_scale("frozen_pizza", (-1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
+        self.assertEqual(_catalog_render_scale("sports_drink", (1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
+        self.assertEqual(_catalog_render_scale("sports_drink", (-1.0, 1.0, 1.0)), (-1.0, 1.0, 1.0))
         self.assertEqual(_catalog_render_scale("tea_box", (1.0, 1.0, 1.0)), (1.0, 1.0, 1.0))
         scenario = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
-        pizzas = [
+        corrected_assets = [
             asset
             for asset in build_aisle_layout(scenario.environment).assets
-            if asset.asset_key == "frozen_pizza"
+            if asset.asset_key in {"frozen_pizza", "sports_drink"}
         ]
-        self.assertTrue(any("/r0/" in asset.semantic_id for asset in pizzas))
-        self.assertTrue(any("/r1/" in asset.semantic_id for asset in pizzas))
-        for asset in pizzas:
+        for asset_key in ("frozen_pizza", "sports_drink"):
+            instances = [asset for asset in corrected_assets if asset.asset_key == asset_key]
+            self.assertTrue(any("/r0/" in asset.semantic_id for asset in instances))
+            self.assertTrue(any("/r1/" in asset.semantic_id for asset in instances))
+        for asset in corrected_assets:
             corrected = _catalog_render_scale(asset.asset_key, asset.scale_xyz)
             self.assertEqual(tuple(abs(value) for value in corrected), asset.scale_xyz)
             self.assertEqual(corrected[1:], asset.scale_xyz[1:])

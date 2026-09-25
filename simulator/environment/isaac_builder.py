@@ -10,13 +10,13 @@ from simulator.environment.aisle_builder import AisleLayout
 from simulator.environment.retail_catalog import load_retail_catalog
 
 
-# The frozen-pizza carton predates the corrected package-wrap convention. Its
-# +Y front panel is physically oriented correctly, but its U axis renders
-# horizontally reversed in Isaac. Reflect the referenced carton locally so its
-# exterior copy reads correctly without changing its measured bounds or aisle
-# placement. Keep this correction scene-side until the shared packaging
+# These legacy packages predate the corrected package-wrap convention. Their
+# +Y front panels are physically oriented correctly, but their U axes render
+# horizontally reversed in Isaac. Reflect each referenced package locally so
+# exterior copy reads correctly without changing measured bounds or aisle
+# placement. Keep this explicit allowlist scene-side until the shared packaging
 # generator is regenerated after the separate hero-art revision lands.
-_REFLECT_X_FOR_READABLE_FRONT = frozenset({"frozen_pizza"})
+_REFLECT_X_FOR_READABLE_FRONT = frozenset({"frozen_pizza", "sports_drink"})
 
 
 def _catalog_render_scale(asset_key: str, scale_xyz) -> tuple[float, float, float]:
