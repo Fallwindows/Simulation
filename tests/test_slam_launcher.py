@@ -116,7 +116,7 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
-foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Start-SlamAttempt")) {
+foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Open-DirectoryMutationGuard","Start-SlamAttempt")) {
   $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
   if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
   Invoke-Expression $definition[0].Extent.Text
@@ -245,7 +245,7 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
-foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Resolve-SafeSlamDirectory","Start-SlamAttempt")) {
+foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Open-DirectoryMutationGuard","Resolve-SafeSlamDirectory","Start-SlamAttempt")) {
   $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
   if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
   Invoke-Expression $definition[0].Extent.Text
@@ -288,6 +288,113 @@ try {
             capture_output=True,
             text=True,
             timeout=15,
+        )
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+        harness.unlink()
+        result_path.unlink()
+        return result
+
+    def _run_replacement_race_harness(self, run_directory: Path, outside_directory: Path, target_location: str) -> dict:
+        result_path = run_directory.parent / f"race-result-{time.time_ns()}.json"
+        harness = run_directory.parent / f"race-harness-{time.time_ns()}.ps1"
+        harness.write_text(
+            r'''param(
+  [string]$LauncherPath,
+  [string]$RunDirectory,
+  [string]$OutsideDirectory,
+  [string]$TargetLocation,
+  [string]$ResultPath
+)
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($LauncherPath, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw ($parseErrors | ForEach-Object Message) -join "`n" }
+foreach ($functionName in @("Assert-NoReparseDirectory","Assert-SafeDirectoryChain","Open-DirectoryMutationGuard","Start-SlamAttempt")) {
+  $definition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true))
+  if ($definition.Count -ne 1) { throw "Expected one function definition for $functionName, found $($definition.Count)." }
+  Invoke-Expression $definition[0].Extent.Text
+}
+$script:raceSlamDirectory = Join-Path $RunDirectory "slam"
+$script:raceTargetDirectory = $null
+$script:raceRenamedDirectory = $null
+$script:raceOutsideDirectory = $OutsideDirectory
+$script:hookFailure = $null
+$script:replacementCreated = $false
+$attempt = $null
+$outerFailure = $null
+$hook = {
+  param($slamDirectory, $attemptsDirectory, $attemptDirectory, $priorDirectory)
+  $script:raceTargetDirectory = switch ($TargetLocation) {
+    "slam" { $slamDirectory }
+    "attempts" { $attemptsDirectory }
+    "attempt" { $attemptDirectory }
+    default { throw "Unknown target location: $TargetLocation" }
+  }
+  $script:raceRenamedDirectory = $script:raceTargetDirectory + "-checked"
+  try {
+    Move-Item -LiteralPath $script:raceTargetDirectory -Destination $script:raceRenamedDirectory -ErrorAction Stop
+    New-Item -ItemType Junction -Path $script:raceTargetDirectory -Target $script:raceOutsideDirectory -ErrorAction Stop | Out-Null
+    $script:replacementCreated = $true
+  } catch {
+    $script:hookFailure = $_.Exception.Message
+  }
+}
+try {
+  $attempt = Start-SlamAttempt -SlamDirectory $script:raceSlamDirectory -ContainmentRoot $RunDirectory -BeforeMutationHook $hook
+} catch {
+  $outerFailure = $_.Exception.Message
+}
+$guardCount = if ($attempt) { @($attempt.mutation_guards).Count } else { 0 }
+$priorManifestExists = if ($attempt) { Test-Path -LiteralPath (Join-Path $attempt.prior_directory "slam_manifest.json") } else { $false }
+$priorDatabaseExists = if ($attempt) { Test-Path -LiteralPath (Join-Path $attempt.prior_directory "rtabmap.db") } else { $false }
+$attemptReceiptExists = if ($attempt) { Test-Path -LiteralPath (Join-Path $attempt.attempt_directory "attempt.json") } else { $false }
+if ($attempt) { foreach ($guard in @($attempt.mutation_guards)) { $guard.Dispose() } }
+$postDisposeRenameSucceeded = $false
+try {
+  Move-Item -LiteralPath $script:raceTargetDirectory -Destination $script:raceRenamedDirectory -ErrorAction Stop
+  Move-Item -LiteralPath $script:raceRenamedDirectory -Destination $script:raceTargetDirectory -ErrorAction Stop
+  $postDisposeRenameSucceeded = $true
+} catch {}
+$result = [ordered]@{
+  outer_failure=$outerFailure
+  hook_failure=$script:hookFailure
+  replacement_created=$script:replacementCreated
+  attempt_id=$(if ($attempt) { $attempt.attempt_id } else { $null })
+  guard_count=$guardCount
+  target_is_junction=$(if (Test-Path -LiteralPath $script:raceTargetDirectory) { ((Get-Item -LiteralPath $script:raceTargetDirectory -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 } else { $false })
+  renamed_exists=(Test-Path -LiteralPath $script:raceRenamedDirectory)
+  post_dispose_rename_succeeded=$postDisposeRenameSucceeded
+  prior_manifest_exists=$priorManifestExists
+  prior_database_exists=$priorDatabaseExists
+  attempt_receipt_exists=$attemptReceiptExists
+}
+$result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+''',
+            encoding="utf-8",
+        )
+        process = subprocess.run(
+            [
+                self.pwsh,
+                "-NoProfile",
+                "-File",
+                str(harness),
+                "-LauncherPath",
+                str(LAUNCHER),
+                "-RunDirectory",
+                str(run_directory),
+                "-OutsideDirectory",
+                str(outside_directory),
+                "-TargetLocation",
+                target_location,
+                "-ResultPath",
+                str(result_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
         result = json.loads(result_path.read_text(encoding="utf-8-sig"))
@@ -555,6 +662,43 @@ Wait-Process -Id $child.Id
                     self.assertFalse((outside / "attempts").exists())
                 finally:
                     os.rmdir(junction)
+
+    def test_checked_slam_directory_cannot_be_replaced_before_mutation(self):
+        for target_location in ("slam", "attempts", "attempt"):
+            with self.subTest(target_location=target_location), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                run = root / "run"
+                slam = run / "slam"
+                outside = root / "outside"
+                slam.mkdir(parents=True)
+                outside.mkdir()
+                (slam / "slam_manifest.json").write_text(json.dumps({"status": "complete", "source": "inside"}), encoding="utf-8")
+                (slam / "rtabmap.db").write_bytes(b"inside-database")
+                outside_manifest = outside / "slam_manifest.json"
+                outside_database = outside / "rtabmap.db"
+                outside_manifest.write_text(json.dumps({"status": "complete", "sentinel": "outside"}), encoding="utf-8")
+                outside_database.write_bytes(b"outside-database")
+                sentinel_state = {
+                    path: (hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_mtime_ns)
+                    for path in (outside_manifest, outside_database)
+                }
+
+                result = self._run_replacement_race_harness(run, outside, target_location)
+
+                self.assertIsNone(result["outer_failure"])
+                self.assertIsNotNone(result["hook_failure"])
+                self.assertFalse(result["replacement_created"])
+                self.assertFalse(result["target_is_junction"])
+                self.assertFalse(result["renamed_exists"])
+                self.assertTrue(result["post_dispose_rename_succeeded"])
+                self.assertGreaterEqual(result["guard_count"], 5)
+                self.assertTrue(result["prior_manifest_exists"])
+                self.assertTrue(result["prior_database_exists"])
+                self.assertTrue(result["attempt_receipt_exists"])
+                self.assertFalse((outside / "attempts").exists())
+                for path, (expected_hash, expected_mtime) in sentinel_state.items():
+                    self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected_hash)
+                    self.assertEqual(path.stat().st_mtime_ns, expected_mtime)
 
 
 if __name__ == "__main__":

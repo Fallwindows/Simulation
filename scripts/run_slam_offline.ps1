@@ -46,6 +46,122 @@ function Assert-SafeDirectoryChain {
     }
   }
 }
+function Open-DirectoryMutationGuard {
+  param([string]$Path, [string]$Label)
+  if (-not ("GrocerySim.DirectoryMutationGuard" -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace GrocerySim {
+  public sealed class DirectoryGuard : IDisposable {
+    public SafeFileHandle Handle { get; private set; }
+    public string FinalPath { get; private set; }
+    public uint Attributes { get; private set; }
+
+    internal DirectoryGuard(SafeFileHandle handle, string finalPath, uint attributes) {
+      Handle = handle;
+      FinalPath = finalPath;
+      Attributes = attributes;
+    }
+
+    public void Dispose() {
+      if (Handle != null) Handle.Dispose();
+    }
+  }
+
+  public static class DirectoryMutationGuard {
+    private const uint DELETE = 0x10000;
+    private const uint FILE_READ_ATTRIBUTES = 0x80;
+    private const uint FILE_SHARE_READ = 0x1;
+    private const uint FILE_SHARE_WRITE = 0x2;
+    private const uint OPEN_EXISTING = 3;
+    private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+    private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+    private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x400;
+    private const int FILE_ATTRIBUTE_TAG_INFO_CLASS = 9;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileAttributeTagInfo {
+      public uint FileAttributes;
+      public uint ReparseTag;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(
+      string fileName, uint desiredAccess, uint shareMode, IntPtr securityAttributes,
+      uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(
+      SafeFileHandle file, int infoClass, out FileAttributeTagInfo info, uint size);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(
+      SafeFileHandle file, StringBuilder path, uint pathLength, uint flags);
+
+    public static DirectoryGuard Acquire(string path) {
+      SafeFileHandle handle = CreateFileW(
+        path, DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
+      if (handle.IsInvalid) {
+        int error = Marshal.GetLastWin32Error();
+        handle.Dispose();
+        throw new Win32Exception(error, "Cannot lock directory against replacement: " + path);
+      }
+      try {
+        FileAttributeTagInfo info;
+        if (!GetFileInformationByHandleEx(
+              handle, FILE_ATTRIBUTE_TAG_INFO_CLASS, out info,
+              (uint)Marshal.SizeOf(typeof(FileAttributeTagInfo)))) {
+          throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect locked directory: " + path);
+        }
+        if ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+          throw new InvalidOperationException("Locked path is not a directory: " + path);
+        }
+        if ((info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+          throw new InvalidOperationException("Locked directory must not be a junction, symbolic link, or other reparse point: " + path);
+        }
+        StringBuilder finalPath = new StringBuilder(32768);
+        uint length = GetFinalPathNameByHandleW(handle, finalPath, (uint)finalPath.Capacity, 0);
+        if (length == 0 || length >= finalPath.Capacity) {
+          throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resolve locked directory: " + path);
+        }
+        return new DirectoryGuard(handle, finalPath.ToString(), info.FileAttributes);
+      } catch {
+        handle.Dispose();
+        throw;
+      }
+    }
+  }
+}
+'@
+  }
+  Assert-NoReparseDirectory -Path $Path -Label $Label
+  $guard = [GrocerySim.DirectoryMutationGuard]::Acquire([System.IO.Path]::GetFullPath($Path))
+  try {
+    $finalPath = [string]$guard.FinalPath
+    if ($finalPath.StartsWith("\\?\UNC\", [System.StringComparison]::OrdinalIgnoreCase)) {
+      $finalPath = "\\" + $finalPath.Substring(8)
+    } elseif ($finalPath.StartsWith("\\?\", [System.StringComparison]::OrdinalIgnoreCase)) {
+      $finalPath = $finalPath.Substring(4)
+    }
+    $expected = [System.IO.Path]::GetFullPath($Path).TrimEnd([char]92,[char]47)
+    $actual = [System.IO.Path]::GetFullPath($finalPath).TrimEnd([char]92,[char]47)
+    if (-not $actual.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "$Label resolves through a redirected path: expected $expected, locked $actual"
+    }
+    return $guard
+  } catch {
+    $guard.Dispose()
+    throw
+  }
+}
 function Resolve-SafeSlamDirectory {
   param([string]$RunDirectory, [string]$RequestedExperimentName)
   if ([string]::IsNullOrWhiteSpace($RequestedExperimentName)) { throw "ExperimentName must be a non-empty safe path segment." }
@@ -76,51 +192,89 @@ $slamSelection = Resolve-SafeSlamDirectory -RunDirectory $runDir -RequestedExper
 $slamDir = [string]$slamSelection.slam_directory
 $logsDir = Join-Path $runDir "logs"
 function Start-SlamAttempt {
-  param([string]$SlamDirectory, [string]$ContainmentRoot)
-  Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $SlamDirectory
-  $attemptId = ([DateTime]::UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + [Guid]::NewGuid().ToString("N"))
-  $attemptsDirectory = Join-Path $SlamDirectory "attempts"
-  $attemptDirectory = Join-Path $attemptsDirectory $attemptId
-  $priorDirectory = Join-Path $attemptDirectory "prior"
-  Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $attemptsDirectory
-  New-Item -ItemType Directory -Force -Path $priorDirectory | Out-Null
-  Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $priorDirectory
-
-  # Invalidate the old authority first. A failed rerun must never leave a
-  # canonical complete manifest that describes an earlier attempt.
-  $rotated = @()
-  foreach ($name in @("slam_manifest.json","rtabmap.db","rtabmap.db-wal","rtabmap.db-shm","rtabmap.db-journal")) {
-    $source = Join-Path $SlamDirectory $name
-    if (Test-Path -LiteralPath $source) {
-      Move-Item -LiteralPath $source -Destination (Join-Path $priorDirectory $name)
-      $rotated += $name
+  param(
+    [string]$SlamDirectory,
+    [string]$ContainmentRoot,
+    [string]$SlamRoot = "",
+    [string]$LogsDirectory = "",
+    [scriptblock]$BeforeMutationHook = $null
+  )
+  $guards = [System.Collections.Generic.List[System.IDisposable]]::new()
+  $guardedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  try {
+    Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $SlamDirectory
+    if ([string]::IsNullOrWhiteSpace($SlamRoot)) { $SlamRoot = $SlamDirectory }
+    foreach ($guardRequest in @(
+      [pscustomobject]@{path=$ContainmentRoot; label="Run directory"}
+      [pscustomobject]@{path=$LogsDirectory; label="Log directory"}
+      [pscustomobject]@{path=$SlamRoot; label="SLAM root directory"}
+      [pscustomobject]@{path=$SlamDirectory; label="SLAM output directory"}
+    )) {
+      $guardPath = [string]$guardRequest.path
+      if (-not [string]::IsNullOrWhiteSpace($guardPath)) {
+        $guardPath = [System.IO.Path]::GetFullPath($guardPath).TrimEnd([char]92,[char]47)
+        if ($guardedPaths.Add($guardPath)) {
+          $guards.Add((Open-DirectoryMutationGuard -Path $guardPath -Label ([string]$guardRequest.label)))
+        }
+      }
     }
-  }
-  $attemptDatabase = Join-Path $attemptDirectory "rtabmap.db"
-  if (Test-Path -LiteralPath $attemptDatabase) { throw "Fresh SLAM attempt database path already exists: $attemptDatabase" }
-  $receipt = [ordered]@{
-    attempt_id=$attemptId
-    receipt_kind="attempt_start_marker"
-    status="started"
-    terminal_status_authority="slam_manifest.json"
-    started_utc=[DateTime]::UtcNow.ToString("o")
-    mapper_database_relative_path=("attempts/$attemptId/rtabmap.db")
-    rotated_prior_artifacts=@($rotated)
-  }
-  $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $attemptDirectory "attempt.json") -Encoding UTF8
-  return [pscustomobject]@{
-    attempt_id=$attemptId
-    attempt_directory=$attemptDirectory
-    prior_directory=$priorDirectory
-    database_path=$attemptDatabase
-    rotated_prior_artifacts=@($rotated)
+    $attemptId = ([DateTime]::UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + [Guid]::NewGuid().ToString("N"))
+    $attemptsDirectory = Join-Path $SlamDirectory "attempts"
+    $attemptDirectory = Join-Path $attemptsDirectory $attemptId
+    $priorDirectory = Join-Path $attemptDirectory "prior"
+    Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $attemptsDirectory
+    New-Item -ItemType Directory -Force -Path $attemptsDirectory | Out-Null
+    $guards.Add((Open-DirectoryMutationGuard -Path $attemptsDirectory -Label "SLAM attempts directory"))
+    [void]$guardedPaths.Add([System.IO.Path]::GetFullPath($attemptsDirectory).TrimEnd([char]92,[char]47))
+    New-Item -ItemType Directory -Path $attemptDirectory | Out-Null
+    $guards.Add((Open-DirectoryMutationGuard -Path $attemptDirectory -Label "SLAM attempt directory"))
+    [void]$guardedPaths.Add([System.IO.Path]::GetFullPath($attemptDirectory).TrimEnd([char]92,[char]47))
+    New-Item -ItemType Directory -Path $priorDirectory | Out-Null
+    $guards.Add((Open-DirectoryMutationGuard -Path $priorDirectory -Label "SLAM prior-artifact directory"))
+    [void]$guardedPaths.Add([System.IO.Path]::GetFullPath($priorDirectory).TrimEnd([char]92,[char]47))
+    Assert-SafeDirectoryChain -RootDirectory $ContainmentRoot -TargetDirectory $priorDirectory
+    if ($BeforeMutationHook) { & $BeforeMutationHook $SlamDirectory $attemptsDirectory $attemptDirectory $priorDirectory }
+
+    # Invalidate the old authority first. A failed rerun must never leave a
+    # canonical complete manifest that describes an earlier attempt.
+    $rotated = @()
+    foreach ($name in @("slam_manifest.json","rtabmap.db","rtabmap.db-wal","rtabmap.db-shm","rtabmap.db-journal")) {
+      $source = Join-Path $SlamDirectory $name
+      if (Test-Path -LiteralPath $source) {
+        Move-Item -LiteralPath $source -Destination (Join-Path $priorDirectory $name)
+        $rotated += $name
+      }
+    }
+    $attemptDatabase = Join-Path $attemptDirectory "rtabmap.db"
+    if (Test-Path -LiteralPath $attemptDatabase) { throw "Fresh SLAM attempt database path already exists: $attemptDatabase" }
+    $receipt = [ordered]@{
+      attempt_id=$attemptId
+      receipt_kind="attempt_start_marker"
+      status="started"
+      terminal_status_authority="slam_manifest.json"
+      started_utc=[DateTime]::UtcNow.ToString("o")
+      mapper_database_relative_path=("attempts/$attemptId/rtabmap.db")
+      rotated_prior_artifacts=@($rotated)
+    }
+    $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $attemptDirectory "attempt.json") -Encoding UTF8
+    return [pscustomobject]@{
+      attempt_id=$attemptId
+      attempt_directory=$attemptDirectory
+      prior_directory=$priorDirectory
+      database_path=$attemptDatabase
+      rotated_prior_artifacts=@($rotated)
+      mutation_guards=$guards
+    }
+  } catch {
+    for ($guardIndex = $guards.Count - 1; $guardIndex -ge 0; $guardIndex -= 1) { $guards[$guardIndex].Dispose() }
+    throw
   }
 }
 Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $logsDir
 New-Item -ItemType Directory -Force -Path $slamDir,$logsDir | Out-Null
 Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $slamDir
 Assert-SafeDirectoryChain -RootDirectory $runDir -TargetDirectory $logsDir
-$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir -ContainmentRoot $runDir
+$slamAttempt = Start-SlamAttempt -SlamDirectory $slamDir -ContainmentRoot $runDir -SlamRoot ([string]$slamSelection.slam_root) -LogsDirectory $logsDir
 
 $manifestPath = Join-Path $captureDir "capture_manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Capture manifest not found: $manifestPath" }
@@ -410,4 +564,7 @@ try {
   if ($mapping -and -not $mapping.HasExited) { Stop-ProcessTree -RootPid $mapping.Id }
   if ($router -and -not $router.HasExited) { Stop-ProcessTree -RootPid $router.Id }
   Pop-Location
+  for ($guardIndex = $slamAttempt.mutation_guards.Count - 1; $guardIndex -ge 0; $guardIndex -= 1) {
+    $slamAttempt.mutation_guards[$guardIndex].Dispose()
+  }
 }
