@@ -545,6 +545,29 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "kind": "case_frame",
             }
         )
+        # Vertical door-edge practicals add a motivated highlight to the
+        # glazing and keep late-aisle stock readable without lifting the
+        # already bright floor or wall exposure.
+        for edge_index, edge_y in enumerate((-0.535, 0.535)):
+            boxes.append(
+                {
+                    "name": f"end_case_edge_light_{case_index}_{edge_index}",
+                    "center_m": (shell_end_x - 0.675, case_y + edge_y, 1.24),
+                    "size_m": (0.018, 0.016, 1.72),
+                    "kind": "light_panel",
+                }
+            )
+            lights.append(
+                {
+                    "name": f"end_case_edge_light_{case_index}_{edge_index}",
+                    "position_m": (shell_end_x - 0.665, case_y + edge_y, 1.24),
+                    "width_m": 1.68,
+                    "height_m": 0.026,
+                    "intensity": float(environment.lighting_lux) * 3.0,
+                    "color": (0.88, 0.95, 1.0),
+                    "rotation_rpy_deg": (0.0, 90.0, 0.0),
+                }
+            )
         for shelf_index, shelf_z in enumerate((0.34, 0.80, 1.26, 1.72)):
             boxes.append(
                 {
@@ -575,7 +598,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "position_m": (shell_end_x - 0.34, case_y, 1.34),
                 "width_m": 1.58,
                 "height_m": 1.02,
-                "intensity": float(environment.lighting_lux) * 6.5,
+                "intensity": float(environment.lighting_lux) * 9.0,
                 "color": (0.88, 0.95, 1.0),
                 "rotation_rpy_deg": (0.0, 90.0, 0.0),
             }
@@ -660,7 +683,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 # preserves the physical pose while making the category text
                 # readable from the approaching camera.
                 "rotation_rpy_deg": (0.0, 0.0, 42.0),
-                "scale_xyz": (-1.0, 1.0, 1.0),
+                "scale_xyz": (-0.78, 0.78, 0.78),
             },
             {
                 "name": "end_market_sign",
@@ -680,23 +703,23 @@ def store_shell_spec(environment) -> dict[str, object]:
         [
             {
                 "name": "hero_focus_plinth",
-                "center_m": (12.20, -0.950, 0.53),
+                "center_m": (12.20, -0.950, 0.73),
                 "size_m": (0.55, 0.83, 0.70),
                 "kind": "display_wood",
             },
             {
                 "name": "hero_focus_top",
-                "center_m": (12.20, -0.950, 0.895),
+                "center_m": (12.20, -0.950, 1.095),
                 "size_m": (0.59, 0.87, 0.030),
                 "kind": "shelf",
             },
         ]
     )
     focus_specs = (
-        ("cereal_sunrise", 12.11, -0.60, 74.0, 1.22, 0.915),
-        ("juice_citrus", 12.15, -0.83, 77.0, 1.32, 0.919),
-        ("coffee_bag", 12.12, -1.06, 72.0, 1.28, 0.915),
-        ("cereal_harvest", 12.18, -1.29, 76.0, 1.17, 0.917),
+        ("cereal_sunrise", 12.11, -0.60, 74.0, 1.22, 1.115),
+        ("juice_citrus", 12.15, -0.83, 77.0, 1.32, 1.119),
+        ("coffee_bag", 12.12, -1.02, 72.0, 1.28, 1.115),
+        ("cereal_harvest", 12.18, -1.23, 76.0, 1.17, 1.117),
     )
     for focus_index, (key, product_x, product_y, yaw, scale, support_z) in enumerate(focus_specs):
         asset_references.append(
@@ -718,7 +741,54 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "name": f"hero_focus_price_{price_index}",
                 "asset_key": "price_display",
                 "position_xy_m": (11.915, price_y),
-                "support_z_m": 0.915,
+                "support_z_m": 1.115,
+                "rotation_rpy_deg": (0.0, 0.0, 90.0),
+                "scale_xyz": (-0.82, 0.82, 0.82),
+            }
+        )
+    # A second eye-level product group creates the requested close shelf beat
+    # near 17 seconds.  It uses the same measured side clearance as the 9 s
+    # group, so the M1 rig and LiDAR centerline remain unobstructed.
+    boxes.extend(
+        [
+            {
+                "name": "late_focus_plinth",
+                "center_m": (21.35, -0.950, 0.73),
+                "size_m": (0.55, 0.83, 0.70),
+                "kind": "display_wood",
+            },
+            {
+                "name": "late_focus_top",
+                "center_m": (21.35, -0.950, 1.095),
+                "size_m": (0.59, 0.87, 0.030),
+                "kind": "shelf",
+            },
+        ]
+    )
+    late_focus_specs = (
+        ("pasta_box", 21.26, -0.60, 74.0, 1.18, 1.115),
+        ("tea_box", 21.30, -0.83, 77.0, 1.24, 1.119),
+        ("coffee_canister", 21.27, -1.02, 72.0, 1.20, 1.115),
+        ("snack_wafer", 21.33, -1.23, 76.0, 1.16, 1.117),
+    )
+    for focus_index, (key, product_x, product_y, yaw, scale, support_z) in enumerate(late_focus_specs):
+        asset_references.append(
+            {
+                "name": f"late_focus_stock_{focus_index}",
+                "asset_key": key,
+                "position_xy_m": (product_x, product_y),
+                "support_z_m": support_z,
+                "rotation_rpy_deg": (0.0, 0.0, yaw),
+                "scale_xyz": (-scale, scale, scale),
+            }
+        )
+    for price_index, price_y in enumerate((-0.69, -0.95, -1.21)):
+        asset_references.append(
+            {
+                "name": f"late_focus_price_{price_index}",
+                "asset_key": "price_display",
+                "position_xy_m": (21.065, price_y),
+                "support_z_m": 1.115,
                 "rotation_rpy_deg": (0.0, 0.0, 90.0),
                 "scale_xyz": (-0.82, 0.82, 0.82),
             }
@@ -797,10 +867,21 @@ def runtime_dense_stock_references(layout, environment) -> tuple[dict[str, objec
         shelf_max = shelf.center_m[0] + shelf.size_m[0] / 2.0 - environment.edge_margin_m
         front_sign = 1.0 if shelf.center_m[1] < 0.0 else -1.0
         for side_name, source_asset in (("left", occupied[0][2]), ("right", occupied[-1][2])):
-            record = catalog.by_key(source_asset.asset_key)
+            source_record = catalog.by_key(source_asset.asset_key)
+            compatible_records = tuple(
+                candidate
+                for candidate in catalog.by_category(source_record.category)
+                if candidate.intended_support == "shelf"
+                and 0.78 <= candidate.dimensions_m[0] / source_record.dimensions_m[0] <= 1.0
+                and 0.78 <= candidate.dimensions_m[1] / source_record.dimensions_m[1] <= 1.0
+                and 0.72 <= candidate.dimensions_m[2] / source_record.dimensions_m[2] <= 1.0
+            ) or (source_record,)
             cursor = occupied[0][0] if side_name == "left" else occupied[-1][1]
             for fill_index in range(2):
                 variation = ((row_index * 17 + bay_index * 7 + level_index * 3 + fill_index) % 5) - 2
+                record = compatible_records[
+                    (row_index * 13 + bay_index * 7 + level_index * 5 + fill_index * 3) % len(compatible_records)
+                ]
                 scale = 0.98 + 0.012 * variation
                 half_width = record.dimensions_m[0] * scale / 2.0
                 if side_name == "left":
@@ -817,7 +898,7 @@ def runtime_dense_stock_references(layout, environment) -> tuple[dict[str, objec
                     environment.shelf_depth_m / 2.0
                     - record.dimensions_m[1] * scale / 2.0
                     - environment.edge_margin_m
-                )
+                ) + front_sign * (0.006 * abs(variation))
                 references.append(
                     {
                         "name": f"dense_stock_r{row_index}_b{bay_index}_l{level_index}_{side_name}_{fill_index}",
