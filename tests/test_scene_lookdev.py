@@ -186,11 +186,14 @@ class SceneLookdevTests(unittest.TestCase):
                 support_z + record.dimensions_m[2] * abs(scale[2]),
             )
 
-        box_obbs = []
+        context_box_obbs = []
         for box in spec["boxes"]:
             x, y, z = box["center_m"]
             width, depth, height = box["size_m"]
-            box_obbs.append(obb(box["name"], (x, y), width, depth, 0.0, z - height / 2.0, z + height / 2.0))
+            context_box_obbs.append(
+                obb(box["name"], (x, y), width, depth, 0.0, z - height / 2.0, z + height / 2.0)
+            )
+        box_obbs = list(context_box_obbs)
         for primitive in layout.primitives:
             x, y, z = primitive.center_m
             width, depth, height = primitive.size_m
@@ -220,12 +223,13 @@ class SceneLookdevTests(unittest.TestCase):
                 )
 
         dense = runtime_dense_stock_references(layout, scenario.environment)
-        shelf_lights = [box for box in box_obbs if box[0].startswith("shelf_strip_")]
         for reference in dense:
             candidate = reference_obb(reference)
-            self.assertFalse(
-                any(intersects(candidate, light) for light in shelf_lights),
-                f"{reference['name']} penetrates a shelf light",
+            collisions = [box[0] for box in context_box_obbs if intersects(candidate, box)]
+            self.assertEqual(
+                collisions,
+                [],
+                f"{reference['name']} penetrates authored context boxes {collisions}",
             )
 
         existing_price_obbs = []

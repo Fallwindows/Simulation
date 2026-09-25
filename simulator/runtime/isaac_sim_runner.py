@@ -935,7 +935,60 @@ def runtime_dense_stock_references(layout, environment) -> tuple[dict[str, objec
                     "scale_xyz": (0.82, 0.82, 0.82),
                 }
             )
-    return tuple(references)
+    # Dense shelf dressing is derived after the authored context geometry, so
+    # reject any candidate whose oriented footprint penetrates a context box.
+    # This keeps later focus displays and other scene dressing authoritative
+    # without relying on one-off bay exclusions.
+    context_boxes = store_shell_spec(environment)["boxes"]
+    collision_free: list[dict[str, object]] = []
+    for reference in references:
+        record = catalog.by_key(reference["asset_key"])
+        scale = reference["scale_xyz"]
+        width = record.dimensions_m[0] * abs(scale[0])
+        depth = record.dimensions_m[1] * abs(scale[1])
+        yaw = math.radians(reference["rotation_rpy_deg"][2])
+        axis_x = (math.cos(yaw), math.sin(yaw))
+        axis_y = (-math.sin(yaw), math.cos(yaw))
+        center_x, center_y = reference["position_xy_m"]
+        corners = tuple(
+            (
+                center_x + sx * width * axis_x[0] / 2.0 + sy * depth * axis_y[0] / 2.0,
+                center_y + sx * width * axis_x[1] / 2.0 + sy * depth * axis_y[1] / 2.0,
+            )
+            for sx in (-1.0, 1.0)
+            for sy in (-1.0, 1.0)
+        )
+        z_min = reference["support_z_m"]
+        z_max = z_min + record.dimensions_m[2] * abs(scale[2])
+        penetrates_context = False
+        for box in context_boxes:
+            box_x, box_y, box_z = box["center_m"]
+            box_width, box_depth, box_height = box["size_m"]
+            if min(z_max, box_z + box_height / 2.0) - max(z_min, box_z - box_height / 2.0) <= 1e-4:
+                continue
+            box_corners = (
+                (box_x - box_width / 2.0, box_y - box_depth / 2.0),
+                (box_x - box_width / 2.0, box_y + box_depth / 2.0),
+                (box_x + box_width / 2.0, box_y - box_depth / 2.0),
+                (box_x + box_width / 2.0, box_y + box_depth / 2.0),
+            )
+            separated = False
+            for axis in (axis_x, axis_y, (1.0, 0.0), (0.0, 1.0)):
+                reference_interval = [point[0] * axis[0] + point[1] * axis[1] for point in corners]
+                box_interval = [point[0] * axis[0] + point[1] * axis[1] for point in box_corners]
+                if (
+                    min(max(reference_interval), max(box_interval))
+                    - max(min(reference_interval), min(box_interval))
+                    <= 1e-4
+                ):
+                    separated = True
+                    break
+            if not separated:
+                penetrates_context = True
+                break
+        if not penetrates_context:
+            collision_free.append(reference)
+    return tuple(collision_free)
 
 
 def _build_store_shell(stage, environment, builder, layout=None) -> int:
