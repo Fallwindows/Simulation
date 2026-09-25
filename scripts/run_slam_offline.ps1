@@ -49,6 +49,91 @@ function Stop-ProcessTree([int]$RootPid) {
   foreach ($childPid in $children) { Stop-ProcessTree -RootPid ([int]$childPid); Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue }
   Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
 }
+function Invoke-ProcessProbe {
+  param(
+    [string]$ExecutablePath,
+    [string[]]$ArgumentList,
+    [int]$TimeoutMilliseconds,
+    [string]$StdoutPath,
+    [string]$StderrPath
+  )
+  Remove-Item -LiteralPath $StdoutPath,$StderrPath -Force -ErrorAction SilentlyContinue
+  $startedUtc = [DateTime]::UtcNow
+  try {
+    $process = Start-Process -FilePath $ExecutablePath -ArgumentList $ArgumentList -WindowStyle Hidden -PassThru -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
+  } catch {
+    return [pscustomobject]@{
+      timed_out=$false; exit_code=$null; stdout=""; stderr=""; start_error=$_.Exception.Message
+      elapsed_ms=[int]([DateTime]::UtcNow - $startedUtc).TotalMilliseconds
+    }
+  }
+  $completed = $process.WaitForExit([Math]::Max(1, $TimeoutMilliseconds))
+  if (-not $completed) {
+    Stop-ProcessTree -RootPid $process.Id
+    [void]$process.WaitForExit(5000)
+  } else {
+    # A parameterless wait flushes redirected stdout/stderr after process exit.
+    $process.WaitForExit()
+  }
+  $stdout = if (Test-Path -LiteralPath $StdoutPath) { (Get-Content -LiteralPath $StdoutPath -Raw -ErrorAction SilentlyContinue) } else { "" }
+  $stderr = if (Test-Path -LiteralPath $StderrPath) { (Get-Content -LiteralPath $StderrPath -Raw -ErrorAction SilentlyContinue) } else { "" }
+  [pscustomobject]@{
+    timed_out=(-not $completed)
+    exit_code=$(if ($completed) { $process.ExitCode } else { $null })
+    stdout=[string]$stdout
+    stderr=[string]$stderr
+    start_error=$null
+    elapsed_ms=[int]([DateTime]::UtcNow - $startedUtc).TotalMilliseconds
+  }
+}
+function Test-RequiredRosNodes {
+  param([string]$NodeListText, [string[]]$RequiredNodeNames)
+  $observed = @($NodeListText -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  foreach ($required in $RequiredNodeNames) {
+    if ($observed -notcontains $required) { return $false }
+  }
+  return $true
+}
+function Wait-ForRosNodes {
+  param(
+    [string]$ExecutablePath,
+    [string[]]$ArgumentList,
+    [string[]]$RequiredNodeNames,
+    [DateTime]$DeadlineUtc,
+    [int]$PerProbeTimeoutMilliseconds,
+    [int]$PollIntervalMilliseconds,
+    [string]$DiagnosticLogPath,
+    [string]$Phase,
+    [System.Diagnostics.Process]$AbortIfExitedProcess = $null
+  )
+  $attempt = 0
+  $lastProbe = $null
+  while ([DateTime]::UtcNow -lt $DeadlineUtc) {
+    if ($AbortIfExitedProcess -and $AbortIfExitedProcess.HasExited) { break }
+    $attempt += 1
+    if ($PollIntervalMilliseconds -gt 0) { Start-Sleep -Milliseconds $PollIntervalMilliseconds }
+    $remainingMs = [int][Math]::Floor(($DeadlineUtc - [DateTime]::UtcNow).TotalMilliseconds)
+    if ($remainingMs -le 0) { break }
+    $probeTimeoutMs = [Math]::Max(1, [Math]::Min($PerProbeTimeoutMilliseconds, $remainingMs))
+    $probeOut = "$DiagnosticLogPath.$Phase.out"
+    $probeErr = "$DiagnosticLogPath.$Phase.err"
+    $lastProbe = Invoke-ProcessProbe -ExecutablePath $ExecutablePath -ArgumentList $ArgumentList -TimeoutMilliseconds $probeTimeoutMs -StdoutPath $probeOut -StderrPath $probeErr
+    $ready = (-not $lastProbe.timed_out) -and ($null -eq $lastProbe.start_error) -and ($lastProbe.exit_code -eq 0) -and (Test-RequiredRosNodes -NodeListText $lastProbe.stdout -RequiredNodeNames $RequiredNodeNames)
+    [ordered]@{
+      phase=$Phase; attempt=$attempt; recorded_utc=[DateTime]::UtcNow.ToString("o")
+      deadline_utc=$DeadlineUtc.ToString("o"); probe_timeout_ms=$probeTimeoutMs
+      elapsed_ms=$lastProbe.elapsed_ms; timed_out=$lastProbe.timed_out; exit_code=$lastProbe.exit_code
+      start_error=$lastProbe.start_error; required_nodes=$RequiredNodeNames
+      observed_nodes=@($lastProbe.stdout -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+      stderr=$lastProbe.stderr; ready=$ready
+    } | ConvertTo-Json -Compress -Depth 5 | Add-Content -LiteralPath $DiagnosticLogPath -Encoding UTF8
+    if ($ready) {
+      return [pscustomobject]@{ready=$true; attempts=$attempt; last_probe=$lastProbe}
+    }
+    if ($AbortIfExitedProcess -and $AbortIfExitedProcess.HasExited) { break }
+  }
+  return [pscustomobject]@{ready=$false; attempts=$attempt; last_probe=$lastProbe}
+}
 function Wait-ProcessWithTimeout($Process, [int]$TimeoutSeconds, [string]$Name) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while (-not $Process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
@@ -68,24 +153,27 @@ try {
   # Start mapping immediately; the bounded ROS graph probe below, not a delay,
   # gates bag playback on both estimator nodes being visible.
   $mapping = Start-Process -FilePath $pixi -ArgumentList $mappingArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_mapping.out.log") -RedirectStandardError (Join-Path $logsDir "offline_mapping.err.log")
-  $nodeDeadline = (Get-Date).AddSeconds(90)
-  do {
-    Start-Sleep -Milliseconds 250
-    $nodes = (& $pixi @baseArgs node list 2>$null) -join "`n"
-  } while ((($nodes -notmatch "icp_odometry") -or ($nodes -notmatch "rtabmap")) -and (Get-Date) -lt $nodeDeadline)
-  if (($nodes -notmatch "icp_odometry") -or ($nodes -notmatch "rtabmap")) { throw "RTAB-Map nodes did not become ready. Nodes: $nodes" }
+  $nodeReadinessLog = Join-Path $logsDir "offline_node_readiness.jsonl"
+  Remove-Item -LiteralPath $nodeReadinessLog -Force -ErrorAction SilentlyContinue
+  $nodeListArgs = @($baseArgs + @("node","list"))
+  $nodeDeadline = [DateTime]::UtcNow.AddSeconds(90)
+  $mappingReady = Wait-ForRosNodes -ExecutablePath $pixi -ArgumentList $nodeListArgs -RequiredNodeNames @("/icp_odometry","/rtabmap") -DeadlineUtc $nodeDeadline -PerProbeTimeoutMilliseconds 10000 -PollIntervalMilliseconds 250 -DiagnosticLogPath $nodeReadinessLog -Phase "mapping"
+  if (-not $mappingReady.ready) {
+    $lastMappingProbe = $mappingReady.last_probe
+    throw "RTAB-Map nodes did not become ready before the absolute deadline after $($mappingReady.attempts) probe(s). Last probe timed_out=$($lastMappingProbe.timed_out), exit_code=$($lastMappingProbe.exit_code), start_error=$($lastMappingProbe.start_error), nodes=$($lastMappingProbe.stdout), stderr=$($lastMappingProbe.stderr)"
+  }
 
   $observerArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.slam_observer","--output-dir",$slamDir,"--duration-seconds",([string]$duration),"--startup-timeout-seconds","180","--expected-sensor-last-stamp-seconds",([string]$lastLidarStamp),"--sensor-scan-period-seconds",([string]$scanPeriod),"--database-path",$database)
   $replaySignal = Join-Path $slamDir "bag_replay.complete"
   Remove-Item -LiteralPath $replaySignal -Force -ErrorAction SilentlyContinue
   $observerArgs += @("--replay-complete-signal",$replaySignal)
   $observer = Start-Process -FilePath $pixi -ArgumentList $observerArgs -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_observer.out.log") -RedirectStandardError (Join-Path $logsDir "offline_observer.err.log")
-  $observerReadyDeadline = (Get-Date).AddSeconds(45)
-  do {
-    Start-Sleep -Milliseconds 250
-    $observerNodes = (& $pixi @baseArgs node list 2>$null) -join "`n"
-  } while (($observerNodes -notmatch "grocery_sim_offline_slam_observer") -and (Get-Date) -lt $observerReadyDeadline -and -not $observer.HasExited)
-  if ($observer.HasExited -or $observerNodes -notmatch "grocery_sim_offline_slam_observer") { throw "Offline SLAM observer did not become ready before replay." }
+  $observerReadyDeadline = [DateTime]::UtcNow.AddSeconds(45)
+  $observerReady = Wait-ForRosNodes -ExecutablePath $pixi -ArgumentList $nodeListArgs -RequiredNodeNames @("/grocery_sim_offline_slam_observer") -DeadlineUtc $observerReadyDeadline -PerProbeTimeoutMilliseconds 10000 -PollIntervalMilliseconds 250 -DiagnosticLogPath $nodeReadinessLog -Phase "observer" -AbortIfExitedProcess $observer
+  if ($observer.HasExited -or -not $observerReady.ready) {
+    $lastObserverProbe = $observerReady.last_probe
+    throw "Offline SLAM observer did not become ready before replay after $($observerReady.attempts) probe(s). observer_exited=$($observer.HasExited), last_probe_timed_out=$($lastObserverProbe.timed_out), exit_code=$($lastObserverProbe.exit_code), start_error=$($lastObserverProbe.start_error), nodes=$($lastObserverProbe.stdout), stderr=$($lastObserverProbe.stderr)"
+  }
   # /clock has exactly one source: rosbag2's playback clock. Keep the recorded
   # /clock topic out of the bag topic selection to prevent a second publisher.
   $replayTopics = @("--topics","/sim/camera/rgb/image_raw","/sim/camera/rgb/camera_info","/sim/lidar/points","/tf","/tf_static")
