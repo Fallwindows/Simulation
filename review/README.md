@@ -3,7 +3,7 @@
 ## Master review checkpoint (2026-09-25)
 
 - The combined code/test checkpoint is `6f24f38edf9f009db56f44a858f3e49565df6e85` (tree `d1280efd3fdf6dab86f07f316f0350ad544b0947`); this review-index/journal update follows it. It includes the G02 trial, Scene R13, standalone cart, M5 capture-validation WIP, dynamic technical-consumer WIP, SLAM replay-safety WIP, Hero R4, and approved fixture repairs.
-- Hero R4 R2, the strict-RGB and presentation fixture fixes, the storyboard-path fix, and the SLAM R13 R2 series are independently approved. The integrated full suite passed 269 tests with two expected skips (173.174 seconds) on this checkpoint. Exact review of the combined tree is pending. See the latest entry in the [implementation journal](../IMPLEMENTATION_JOURNAL.md) for candidate identities and scope.
+- Hero R4 R2, the strict-RGB and presentation fixture fixes, the storyboard-path fix, and the SLAM R13 R2 series are independently approved. The integrated full suite passed 269 tests with two expected skips (173.174 seconds) on code-identical checkpoint `6f24f38`. The final combined tree `734737d` was independently reviewed and approved with no findings, then pushed to `origin/master`. See the latest entry in the [implementation journal](../IMPLEMENTATION_JOURNAL.md) for candidate identities and scope.
 - These source/test results do not claim visual acceptance or production delivery. The fresh current-scene RGB/LiDAR capture, completed SLAM and perception, seven technical clips, and 1,350-frame final film remain open. Generated runs and temporary review scratch are kept out of Git.
 
 ## Production-quality grocery demo (G02, in progress)
