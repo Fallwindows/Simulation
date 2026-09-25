@@ -322,6 +322,10 @@ class SceneLookdevTests(unittest.TestCase):
         for kind, texture_names in expected.items():
             self.assertEqual(_TEXTURE_SETS[kind][:3], texture_names)
 
+        runner_source = (Path(__file__).resolve().parents[1] / "simulator/runtime/isaac_sim_runner.py").read_text(encoding="utf-8")
+        self.assertIn('"scene_material_manifest"', runner_source)
+        self.assertIn('"assets" / "scene" / "materials" / "manifest.json"', runner_source)
+
     def test_capture_frame_selection_is_sorted_unique_and_bounded(self):
         self.assertEqual(parse_capture_frames("12, 0, 6", 13), (0, 6, 12))
         with self.assertRaisesRegex(ValueError, "duplicates"):

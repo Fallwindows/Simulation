@@ -148,12 +148,17 @@ def _capture_provenance(args: argparse.Namespace, scenario) -> dict[str, object]
             input_path = (scenario_path.parent / relative_path).resolve()
             config_inputs.append({"role": role, "path": str(input_path), "sha256": _sha256_path(input_path)})
     asset_manifest = Path(scenario.environment.asset_manifest_path).resolve()
+    scene_material_manifest = (REPO_ROOT / "assets" / "scene" / "materials" / "manifest.json").resolve()
     return {
         "git_commit": git("rev-parse", "HEAD"),
         "git_tree": git("rev-parse", "HEAD^{tree}"),
         "git_worktree_dirty": bool(git("status", "--porcelain")),
         "config_inputs": config_inputs,
         "asset_manifest": {"path": str(asset_manifest), "sha256": _sha256_path(asset_manifest)},
+        "scene_material_manifest": {
+            "path": str(scene_material_manifest),
+            "sha256": _sha256_path(scene_material_manifest),
+        },
         "renderer": args.renderer,
         "headless": bool(args.headless),
         "capture_only": bool(args.capture_only),
