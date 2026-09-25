@@ -729,6 +729,13 @@ class CompletePresentationTests(unittest.TestCase):
                 "ROI method/index receipt",
             ),
             (
+                "missing_roi_raw_indices", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
+                    "selected_raw_indices"
+                ),
+                "ROI method/index receipt",
+            ),
+            (
                 "missing_roi_count", 3,
                 lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].pop(
                     "selected_return_count"
@@ -761,7 +768,29 @@ class CompletePresentationTests(unittest.TestCase):
                 lambda receipt: receipt["derivation"]["cotimed_rgb_pairs"]["pairs"][0].update(
                     scan_timestamp_ns=3_000_000_000
                 ),
-                "does not bind a selected current scan",
+                "does not match the bound RGB frame index",
+            ),
+            (
+                "rgb_pair_forged_frame_timestamp", 0,
+                lambda receipt: receipt["derivation"]["cotimed_rgb_pairs"]["pairs"][0].update(
+                    rgb_frame_index=614, absolute_skew_ns=0
+                ),
+                "does not match the bound RGB frame index",
+            ),
+            (
+                "roi_forged_raw_index_digest", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    selected_raw_indices_sha256="f" * 64
+                ),
+                "not bound to a valid in-window selected scan",
+            ),
+            (
+                "roi_forged_rgb_frame_timestamp", 3,
+                lambda receipt: receipt["derivation"]["estimated_roi_selection"]["rois"][0].update(
+                    rgb_frame_index=614, rgb_timestamp_s=20.466666667,
+                    absolute_rgb_skew_ns=0,
+                ),
+                "not bound to a valid in-window selected scan",
             ),
         ]
         for name, output_index, mutate, message in attacks:

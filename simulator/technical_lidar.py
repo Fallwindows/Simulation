@@ -751,6 +751,7 @@ class SelectiveLidarSource:
                     "raw_track_id": item.detection.raw_track_id,
                     "bbox_xyxy": list(item.detection.bbox_xyxy),
                     "selected_return_count": len(item.raw_point_indices),
+                    "selected_raw_indices": [int(value) for value in item.raw_point_indices],
                     "selected_raw_indices_sha256": _indices_sha256(item.raw_point_indices),
                     "selection": "bbox_nearest_front_surface",
                 }

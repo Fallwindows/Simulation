@@ -42,6 +42,11 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def raw_indices_sha256(indices: list[int]) -> str:
+    payload = b"".join(value.to_bytes(8, "little", signed=True) for value in indices)
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _run(command: list[str]) -> None:
     subprocess.run(command, check=True, capture_output=True, text=True)
 
@@ -202,7 +207,7 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                 "effective_config": {"path": "capture/effective_config.json", "sha256": digest("effective config"), "version": "fixture-config-v1"},
                 "scene_manifest": {"path": "capture/scene_manifest.json", "sha256": digest("scene manifest"), "version": "fixture-scene-v1"},
                 "rgb_video": {"path": "capture/rgb_camera.mp4", "sha256": digest("rgb video"), "version": "fixture-rgb-v1"},
-                "rgb_frames": {"path": "capture/rgb_frames.jsonl", "sha256": digest("rgb frames"), "version": "fixture-rgb-index-v1"},
+                "rgb_frames": {"path": "capture/rgb_frames.jsonl", "sha256": sha256(frames), "version": "fixture-rgb-index-v1"},
                 "frame_annotations": {"path": "perception/frame_annotations.jsonl", "sha256": digest("annotations"), "version": "fixture-annotations-v1"},
             },
             "simulation_time": {"source": "slam/slam_map_poses.csv:timestamp_s", "start_s": 0.2, "end_s": 20.4},
@@ -295,8 +300,12 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
         view_spec = specs_by_id[view_id]
         scan_timestamp_s = float(view_spec.display_window_s[0])
         scan_timestamp_ns = int(round(scan_timestamp_s * 1_000_000_000))
+        rgb_frame_index = int(round(scan_timestamp_s * 30.0))
+        rgb_timestamp_s = rgb_frame_index / 30.0
+        rgb_skew_ns = abs(int(round(rgb_timestamp_s * 1_000_000_000)) - scan_timestamp_ns)
         is_roi_view = view_spec.selection_mode == "estimated_roi_front_surfaces"
-        primary_scan_hash = digest(f"roi {view_id}") if is_roi_view else digest(f"scan {view_id}")
+        roi_raw_indices = [0, 2, 4]
+        primary_scan_hash = raw_indices_sha256(roi_raw_indices) if is_roi_view else digest(f"scan {view_id}")
         view_video = technical_dir / f"{view_id}_1080p.mp4"
         _video(ffmpeg, view_video, frame_count, color)
         video_hash = sha256(view_video)
@@ -359,16 +368,18 @@ def build_complete_fixture(root: Path, repo_root: Path, ffmpeg: str, ffprobe: st
                     "topic": "/sim/camera/rgb/camera_info",
                 },
                 **({
-                    "cotimed_rgb_pairs": {"pair_count": 1, "maximum_absolute_skew_ns": 0, "pairs": [
-                        {"scan_timestamp_ns": scan_timestamp_ns, "rgb_frame_index": 3, "absolute_skew_ns": 0}
+                    "cotimed_rgb_pairs": {"pair_count": 1, "maximum_absolute_skew_ns": rgb_skew_ns, "pairs": [
+                        {"scan_timestamp_ns": scan_timestamp_ns, "rgb_frame_index": rgb_frame_index,
+                         "absolute_skew_ns": rgb_skew_ns}
                     ]}
                 } if view_spec.rgb_context else {}),
                 **({
                     "estimated_roi_selection": {"roi_count": 1, "rois": [{
-                        "scan_message_id": 1, "scan_timestamp_ns": scan_timestamp_ns, "rgb_frame_index": 3,
-                        "rgb_timestamp_s": scan_timestamp_s, "track_id": 7, "raw_track_id": 11,
-                        "absolute_rgb_skew_ns": 0,
+                        "scan_message_id": 1, "scan_timestamp_ns": scan_timestamp_ns,
+                        "rgb_frame_index": rgb_frame_index, "rgb_timestamp_s": rgb_timestamp_s,
+                        "track_id": 7, "raw_track_id": 11, "absolute_rgb_skew_ns": rgb_skew_ns,
                         "bbox_xyxy": [1, 1, 4, 4], "selected_return_count": 3,
+                        "selected_raw_indices": roi_raw_indices,
                         "selected_raw_indices_sha256": primary_scan_hash,
                         "selection": "bbox_nearest_front_surface",
                     }]}

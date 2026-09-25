@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import struct
 import subprocess
 from dataclasses import dataclass
 from fractions import Fraction
@@ -142,6 +143,82 @@ def _require_git_commit(repo_root: Path, revision: object, producer: str) -> str
 
 def _plain_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _raw_indices_sha256(indices: tuple[int, ...]) -> str:
+    digest = hashlib.sha256()
+    for value in indices:
+        digest.update(struct.pack("<q", value))
+    return digest.hexdigest()
+
+
+def _verified_source_artifact(
+    delivery_directory: Path,
+    catalog_source: dict[str, Any],
+    artifact_name: str,
+) -> Path:
+    """Resolve one catalog artifact from the delivery's source-run ancestry.
+
+    Technical delivery validation depends on the original paired capture.  The
+    catalog path is relative to that run, while the technical output is stored
+    below the same run.  A nearer conflicting file is an integrity failure; it
+    must not be skipped in favor of a matching copy higher in the tree.
+    """
+
+    artifact = catalog_source.get("artifacts", {}).get(artifact_name)
+    if not isinstance(artifact, dict) or not SHA256_PATTERN.fullmatch(str(artifact.get("sha256", ""))):
+        raise ValueError(f"technical catalog {artifact_name} binding is invalid")
+    roots = (delivery_directory, *delivery_directory.parents)
+    for candidate_root in roots:
+        candidate = _safe_child(candidate_root, artifact.get("path"), f"catalog {artifact_name}.path")
+        if not candidate.exists():
+            continue
+        if not candidate.is_file() or sha256_path(candidate) != artifact["sha256"]:
+            raise ValueError(f"technical bound {artifact_name} artifact hash mismatch")
+        return candidate
+    raise ValueError(f"technical bound {artifact_name} artifact is unavailable")
+
+
+def _verified_rgb_frame_index(
+    path: Path,
+    *,
+    camera_frame_id: str,
+) -> dict[int, int]:
+    frames: dict[int, int] = {}
+    prior_timestamp_ns = -1
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError("technical bound RGB frame index row is invalid")
+            frame_index = row.get("frame_index")
+            stamp_s = row.get("stamp_s")
+            width = row.get("width")
+            height = row.get("height")
+            if (
+                not _plain_int(frame_index)
+                or frame_index != len(frames)
+                or not isinstance(stamp_s, (int, float))
+                or isinstance(stamp_s, bool)
+                or not math.isfinite(float(stamp_s))
+                or float(stamp_s) < 0.0
+                or not _plain_int(width)
+                or not _plain_int(height)
+                or width <= 0
+                or height <= 0
+                or row.get("frame_id") != camera_frame_id
+            ):
+                raise ValueError("technical bound RGB frame index row is invalid")
+            timestamp_ns = int(round(float(stamp_s) * 1_000_000_000))
+            if timestamp_ns <= prior_timestamp_ns:
+                raise ValueError("technical bound RGB frame timestamps are not strictly ordered")
+            frames[frame_index] = timestamp_ns
+            prior_timestamp_ns = timestamp_ns
+    if not frames:
+        raise ValueError("technical bound RGB frame index is empty")
+    return frames
 
 
 def _validate_scan_selection(
@@ -391,6 +468,11 @@ def validate_technical_delivery(
     catalog_hash = _sha256_lf_text(catalog_path)
     catalog_source = _catalog_source(catalog_path, capture_id, source_id)
     _validate_source_binding(source, manifest, catalog_source, catalog_hash, root)
+    rgb_index_path = _verified_source_artifact(directory, catalog_source, "rgb_frames")
+    rgb_frame_timestamps_ns = _verified_rgb_frame_index(
+        rgb_index_path,
+        camera_frame_id=str(source["paired_capture_state"]["camera_frame_id"]),
+    )
     if manifest.get("input_snapshot_verification") != "post_render_sha256_match":
         raise ValueError("technical delivery lacks post-render input snapshot verification")
     presentation_classification = validate_presentation_classification(
@@ -552,15 +634,26 @@ def validate_technical_delivery(
                 frame_index = pair.get("rgb_frame_index")
                 skew_ns = pair.get("absolute_skew_ns")
                 identity = (scan_timestamp, frame_index)
+                bound_rgb_timestamp_ns = (
+                    rgb_frame_timestamps_ns.get(frame_index) if _plain_int(frame_index) else None
+                )
+                expected_skew_ns = (
+                    abs(bound_rgb_timestamp_ns - scan_timestamp)
+                    if bound_rgb_timestamp_ns is not None and _plain_int(scan_timestamp)
+                    else None
+                )
                 if (
                     not all(_plain_int(value) for value in (scan_timestamp, frame_index, skew_ns))
                     or scan_timestamp not in scan_by_timestamp
                     or frame_index < 0
                     or skew_ns < 0
                     or skew_ns > source["paired_capture_state"]["maximum_rgb_skew_ns"]
+                    or expected_skew_ns != skew_ns
                     or identity in seen_pairs
                 ):
-                    raise ValueError(f"technical RGB pair does not bind a selected current scan for {view_id}")
+                    raise ValueError(
+                        f"technical RGB pair does not match the bound RGB frame index or selected current scan for {view_id}"
+                    )
                 seen_pairs.add(identity)
                 skews.append(skew_ns)
                 paired_scan_timestamps.add(scan_timestamp)
@@ -585,12 +678,12 @@ def validate_technical_delivery(
                 raise ValueError(f"technical estimated ROI support is missing for {view_id}")
             seen_rois: set[tuple[object, ...]] = set()
             referenced_scans: set[tuple[int, int]] = set()
-            roi_count_by_scan: dict[tuple[int, int], int] = {}
+            roi_indices_by_scan: dict[tuple[int, int], set[int]] = {}
             for roi in roi_rows:
                 if not isinstance(roi, dict) or set(roi) != {
                     "scan_message_id", "scan_timestamp_ns", "rgb_frame_index", "rgb_timestamp_s",
                     "absolute_rgb_skew_ns", "track_id", "raw_track_id", "bbox_xyxy",
-                    "selected_return_count", "selected_raw_indices_sha256", "selection",
+                    "selected_return_count", "selected_raw_indices", "selected_raw_indices_sha256", "selection",
                 }:
                     raise ValueError(f"technical ROI method/index receipt is invalid for {view_id}")
                 message_id = roi.get("scan_message_id")
@@ -603,6 +696,16 @@ def validate_technical_delivery(
                 count = roi.get("selected_return_count")
                 bbox = roi.get("bbox_xyxy")
                 scan_identity = (message_id, timestamp_ns)
+                raw_indices_value = roi.get("selected_raw_indices")
+                raw_indices = (
+                    tuple(raw_indices_value)
+                    if isinstance(raw_indices_value, list)
+                    and all(_plain_int(value) for value in raw_indices_value)
+                    else ()
+                )
+                bound_rgb_timestamp_ns = (
+                    rgb_frame_timestamps_ns.get(frame_index) if _plain_int(frame_index) else None
+                )
                 if (
                     not all(_plain_int(value) for value in (message_id, timestamp_ns, frame_index, skew_ns, track_id, count))
                     or (raw_track_id is not None and not _plain_int(raw_track_id))
@@ -610,11 +713,19 @@ def validate_technical_delivery(
                     or frame_index < 0
                     or count <= 0
                     or count > int(scan_by_identity[scan_identity]["selected_return_count"])
+                    or len(raw_indices) != count
+                    or any(
+                        value < 0 or value >= int(scan_by_identity[scan_identity]["raw_point_count"])
+                        for value in raw_indices
+                    )
+                    or any(second <= first for first, second in zip(raw_indices, raw_indices[1:]))
                     or roi.get("selection") != "bbox_nearest_front_surface"
-                    or not SHA256_PATTERN.fullmatch(str(roi.get("selected_raw_indices_sha256", "")))
+                    or roi.get("selected_raw_indices_sha256") != _raw_indices_sha256(raw_indices)
                     or not isinstance(rgb_timestamp_s, (int, float))
                     or isinstance(rgb_timestamp_s, bool)
                     or not math.isfinite(float(rgb_timestamp_s))
+                    or bound_rgb_timestamp_ns is None
+                    or int(round(float(rgb_timestamp_s) * 1_000_000_000)) != bound_rgb_timestamp_ns
                     or not isinstance(bbox, list)
                     or len(bbox) != 4
                     or not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) for value in bbox)
@@ -622,7 +733,7 @@ def validate_technical_delivery(
                     or float(bbox[3]) < float(bbox[1])
                     or skew_ns < 0
                     or skew_ns > source["paired_capture_state"]["maximum_rgb_skew_ns"]
-                    or int(round(abs(float(rgb_timestamp_s) - timestamp_ns / 1_000_000_000.0) * 1_000_000_000)) != skew_ns
+                    or abs(bound_rgb_timestamp_ns - timestamp_ns) != skew_ns
                     or not (
                         display_window[0] - skew_ns / 1_000_000_000.0 - 1e-9
                         <= float(rgb_timestamp_s)
@@ -637,11 +748,16 @@ def validate_technical_delivery(
                     raise ValueError(f"technical ROI rows are not unique for {view_id}")
                 seen_rois.add(identity)
                 referenced_scans.add(scan_identity)
-                roi_count_by_scan[scan_identity] = roi_count_by_scan.get(scan_identity, 0) + count
-            if referenced_scans != set(scan_by_identity) or any(
-                int(scan_by_identity[key]["selected_return_count"]) > total
-                for key, total in roi_count_by_scan.items()
-            ):
+                roi_indices_by_scan.setdefault(scan_identity, set()).update(raw_indices)
+            exact_roi_union = referenced_scans == set(scan_by_identity)
+            for scan_identity, scan in scan_by_identity.items():
+                indices = tuple(sorted(roi_indices_by_scan.get(scan_identity, set())))
+                if (
+                    len(indices) != int(scan["selected_return_count"])
+                    or _raw_indices_sha256(indices) != scan["selected_raw_indices_sha256"]
+                ):
+                    exact_roi_union = False
+            if not exact_roi_union:
                 raise ValueError(f"technical ROI aggregates do not cover the selected ROI scans for {view_id}")
         elif "estimated_roi_selection" in derivation:
             raise ValueError(f"technical non-ROI receipt has unexpected ROI selection for {view_id}")
