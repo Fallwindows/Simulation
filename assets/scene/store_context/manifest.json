@@ -1,0 +1,46 @@
+{
+  "asset_id": "shopping_cart",
+  "files": [
+    {
+      "bytes": 8,
+      "path": ".gitattributes",
+      "role": "preserve_generated_bytes",
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    },
+    {
+      "bytes": 7628,
+      "path": "shopping_cart.metadata.json",
+      "role": "geometry_and_collision_contract",
+      "sha256": "f02f040f6db72d68be92286dac069187e86c24f3a85a51c0c83d3e1f4d5cad1e"
+    },
+    {
+      "bytes": 89221,
+      "path": "shopping_cart.usda",
+      "role": "render_asset",
+      "sha256": "d525807fa0d6f09a3a19ff9496db9c5891a5a40a5aabd29d44cd9759cb315be9"
+    },
+    {
+      "bytes": 14662,
+      "path": "shopping_cart_preview.svg",
+      "role": "cpu_visual_preview",
+      "sha256": "3a85d2ad54d334dff3745f69fe9cfbc80638cf17186174d013e0c2758080cc4d"
+    }
+  ],
+  "generator": {
+    "hash_basis": "UTF-8 with LF line endings",
+    "path": "tools/generate_shopping_cart.py",
+    "runtime": "Python >= 3.10, standard library only",
+    "sha256": "2f66ef62b111c86883dd8ac49ca5808b7982cc91b0343c4adbfc93de78389ea0"
+  },
+  "schema_version": 1,
+  "source_references": [
+    {
+      "path": "references/storyboard/02_walk_forward_rgb.png",
+      "sha256": "1dd93c320ce31c79eaa1a40c7e3b96507656ae59ab28eadec7d94e089cfc77d7"
+    },
+    {
+      "path": "references/storyboard/03_explore_shelves_rgb.png",
+      "sha256": "09154a4f078b9d625c4cb80bd3a9e46397c49159338cdfba98929eab2dd39297"
+    }
+  ]
+}

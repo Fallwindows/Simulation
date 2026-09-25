@@ -1,0 +1,1955 @@
+#usda 1.0
+(
+    defaultPrim = "ShoppingCart"
+    metersPerUnit = 1
+    upAxis = "Z"
+    customLayerData = {
+        string asset_identifier = "shopping_cart"
+        string generator = "tools/generate_shopping_cart.py"
+        string generator_version = "1"
+    }
+)
+
+def Xform "ShoppingCart" (
+    kind = "component"
+    customData = {
+        string asset_identifier = "shopping_cart"
+        double3 dimensions_m = (1.030000, 0.600000, 1.030000)
+        double3 obb_center_m = (-0.003000, 0.000000, 0.515000)
+        double3 obb_half_extents_m = (0.515000, 0.300000, 0.515000)
+        string collision_metadata = "shopping_cart.metadata.json"
+        bool independently_placeable = 1
+        bool requires_human = 0
+    }
+)
+{
+    def Scope "Looks"
+    {
+        def Material "Steel"
+        {
+            token outputs:surface.connect = </ShoppingCart/Looks/Steel/PreviewSurface.outputs:surface>
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.310000, 0.330000, 0.350000)
+                float inputs:metallic = 0.880000
+                float inputs:roughness = 0.240000
+                float inputs:clearcoat = 0.080000
+                float inputs:clearcoatRoughness = 0.180000
+                token outputs:surface
+            }
+        }
+
+        def Material "ZincWire"
+        {
+            token outputs:surface.connect = </ShoppingCart/Looks/ZincWire/PreviewSurface.outputs:surface>
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.480000, 0.510000, 0.540000)
+                float inputs:metallic = 0.820000
+                float inputs:roughness = 0.290000
+                float inputs:clearcoat = 0.080000
+                float inputs:clearcoatRoughness = 0.180000
+                token outputs:surface
+            }
+        }
+
+        def Material "HandlePolymer"
+        {
+            token outputs:surface.connect = </ShoppingCart/Looks/HandlePolymer/PreviewSurface.outputs:surface>
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.025000, 0.105000, 0.210000)
+                float inputs:metallic = 0.000000
+                float inputs:roughness = 0.330000
+                float inputs:clearcoat = 0.080000
+                float inputs:clearcoatRoughness = 0.180000
+                token outputs:surface
+            }
+        }
+
+        def Material "Rubber"
+        {
+            token outputs:surface.connect = </ShoppingCart/Looks/Rubber/PreviewSurface.outputs:surface>
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.012000, 0.014000, 0.017000)
+                float inputs:metallic = 0.000000
+                float inputs:roughness = 0.780000
+                float inputs:clearcoat = 0.080000
+                float inputs:clearcoatRoughness = 0.180000
+                token outputs:surface
+            }
+        }
+    }
+
+    def Xform "Visual"
+    {
+            def Cylinder "Frame_Base_L" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.770406
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.695539, 0.000000, 0.718488, 0.000000)
+                double3 xformOp:translate = (0.020000, -0.252000, 0.177500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Frame_RearPost_L" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.720225
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.999922, 0.000000, 0.012497, 0.000000)
+                double3 xformOp:translate = (-0.401000, -0.252000, 0.545000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Frame_Diagonal_L" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.850969
+                double radius = 0.014000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.584258, 0.000000, 0.811568, 0.000000)
+                double3 xformOp:translate = (0.001500, -0.252000, 0.320000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Handle_Riser_L" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.150629
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "handle_support"
+                quatf xformOp:orient = (0.921162, 0.000000, -0.389180, 0.000000)
+                double3 xformOp:translate = (-0.446000, -0.252000, 0.957500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Frame_Base_R" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.770406
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.695539, 0.000000, 0.718488, 0.000000)
+                double3 xformOp:translate = (0.020000, 0.252000, 0.177500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Frame_RearPost_R" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.720225
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.999922, 0.000000, 0.012497, 0.000000)
+                double3 xformOp:translate = (-0.401000, 0.252000, 0.545000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Frame_Diagonal_R" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.850969
+                double radius = 0.014000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.584258, 0.000000, 0.811568, 0.000000)
+                double3 xformOp:translate = (0.001500, 0.252000, 0.320000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Handle_Riser_R" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.150629
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "handle_support"
+                quatf xformOp:orient = (0.921162, 0.000000, -0.389180, 0.000000)
+                double3 xformOp:translate = (-0.446000, 0.252000, 0.957500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Frame_FrontCross" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.504000
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.405000, 0.000000, 0.165000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Frame_RearCross" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.504000
+                double radius = 0.016000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "frame"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.365000, 0.000000, 0.190000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Handle_Grip" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.600000
+                double radius = 0.018000
+                rel material:binding = </ShoppingCart/Looks/HandlePolymer>
+                custom string cart:role = "handle"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.500000, 0.000000, 1.010000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Top_L" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.855000
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.707107, 0.000000, 0.707107, 0.000000)
+                double3 xformOp:translate = (0.072500, -0.282000, 0.875000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Bottom_L" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, -0.282000, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Top_R" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.855000
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.707107, 0.000000, 0.707107, 0.000000)
+                double3 xformOp:translate = (0.072500, 0.282000, 0.875000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Bottom_R" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, 0.282000, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Top_Front" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.500000, 0.000000, 0.875000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Bottom_Front" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.455000, 0.000000, 0.455000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Top_Rear" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.355000, 0.000000, 0.875000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Bottom_Rear" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.010000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_perimeter"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.325000, 0.000000, 0.505000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Horizontal_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.796006
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.689111, 0.000000, 0.724655, 0.000000)
+                double3 xformOp:translate = (0.066500, -0.282000, 0.559000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Horizontal_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.810555
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.693898, 0.000000, 0.720073, 0.000000)
+                double3 xformOp:translate = (0.068000, -0.282000, 0.638000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Horizontal_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.825242
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.698486, 0.000000, 0.715624, 0.000000)
+                double3 xformOp:translate = (0.069500, -0.282000, 0.717000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Horizontal_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.840060
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.702886, 0.000000, 0.711303, 0.000000)
+                double3 xformOp:translate = (0.071000, -0.282000, 0.796000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.374920
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999498, 0.000000, -0.031689, 0.000000)
+                double3 xformOp:translate = (-0.271875, -0.282000, 0.687917)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.378738
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999733, 0.000000, -0.023109, 0.000000)
+                double3 xformOp:translate = (-0.203750, -0.282000, 0.685833)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.382665
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999892, 0.000000, -0.014701, 0.000000)
+                double3 xformOp:translate = (-0.135625, -0.282000, 0.683750)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.386699
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999979, 0.000000, -0.006465, 0.000000)
+                double3 xformOp:translate = (-0.067500, -0.282000, 0.681667)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_05" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.390835
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999999, 0.000000, 0.001599, 0.000000)
+                double3 xformOp:translate = (0.000625, -0.282000, 0.679583)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_06" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.395071
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999955, 0.000000, 0.009492, 0.000000)
+                double3 xformOp:translate = (0.068750, -0.282000, 0.677500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_07" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.399403
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999852, 0.000000, 0.017216, 0.000000)
+                double3 xformOp:translate = (0.136875, -0.282000, 0.675417)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_08" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.403829
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999693, 0.000000, 0.024771, 0.000000)
+                double3 xformOp:translate = (0.205000, -0.282000, 0.673333)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_09" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.408345
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999483, 0.000000, 0.032159, 0.000000)
+                double3 xformOp:translate = (0.273125, -0.282000, 0.671250)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_10" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.412948
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999224, 0.000000, 0.039382, 0.000000)
+                double3 xformOp:translate = (0.341250, -0.282000, 0.669167)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_L_Vertical_11" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.417635
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998921, 0.000000, 0.046442, 0.000000)
+                double3 xformOp:translate = (0.409375, -0.282000, 0.667083)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Horizontal_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.796006
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.689111, 0.000000, 0.724655, 0.000000)
+                double3 xformOp:translate = (0.066500, 0.282000, 0.559000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Horizontal_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.810555
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.693898, 0.000000, 0.720073, 0.000000)
+                double3 xformOp:translate = (0.068000, 0.282000, 0.638000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Horizontal_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.825242
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.698486, 0.000000, 0.715624, 0.000000)
+                double3 xformOp:translate = (0.069500, 0.282000, 0.717000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Horizontal_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.840060
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.702886, 0.000000, 0.711303, 0.000000)
+                double3 xformOp:translate = (0.071000, 0.282000, 0.796000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.374920
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999498, 0.000000, -0.031689, 0.000000)
+                double3 xformOp:translate = (-0.271875, 0.282000, 0.687917)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.378738
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999733, 0.000000, -0.023109, 0.000000)
+                double3 xformOp:translate = (-0.203750, 0.282000, 0.685833)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.382665
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999892, 0.000000, -0.014701, 0.000000)
+                double3 xformOp:translate = (-0.135625, 0.282000, 0.683750)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.386699
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999979, 0.000000, -0.006465, 0.000000)
+                double3 xformOp:translate = (-0.067500, 0.282000, 0.681667)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_05" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.390835
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999999, 0.000000, 0.001599, 0.000000)
+                double3 xformOp:translate = (0.000625, 0.282000, 0.679583)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_06" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.395071
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999955, 0.000000, 0.009492, 0.000000)
+                double3 xformOp:translate = (0.068750, 0.282000, 0.677500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_07" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.399403
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999852, 0.000000, 0.017216, 0.000000)
+                double3 xformOp:translate = (0.136875, 0.282000, 0.675417)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_08" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.403829
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999693, 0.000000, 0.024771, 0.000000)
+                double3 xformOp:translate = (0.205000, 0.282000, 0.673333)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_09" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.408345
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999483, 0.000000, 0.032159, 0.000000)
+                double3 xformOp:translate = (0.273125, 0.282000, 0.671250)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_10" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.412948
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999224, 0.000000, 0.039382, 0.000000)
+                double3 xformOp:translate = (0.341250, 0.282000, 0.669167)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Side_R_Vertical_11" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.417635
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998921, 0.000000, 0.046442, 0.000000)
+                double3 xformOp:translate = (0.409375, 0.282000, 0.667083)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Horizontal_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.464000, 0.000000, 0.539000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Horizontal_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.473000, 0.000000, 0.623000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Horizontal_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.482000, 0.000000, 0.707000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Horizontal_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.491000, 0.000000, 0.791000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Vertical_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.422404
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998576, 0.000000, 0.053343, 0.000000)
+                double3 xformOp:translate = (0.477500, -0.211500, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Vertical_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.422404
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998576, 0.000000, 0.053343, 0.000000)
+                double3 xformOp:translate = (0.477500, -0.141000, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Vertical_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.422404
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998576, 0.000000, 0.053343, 0.000000)
+                double3 xformOp:translate = (0.477500, -0.070500, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Vertical_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.422404
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998576, 0.000000, 0.053343, 0.000000)
+                double3 xformOp:translate = (0.477500, 0.000000, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Vertical_05" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.422404
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998576, 0.000000, 0.053343, 0.000000)
+                double3 xformOp:translate = (0.477500, 0.070500, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Vertical_06" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.422404
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998576, 0.000000, 0.053343, 0.000000)
+                double3 xformOp:translate = (0.477500, 0.141000, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Front_Vertical_07" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.422404
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.998576, 0.000000, 0.053343, 0.000000)
+                double3 xformOp:translate = (0.477500, 0.211500, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Horizontal_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.331000, 0.000000, 0.579000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Horizontal_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.337000, 0.000000, 0.653000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Horizontal_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.343000, 0.000000, 0.727000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Horizontal_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.564000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.349000, 0.000000, 0.801000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Vertical_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.371214
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999182, 0.000000, -0.040441, 0.000000)
+                double3 xformOp:translate = (-0.340000, -0.211500, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Vertical_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.371214
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999182, 0.000000, -0.040441, 0.000000)
+                double3 xformOp:translate = (-0.340000, -0.141000, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Vertical_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.371214
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999182, 0.000000, -0.040441, 0.000000)
+                double3 xformOp:translate = (-0.340000, -0.070500, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Vertical_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.371214
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999182, 0.000000, -0.040441, 0.000000)
+                double3 xformOp:translate = (-0.340000, 0.000000, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Vertical_05" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.371214
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999182, 0.000000, -0.040441, 0.000000)
+                double3 xformOp:translate = (-0.340000, 0.070500, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Vertical_06" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.371214
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999182, 0.000000, -0.040441, 0.000000)
+                double3 xformOp:translate = (-0.340000, 0.141000, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Rear_Vertical_07" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.371214
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_wire"
+                quatf xformOp:orient = (0.999182, 0.000000, -0.040441, 0.000000)
+                double3 xformOp:translate = (-0.340000, 0.211500, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Long_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, -0.183750, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Long_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, -0.122500, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Long_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, -0.061250, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Long_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, 0.000000, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Long_05" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, 0.061250, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Long_06" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, 0.122500, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Long_07" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.781601
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.684116, 0.000000, 0.729373, 0.000000)
+                double3 xformOp:translate = (0.065000, 0.183750, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.260000, 0.000000, 0.500833)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.195000, 0.000000, 0.496667)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.130000, 0.000000, 0.492500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.065000, 0.000000, 0.488333)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_05" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.000000, 0.000000, 0.484167)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_06" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.065000, 0.000000, 0.480000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_07" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.130000, 0.000000, 0.475833)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_08" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.195000, 0.000000, 0.471667)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_09" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.260000, 0.000000, 0.467500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_10" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.325000, 0.000000, 0.463333)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Basket_Floor_Cross_11" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.490000
+                double radius = 0.004200
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "basket_floor_wire"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.390000, 0.000000, 0.459167)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Long_L" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.600750
+                double radius = 0.007000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.689225, 0.000000, 0.724547, 0.000000)
+                double3 xformOp:translate = (0.015000, -0.205000, 0.270000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Long_R" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.600750
+                double radius = 0.007000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.689225, 0.000000, 0.724547, 0.000000)
+                double3 xformOp:translate = (0.015000, 0.205000, 0.270000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Cross_00" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.410000
+                double radius = 0.005000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.285000, 0.000000, 0.285000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Cross_01" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.410000
+                double radius = 0.005000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.185000, 0.000000, 0.280000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Cross_02" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.410000
+                double radius = 0.005000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.085000, 0.000000, 0.275000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Cross_03" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.410000
+                double radius = 0.005000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.015000, 0.000000, 0.270000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Cross_04" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.410000
+                double radius = 0.005000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.115000, 0.000000, 0.265000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Cross_05" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.410000
+                double radius = 0.005000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.215000, 0.000000, 0.260000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Rack_Cross_06" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.410000
+                double radius = 0.005000
+                rel material:binding = </ShoppingCart/Looks/ZincWire>
+                custom string cart:role = "lower_rack"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.315000, 0.000000, 0.255000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_L_Stem" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.073000
+                double radius = 0.011000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_stem"
+                quatf xformOp:orient = (1.000000, 0.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, -0.258000, 0.168500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_L_ForkA" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, -0.281000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_L_ForkB" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, -0.235000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_L_Wheel" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.038000
+                double radius = 0.068000
+                rel material:binding = </ShoppingCart/Looks/Rubber>
+                custom string cart:role = "wheel"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, -0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_L_Hub" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.046000
+                double radius = 0.020000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "wheel_hub"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, -0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_R_Stem" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.073000
+                double radius = 0.011000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_stem"
+                quatf xformOp:orient = (1.000000, 0.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, 0.258000, 0.168500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_R_ForkA" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, 0.235000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_R_ForkB" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, 0.281000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_R_Wheel" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.038000
+                double radius = 0.068000
+                rel material:binding = </ShoppingCart/Looks/Rubber>
+                custom string cart:role = "wheel"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, 0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Rear_R_Hub" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.046000
+                double radius = 0.020000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "wheel_hub"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (-0.335000, 0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_L_Stem" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.073000
+                double radius = 0.011000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_stem"
+                quatf xformOp:orient = (1.000000, 0.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, -0.258000, 0.168500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_L_ForkA" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, -0.281000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_L_ForkB" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, -0.235000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_L_Wheel" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.038000
+                double radius = 0.068000
+                rel material:binding = </ShoppingCart/Looks/Rubber>
+                custom string cart:role = "wheel"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, -0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_L_Hub" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.046000
+                double radius = 0.020000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "wheel_hub"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, -0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_R_Stem" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.073000
+                double radius = 0.011000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_stem"
+                quatf xformOp:orient = (1.000000, 0.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, 0.258000, 0.168500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_R_ForkA" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, 0.235000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_R_ForkB" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.077000
+                double radius = 0.008000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "caster_fork"
+                quatf xformOp:orient = (0.000000, 1.000000, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, 0.281000, 0.106500)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_R_Wheel" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.038000
+                double radius = 0.068000
+                rel material:binding = </ShoppingCart/Looks/Rubber>
+                custom string cart:role = "wheel"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, 0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+
+            def Cylinder "Caster_Front_R_Hub" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                uniform token axis = "Z"
+                double height = 0.046000
+                double radius = 0.020000
+                rel material:binding = </ShoppingCart/Looks/Steel>
+                custom string cart:role = "wheel_hub"
+                quatf xformOp:orient = (0.707107, -0.707107, 0.000000, 0.000000)
+                double3 xformOp:translate = (0.375000, 0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+            }
+    }
+
+    def Xform "Collision"
+    {
+        custom string collision:representation = "authored_box_proxies"
+            def Cube "FrameBaseLeft" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "frame"
+                custom double3 collision:size_m = (0.802000, 0.040000, 0.060000)
+                double3 xformOp:scale = (0.802000, 0.040000, 0.060000)
+                double3 xformOp:translate = (0.020000, -0.252000, 0.180000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "FrameBaseRight" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "frame"
+                custom double3 collision:size_m = (0.802000, 0.040000, 0.060000)
+                double3 xformOp:scale = (0.802000, 0.040000, 0.060000)
+                double3 xformOp:translate = (0.020000, 0.252000, 0.180000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "RearPostLeft" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "frame"
+                custom double3 collision:size_m = (0.060000, 0.060000, 0.750000)
+                double3 xformOp:scale = (0.060000, 0.060000, 0.750000)
+                double3 xformOp:translate = (-0.401000, -0.252000, 0.550000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "RearPostRight" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "frame"
+                custom double3 collision:size_m = (0.060000, 0.060000, 0.750000)
+                double3 xformOp:scale = (0.060000, 0.060000, 0.750000)
+                double3 xformOp:translate = (-0.401000, 0.252000, 0.550000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "BasketLeft" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "basket_side"
+                custom double3 collision:size_m = (0.875000, 0.026000, 0.440000)
+                double3 xformOp:scale = (0.875000, 0.026000, 0.440000)
+                double3 xformOp:translate = (0.073000, -0.282000, 0.668000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "BasketRight" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "basket_side"
+                custom double3 collision:size_m = (0.875000, 0.026000, 0.440000)
+                double3 xformOp:scale = (0.875000, 0.026000, 0.440000)
+                double3 xformOp:translate = (0.073000, 0.282000, 0.668000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "BasketFront" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "basket_front"
+                custom double3 collision:size_m = (0.056000, 0.580000, 0.440000)
+                double3 xformOp:scale = (0.056000, 0.580000, 0.440000)
+                double3 xformOp:translate = (0.478000, 0.000000, 0.665000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "BasketRear" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "basket_rear"
+                custom double3 collision:size_m = (0.050000, 0.580000, 0.400000)
+                double3 xformOp:scale = (0.050000, 0.580000, 0.400000)
+                double3 xformOp:translate = (-0.340000, 0.000000, 0.690000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "Handle" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "handle"
+                custom double3 collision:size_m = (0.036000, 0.600000, 0.036000)
+                double3 xformOp:scale = (0.036000, 0.600000, 0.036000)
+                double3 xformOp:translate = (-0.500000, 0.000000, 1.010000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "CasterRearLeft" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "caster"
+                custom double3 collision:size_m = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:scale = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:translate = (-0.335000, -0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "CasterRearRight" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "caster"
+                custom double3 collision:size_m = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:scale = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:translate = (-0.335000, 0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "CasterFrontLeft" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "caster"
+                custom double3 collision:size_m = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:scale = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:translate = (0.375000, -0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "CasterFrontRight" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                double size = 1.000000
+                bool physics:collisionEnabled = 1
+                token physics:approximation = "box"
+                custom string cart:role = "caster"
+                custom double3 collision:size_m = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:scale = (0.140000, 0.050000, 0.136000)
+                double3 xformOp:translate = (0.375000, 0.258000, 0.068000)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+    }
+}
