@@ -212,5 +212,15 @@ def Xform "Asset" (
                 token outputs:surface
             }
         }
+        def Material "Print" {
+            token outputs:surface.connect = </Asset/Looks/Print/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.67059, 0.69804, 0.70588)
+                float inputs:roughness = 0.3000
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
     }
 }

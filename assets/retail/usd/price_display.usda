@@ -79,12 +79,26 @@ def Xform "Asset" (
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 float3 outputs:rgb
             }
+            def Shader "NormalTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/price_display_normal.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "RoughnessTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/price_display_roughness.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float outputs:r
+            }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.86667, 0.87843, 0.83922)
                 float inputs:roughness = 0.3000
                 float inputs:metallic = 0.0000
                 color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
+                normal3f inputs:normal.connect = </Asset/Looks/Front/NormalTexture.outputs:rgb>
+                float inputs:roughness.connect = </Asset/Looks/Front/RoughnessTexture.outputs:r>
                 token outputs:surface
             }
         }
@@ -157,6 +171,42 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.86667, 0.87843, 0.83922)
                 float inputs:roughness = 0.3000
                 float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Print" {
+            token outputs:surface.connect = </Asset/Looks/Print/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+            def Shader "Texture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/price_display.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "NormalTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/price_display_normal.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "RoughnessTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/price_display_roughness.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float outputs:r
+            }
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.86667, 0.87843, 0.83922)
+                float inputs:roughness = 0.3000
+                float inputs:metallic = 0.0000
+                color3f inputs:diffuseColor.connect = </Asset/Looks/Print/Texture.outputs:rgb>
+                normal3f inputs:normal.connect = </Asset/Looks/Print/NormalTexture.outputs:rgb>
+                float inputs:roughness.connect = </Asset/Looks/Print/RoughnessTexture.outputs:r>
                 token outputs:surface
             }
         }

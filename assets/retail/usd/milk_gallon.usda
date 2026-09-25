@@ -95,38 +95,35 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
-        def Xform "SidePrintLeft" {
-            double3 xformOp:translate = (-0.08700, 0.00000, -0.01160)
-            double3 xformOp:scale = (0.00300, 0.04680, 0.07830)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Accent>
-            }
+        def Mesh "LeftPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.09100, -0.04680, -0.07830), (-0.09100, 0.04680, -0.07830), (-0.09100, 0.04680, 0.07830), (-0.09100, -0.04680, 0.07830)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.05, 0.12), (0.34, 0.12), (0.34, 0.88), (0.05, 0.88)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
         }
-        def Xform "SidePrintRight" {
-            double3 xformOp:translate = (0.08700, 0.00000, -0.01160)
-            double3 xformOp:scale = (0.00300, 0.04680, 0.07830)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Accent>
-            }
+        def Mesh "RightPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.09100, 0.04680, -0.07830), (0.09100, -0.04680, -0.07830), (0.09100, -0.04680, 0.07830), (0.09100, 0.04680, 0.07830)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.05, 0.12), (0.34, 0.12), (0.34, 0.88), (0.05, 0.88)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
         }
-        def Xform "BackColorBand" {
-            double3 xformOp:translate = (0.00000, -0.06200, -0.08990)
-            double3 xformOp:scale = (0.05220, 0.00300, 0.01740)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Accent>
-            }
+        def Mesh "BackPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.06840, -0.06600, -0.11020), (0.06840, -0.06600, -0.11020), (0.06840, -0.06600, -0.06380), (-0.06840, -0.06600, -0.06380)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.08, 0.08), (0.92, 0.08), (0.92, 0.34), (0.08, 0.34)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
         }
     }
     def Scope "Looks" {
@@ -153,12 +150,26 @@ def Xform "Asset" (
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 float3 outputs:rgb
             }
+            def Shader "NormalTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/milk_gallon_normal.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "RoughnessTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/milk_gallon_roughness.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float outputs:r
+            }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.19216, 0.44314, 0.72157)
                 float inputs:roughness = 0.5200
                 float inputs:metallic = 0.0000
                 color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
+                normal3f inputs:normal.connect = </Asset/Looks/Front/NormalTexture.outputs:rgb>
+                float inputs:roughness.connect = </Asset/Looks/Front/RoughnessTexture.outputs:r>
                 token outputs:surface
             }
         }
@@ -231,6 +242,42 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.19216, 0.44314, 0.72157)
                 float inputs:roughness = 0.5200
                 float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Print" {
+            token outputs:surface.connect = </Asset/Looks/Print/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+            def Shader "Texture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/milk_gallon.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "NormalTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/milk_gallon_normal.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "RoughnessTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/milk_gallon_roughness.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float outputs:r
+            }
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.19216, 0.44314, 0.72157)
+                float inputs:roughness = 0.5200
+                float inputs:metallic = 0.0000
+                color3f inputs:diffuseColor.connect = </Asset/Looks/Print/Texture.outputs:rgb>
+                normal3f inputs:normal.connect = </Asset/Looks/Print/NormalTexture.outputs:rgb>
+                float inputs:roughness.connect = </Asset/Looks/Print/RoughnessTexture.outputs:r>
                 token outputs:surface
             }
         }

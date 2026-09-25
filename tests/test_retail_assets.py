@@ -19,7 +19,7 @@ from simulator.environment.aisle_builder import (
     shelf_level_counts_by_zone,
 )
 from simulator.environment.retail_catalog import load_retail_catalog
-from tools.retail_assets.generate_packaging import ASSET_SPECS, _asset_usda, generate_library
+from tools.retail_assets.generate_packaging import ASSET_SPECS, ITEM_ART_DIRECTIONS, _asset_usda, generate_library
 import tools.retail_assets.generate_packaging as packaging_generator
 
 
@@ -155,6 +155,8 @@ class RetailAssetTests(unittest.TestCase):
         self.assertNotRegex(source, r"\bradius2\s*=", asset_key)
         self.assertNotRegex(source, r"token\s+outputs:rgb\b", asset_key)
         self.assertNotRegex(source, r"normals:interpolation\b", asset_key)
+        for prim_name in re.findall(r'\bdef\s+\w+\s+"([^"]+)"', source):
+            self.assertRegex(prim_name, r"^[A-Za-z_][A-Za-z0-9_]*$", asset_key)
         if "outputs:rgb" in source:
             self.assertRegex(source, r"float3\s+outputs:rgb\b", asset_key)
         if 'def Mesh "FrontPanel"' in source:
@@ -297,8 +299,63 @@ class RetailAssetTests(unittest.TestCase):
                     hashlib.sha256((generated_root / "textures" / f"{asset.asset_key}.png").read_bytes()).hexdigest(),
                     hashlib.sha256(asset.texture_path.read_bytes()).hexdigest(),
                 )
+                for surface_path in (asset.normal_texture_path, asset.roughness_texture_path):
+                    if surface_path is not None:
+                        self.assertEqual(
+                            hashlib.sha256((generated_root / "textures" / surface_path.name).read_bytes()).hexdigest(),
+                            hashlib.sha256(surface_path.read_bytes()).hexdigest(),
+                        )
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
+
+    def test_generation_is_cross_process_and_hash_seed_deterministic(self):
+        try:
+            packaging_generator._validate_texture_toolchain()
+        except RuntimeError as error:
+            self.skipTest(f"documented generation runtime required: {error}")
+        root = Path(__file__).resolve().parents[1]
+        scratch_roots = [
+            root / "review" / f".test-retail-{os.getpid()}-process-{seed}"
+            for seed in ("1", "8675309")
+        ]
+        for scratch in scratch_roots:
+            shutil.rmtree(scratch, ignore_errors=True)
+        try:
+            for seed, scratch in zip(("1", "8675309"), scratch_roots):
+                environment = dict(os.environ)
+                environment["PYTHONHASHSEED"] = seed
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; "
+                        "from tools.retail_assets.generate_packaging import generate_library; "
+                        f"generate_library(Path({str(scratch)!r}))",
+                    ],
+                    cwd=root,
+                    env=environment,
+                )
+            generated_roots = [scratch / "assets/retail" for scratch in scratch_roots]
+            first_files = sorted(
+                path.relative_to(generated_roots[0])
+                for path in generated_roots[0].rglob("*")
+                if path.is_file()
+            )
+            second_files = sorted(
+                path.relative_to(generated_roots[1])
+                for path in generated_roots[1].rglob("*")
+                if path.is_file()
+            )
+            self.assertEqual(first_files, second_files)
+            for relative_path in first_files:
+                self.assertEqual(
+                    hashlib.sha256((generated_roots[0] / relative_path).read_bytes()).hexdigest(),
+                    hashlib.sha256((generated_roots[1] / relative_path).read_bytes()).hexdigest(),
+                    relative_path.as_posix(),
+                )
+        finally:
+            for scratch in scratch_roots:
+                shutil.rmtree(scratch, ignore_errors=True)
 
     def test_manifest_order_and_python_hash_seed_do_not_change_layout(self):
         root = Path(__file__).resolve().parents[1]
@@ -313,6 +370,9 @@ class RetailAssetTests(unittest.TestCase):
                 copied = dict(entry)
                 copied["usd_path"] = str((root / "assets/retail" / entry["usd_path"]).resolve())
                 copied["texture_path"] = str((root / "assets/retail" / entry["texture_path"]).resolve())
+                for field in ("normal_texture_path", "roughness_texture_path"):
+                    if field in entry:
+                        copied[field] = str((root / "assets/retail" / entry[field]).resolve())
                 reordered_entries.append(copied)
             reordered["assets"] = reordered_entries
             reordered_path = scratch / "manifest.json"
@@ -467,10 +527,15 @@ class RetailAssetTests(unittest.TestCase):
             source = asset.usd_path.read_text(encoding="utf-8")
             geometry = source.split('def Scope "Looks"', 1)[0]
             front_bindings = geometry.count("</Asset/Looks/Front>")
+            print_bindings = geometry.count("</Asset/Looks/Print>")
             uv_sets = geometry.count("primvars:st")
-            self.assertEqual(front_bindings, uv_sets, asset.asset_key)
+            self.assertEqual(front_bindings + print_bindings, uv_sets, asset.asset_key)
             if "UsdUVTexture" in source:
                 self.assertGreater(front_bindings, 0, asset.asset_key)
+                self.assertIsNotNone(asset.normal_texture_path, asset.asset_key)
+                self.assertIsNotNone(asset.roughness_texture_path, asset.asset_key)
+                self.assertIn("inputs:normal.connect", source)
+                self.assertIn("inputs:roughness.connect", source)
             if asset.asset_key == "price_display":
                 self.assertGreater(front_bindings, 0)
             with PillowImage.open(asset.texture_path) as image:
@@ -479,10 +544,13 @@ class RetailAssetTests(unittest.TestCase):
 
         self.assertEqual(len(texture_hashes), 45)
         self.assertGreaterEqual(len(sizes), 8)
+        self.assertEqual(len(ITEM_ART_DIRECTIONS), 45)
+        self.assertEqual(len({direction[0] for direction in ITEM_ART_DIRECTIONS.values()}), 45)
+        self.assertEqual({direction[2] for direction in ITEM_ART_DIRECTIONS.values()}, set(range(6)))
 
     def test_register_parts_match_upgraded_organic_and_fixture_geometry(self):
         expectations = {
-            "banana_bunch": (r'def (?:Xform|Mesh) "Finger[^\"]*"', 15),
+            "banana_bunch": (r'def (?:Xform|Mesh) "Finger[^\"]*"', 5),
             "broccoli": (r'def (?:Xform|Mesh) "Branch[^\"]*"', 5),
             "wicker_basket": (r'def (?:Xform|Mesh) "FrontWeave[^\"]*"', 8),
             "angled_produce_bin": (r'def (?:Xform|Mesh) "[^\"]*Rail"', 2),
@@ -491,6 +559,11 @@ class RetailAssetTests(unittest.TestCase):
             record = self.catalog_by_key[asset_key]
             source = record.usd_path.read_text(encoding="utf-8")
             self.assertEqual(len(re.findall(pattern, source)), count, asset_key)
+        self.assertLessEqual(self.catalog_by_key["banana_bunch"].usd_path.read_text(encoding="utf-8").count('def Sphere'), 1)
+        self.assertNotIn('def Sphere', self.catalog_by_key["broccoli"].usd_path.read_text(encoding="utf-8"))
+        self.assertNotIn('def Sphere', self.catalog_by_key["bread_loaf"].usd_path.read_text(encoding="utf-8"))
+        wicker = self.catalog_by_key["wicker_basket"].usd_path.read_text(encoding="utf-8")
+        self.assertEqual(len(re.findall(r'def Mesh "(?:Front|Back)Weave', wicker)), 16)
 
     def test_every_physical_object_has_one_unique_identity(self):
         ids = [asset.instance_id for asset in self.layout.assets]

@@ -74,38 +74,35 @@ def Xform "Asset" (
             )
             rel material:binding = </Asset/Looks/Front>
         }
-        def Xform "SidePrintLeft" {
-            double3 xformOp:translate = (-0.03950, 0.00000, -0.00800)
-            double3 xformOp:scale = (0.00300, 0.02520, 0.05400)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Accent>
-            }
+        def Mesh "LeftPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.04350, -0.02520, -0.05400), (-0.04350, 0.02520, -0.05400), (-0.04350, 0.02520, 0.05400), (-0.04350, -0.02520, 0.05400)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            normal3f[] normals = [(-1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.05, 0.12), (0.34, 0.12), (0.34, 0.88), (0.05, 0.88)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
         }
-        def Xform "SidePrintRight" {
-            double3 xformOp:translate = (0.03950, 0.00000, -0.00800)
-            double3 xformOp:scale = (0.00300, 0.02520, 0.05400)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Accent>
-            }
+        def Mesh "RightPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.04350, 0.02520, -0.05400), (0.04350, -0.02520, -0.05400), (0.04350, -0.02520, 0.05400), (0.04350, 0.02520, 0.05400)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            normal3f[] normals = [(1, 0, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.05, 0.12), (0.34, 0.12), (0.34, 0.88), (0.05, 0.88)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
         }
-        def Xform "BackColorBand" {
-            double3 xformOp:translate = (0.00000, -0.03200, -0.06200)
-            double3 xformOp:scale = (0.02465, 0.00300, 0.01200)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            def Cube "Shape" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            ) {
-                double size = 2.0
-                rel material:binding = </Asset/Looks/Accent>
-            }
+        def Mesh "BackPrintPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.03230, -0.03600, -0.07600), (0.03230, -0.03600, -0.07600), (0.03230, -0.03600, -0.04400), (-0.03230, -0.03600, -0.04400)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(0, -1, 0)] (interpolation = "uniform")
+            texCoord2f[] primvars:st = [(0.08, 0.08), (0.92, 0.08), (0.92, 0.34), (0.08, 0.34)] (interpolation = "vertex")
+            rel material:binding = </Asset/Looks/Print>
         }
     }
     def Scope "Looks" {
@@ -132,12 +129,26 @@ def Xform "Asset" (
                 float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
                 float3 outputs:rgb
             }
+            def Shader "NormalTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/hand_soap_normal.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "RoughnessTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/hand_soap_roughness.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float outputs:r
+            }
             def Shader "Preview" {
                 uniform token info:id = "UsdPreviewSurface"
                 color3f inputs:diffuseColor = (0.96471, 0.88627, 0.74510)
                 float inputs:roughness = 0.4200
                 float inputs:metallic = 0.0000
                 color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
+                normal3f inputs:normal.connect = </Asset/Looks/Front/NormalTexture.outputs:rgb>
+                float inputs:roughness.connect = </Asset/Looks/Front/RoughnessTexture.outputs:r>
                 token outputs:surface
             }
         }
@@ -210,6 +221,42 @@ def Xform "Asset" (
                 color3f inputs:diffuseColor = (0.96471, 0.88627, 0.74510)
                 float inputs:roughness = 0.4200
                 float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Print" {
+            token outputs:surface.connect = </Asset/Looks/Print/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+            def Shader "Texture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/hand_soap.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "NormalTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/hand_soap_normal.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "RoughnessTexture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/hand_soap_roughness.png@
+                float2 inputs:st.connect = </Asset/Looks/Print/StReader.outputs:result>
+                float outputs:r
+            }
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.96471, 0.88627, 0.74510)
+                float inputs:roughness = 0.4200
+                float inputs:metallic = 0.0000
+                color3f inputs:diffuseColor.connect = </Asset/Looks/Print/Texture.outputs:rgb>
+                normal3f inputs:normal.connect = </Asset/Looks/Print/NormalTexture.outputs:rgb>
+                float inputs:roughness.connect = </Asset/Looks/Print/RoughnessTexture.outputs:r>
                 token outputs:surface
             }
         }
