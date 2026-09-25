@@ -499,7 +499,7 @@ class SceneLookdevTests(unittest.TestCase):
         validate_capture_dimensions(1280, 720, 4)
         with self.assertRaisesRegex(ValueError, "width"):
             validate_capture_dimensions(32, 720, 4)
-        reference = Path(__file__).resolve().parents[4] / "references/storyboard/01_enter_aisle_rgb.png"
+        reference = Path(__file__).resolve().parents[1] / "references/storyboard/01_enter_aisle_rgb.png"
         self.assertEqual(png_dimensions(reference), (1672, 941))
 
     def test_local_lidar_schema_preserves_scenario_calibration(self):
