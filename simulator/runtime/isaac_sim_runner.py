@@ -100,7 +100,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument(
         "--camera-head-transforms-path",
         default="",
-        help="Dynamic sensor_rig->camera_link JSON; defaults beside --status-path",
+        help="Dynamic sensor_rig->camera_link JSON; defaults beside the guarded capture directory or status",
     )
     parser.add_argument(
         "--capture-only",
@@ -335,6 +335,29 @@ def write_camera_head_transforms(
         "schema": contract["schema"],
         "version": contract["version"],
     }
+
+
+def camera_head_output_path(args, has_representative_frames: bool) -> Path:
+    """Resolve head output without contaminating the guarded image directory."""
+
+    if args.camera_head_transforms_path:
+        output = Path(args.camera_head_transforms_path).resolve()
+    elif has_representative_frames:
+        capture_dir = Path(args.capture_dir).resolve()
+        output = capture_dir.with_name(f"{capture_dir.name}.camera_head_transforms.json")
+    else:
+        output = Path(args.status_path).resolve().with_name("camera_head_transforms.json")
+    if has_representative_frames:
+        capture_root = Path(args.capture_dir).resolve()
+        try:
+            output.relative_to(capture_root)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(
+                "--camera-head-transforms-path must stay outside the representative capture directory"
+            )
+    return output
 
 
 def lidar_runtime_spec(lidar_config) -> dict[str, object]:
@@ -1426,17 +1449,6 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     scenario_path = Path(args.scenario).resolve()
     scenario_links = json.loads(scenario_path.read_text(encoding="utf-8"))
     trajectory_config_path = (scenario_path.parent / scenario_links["trajectory"]).resolve()
-    camera_head_path = (
-        Path(args.camera_head_transforms_path).resolve()
-        if args.camera_head_transforms_path
-        else Path(args.status_path).resolve().with_name("camera_head_transforms.json")
-    )
-    camera_head_artifact = write_camera_head_transforms(
-        camera_head_path,
-        trajectory,
-        scenario,
-        trajectory_config_path,
-    )
     frames = args.frames if args.frames > 0 else max(1, math.ceil(scenario.trajectory.duration_s * 60.0))
     from simulator.runtime.representative_capture import parse_capture_frames, validate_capture_dimensions
 
@@ -1444,6 +1456,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     if bool(args.capture_dir) != bool(selected_capture_frames):
         raise ValueError("--capture-dir and a non-empty --capture-frames list must be supplied together")
     validate_capture_dimensions(args.capture_width, args.capture_height, args.capture_rt_subframes)
+    camera_head_path = camera_head_output_path(args, bool(selected_capture_frames))
+    camera_head_artifact = write_camera_head_transforms(
+        camera_head_path,
+        trajectory,
+        scenario,
+        trajectory_config_path,
+    )
     noise_config = NoiseConfig.from_mapping(scenario.sensor_overrides.get("noise"))
 
     print("[grocery-runtime] starting SimulationApp", flush=True)

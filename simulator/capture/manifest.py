@@ -12,9 +12,10 @@ import ast
 import dataclasses
 import hashlib
 import json
+import math
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 CAPTURE_MANIFEST_VERSION = 1
@@ -406,6 +407,196 @@ def _verify_manifest_files(root: Path, data: dict[str, Any], required_paths: set
             raise ValueError(f"capture sensor input checksum mismatch: {relative}")
 
 
+def _canonical_capture_path(root: Path, value: Any, label: str) -> tuple[str, Path]:
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise ValueError(f"{label} must be a canonical capture-relative path")
+    relative = PurePosixPath(value)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError(f"{label} must be a canonical capture-relative path")
+    if not relative.parts or ":" in relative.parts[0]:
+        raise ValueError(f"{label} must be a canonical capture-relative path")
+    path = (root / Path(*relative.parts)).resolve()
+    try:
+        canonical = path.relative_to(root.resolve()).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes capture directory") from exc
+    if canonical != value:
+        raise ValueError(f"{label} must be a canonical capture-relative path")
+    return canonical, path
+
+
+def _load_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return value
+
+
+def _dynamic_transform_descriptors(root: Path) -> list[tuple[dict[str, Any], str, Path]]:
+    sensor_transforms = _load_json_object(root / "sensor_transforms.json", "sensor_transforms.json")
+    raw_descriptors = sensor_transforms.get("dynamic_transform_artifacts")
+    if raw_descriptors is None:
+        return []
+    if not isinstance(raw_descriptors, list) or not raw_descriptors:
+        raise ValueError("sensor_transforms dynamic_transform_artifacts must be a non-empty list")
+    static_transforms = sensor_transforms.get("transforms")
+    if not isinstance(static_transforms, list):
+        raise ValueError("sensor_transforms transforms must be a list")
+    if any(
+        isinstance(item, dict)
+        and item.get("parent") == "sensor_rig"
+        and item.get("child") == "camera_link"
+        for item in static_transforms
+    ):
+        raise ValueError("sensor_rig->camera_link cannot be both static and dynamic")
+    descriptors = []
+    seen_edges: set[tuple[str, str]] = set()
+    seen_paths: set[str] = set()
+    for index, item in enumerate(raw_descriptors):
+        label = f"dynamic_transform_artifacts[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{label} must be an object")
+        parent = item.get("parent_frame")
+        child = item.get("child_frame")
+        if (parent, child) != ("sensor_rig", "camera_link"):
+            raise ValueError(f"{label} declares an unsupported dynamic transform edge")
+        edge = (str(parent), str(child))
+        if edge in seen_edges:
+            raise ValueError(f"{label} duplicates a dynamic transform edge")
+        relative, path = _canonical_capture_path(root, item.get("path"), f"{label}.path")
+        if relative in seen_paths:
+            raise ValueError(f"{label} duplicates a dynamic transform artifact path")
+        try:
+            size_bytes = int(item["size_bytes"])
+            sha256 = str(item["sha256"]).lower()
+            schema_version = int(item["schema_version"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{label} has invalid size/hash/schema binding") from exc
+        if size_bytes < 1 or not re.fullmatch(r"[0-9a-f]{64}", sha256) or schema_version != 1:
+            raise ValueError(f"{label} has invalid size/hash/schema binding")
+        seen_edges.add(edge)
+        seen_paths.add(relative)
+        descriptors.append((item, relative, path))
+    return descriptors
+
+
+def _validate_camera_head_artifact(
+    descriptor: dict[str, Any],
+    path: Path,
+    rgb_frames_path: Path,
+) -> dict[str, Any]:
+    label = "camera head transform artifact"
+    if path.stat().st_size != int(descriptor["size_bytes"]):
+        raise ValueError(f"{label} descriptor size mismatch")
+    if sha256_file(path) != str(descriptor["sha256"]).lower():
+        raise ValueError(f"{label} descriptor checksum mismatch")
+    artifact = _load_json_object(path, label)
+    if artifact.get("schema") != "grocery.camera_head_transforms" or int(artifact.get("version", -1)) != 1:
+        raise ValueError(f"{label} schema/version is invalid")
+    if artifact.get("frames") != {
+        "parent": "sensor_rig",
+        "child": "camera_link",
+        "optical_child": "camera_optical_frame",
+    }:
+        raise ValueError(f"{label} frame header is invalid")
+    expected_header = {
+        "direction": "parent_to_child",
+        "translation_units": "m",
+        "timestamp_units": "s",
+        "timestamp_domain": "Isaac simulation time (/clock)",
+        "composition": "q_sensor_rig_camera_link = q_configured_mount * q_head_articulation",
+        "interpolation": {
+            "translation": "linear",
+            "rotation": "shortest_arc_quaternion_slerp_xyzw",
+            "range": "closed_0_to_duration_no_extrapolation",
+        },
+        "static_child_transform": {
+            "parent": "camera_link",
+            "child": "camera_optical_frame",
+            "translation_m": [0.0, 0.0, 0.0],
+            "rotation_xyzw": [0.5, -0.5, 0.5, -0.5],
+        },
+    }
+    for key, expected in expected_header.items():
+        if artifact.get(key) != expected:
+            raise ValueError(f"{label} {key} header is invalid")
+    source = artifact.get("source")
+    trajectory_source = source.get("trajectory_config") if isinstance(source, dict) else None
+    if (
+        not isinstance(trajectory_source, dict)
+        or not isinstance(trajectory_source.get("path"), str)
+        or not trajectory_source["path"]
+        or not re.fullmatch(r"[0-9a-f]{64}", str(trajectory_source.get("sha256", "")))
+        or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_commit", "")))
+        or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_tree", "")))
+    ):
+        raise ValueError(f"{label} source header is invalid")
+    try:
+        sample_hz = float(artifact["sample_hz"])
+        duration_s = float(artifact["duration_s"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{label} sampling header is invalid") from exc
+    if not math.isfinite(sample_hz) or sample_hz <= 0.0 or not math.isfinite(duration_s) or duration_s <= 0.0:
+        raise ValueError(f"{label} sampling header is invalid")
+    samples = artifact.get("samples")
+    if not isinstance(samples, list) or not samples:
+        raise ValueError(f"{label} samples are missing")
+    expected_timestamps = [index / sample_hz for index in range(math.floor(duration_s * sample_hz) + 1)]
+    if expected_timestamps[-1] < duration_s:
+        expected_timestamps.append(duration_s)
+    if len(samples) != len(expected_timestamps):
+        raise ValueError(f"{label} sample count does not match its sampling header")
+    timestamps = []
+    for index, (sample, expected_timestamp) in enumerate(zip(samples, expected_timestamps, strict=True)):
+        if not isinstance(sample, dict):
+            raise ValueError(f"{label} sample {index} is invalid")
+        try:
+            timestamp = float(sample["timestamp_s"])
+            translation = tuple(float(value) for value in sample["translation_m"])
+            rotation = tuple(float(value) for value in sample["rotation_xyzw"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{label} sample {index} is invalid") from exc
+        if (
+            not math.isfinite(timestamp)
+            or abs(timestamp - expected_timestamp) > 1e-9
+            or len(translation) != 3
+            or len(rotation) != 4
+            or not all(math.isfinite(value) for value in (*translation, *rotation))
+            or abs(math.hypot(*rotation) - 1.0) > 1e-6
+        ):
+            raise ValueError(f"{label} sample {index} is invalid")
+        timestamps.append(timestamp)
+    rgb_stamps = []
+    try:
+        for line in rgb_frames_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            stamp = float(row["stamp_s"])
+            if not math.isfinite(stamp):
+                raise ValueError
+            rgb_stamps.append(stamp)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("rgb_frames.jsonl has invalid timestamp rows") from exc
+    if not rgb_stamps:
+        raise ValueError("rgb_frames.jsonl has no observed timestamps")
+    deltas = [min(abs(stamp - sample_stamp) for sample_stamp in timestamps) for stamp in rgb_stamps]
+    max_delta = max(deltas)
+    if max_delta > 1e-6:
+        raise ValueError("observed RGB timestamp has no exact validated camera head sample")
+    return {
+        "artifact_path": path.name,
+        "artifact_sha256": sha256_file(path),
+        "sample_count": len(samples),
+        "observed_rgb_stamps": len(rgb_stamps),
+        "matched_rgb_stamps": sum(delta <= 1e-6 for delta in deltas),
+        "max_abs_delta_s": max_delta,
+    }
+
+
 def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate the sensor-only interface required by offline SLAM.
 
@@ -435,6 +626,8 @@ def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] 
         "bag_metadata.json", "effective_config.json", bag_metadata_relative,
     }
     _verify_manifest_files(root, data, required_paths)
+    dynamic_descriptors = _dynamic_transform_descriptors(root)
+    required_paths.update(relative for _descriptor, relative, _path in dynamic_descriptors)
     bag_metadata = bag_uri / "metadata.yaml"
     bag_base = bag_uri.relative_to(root).as_posix().rstrip("/")
     listed_paths = {
@@ -452,7 +645,18 @@ def validate_capture_for_slam(capture_dir: str | Path, manifest: dict[str, Any] 
     if not (required_paths - {"rgb_camera.mp4", "rgb_frames.jsonl", "camera_info.json", "sensor_transforms.json", "bag_metadata.json", "effective_config.json", bag_metadata_relative}):
         raise ValueError("capture bag metadata does not declare any data files")
     _verify_manifest_files(root, data, required_paths)
-    return {"status": "valid", "capture_dir": str(root), "gt_required": False, "topics": list(data["bag"]["topics"]), "verified_sensor_files": len(required_paths)}
+    dynamic_transform_validation = [
+        _validate_camera_head_artifact(descriptor, path, root / "rgb_frames.jsonl")
+        for descriptor, _relative, path in dynamic_descriptors
+    ]
+    return {
+        "status": "valid",
+        "capture_dir": str(root),
+        "gt_required": False,
+        "topics": list(data["bag"]["topics"]),
+        "verified_sensor_files": len(required_paths),
+        "dynamic_transform_validation": dynamic_transform_validation,
+    }
 
 
 def validate_capture_archive(capture_dir: str | Path, manifest: dict[str, Any] | None = None) -> dict[str, Any]:

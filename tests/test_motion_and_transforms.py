@@ -15,6 +15,7 @@ from simulator.runtime.isaac_sim_runner import (
     camera_link_world_pose,
     camera_mount_orientation,
     camera_head_stamp_alignment,
+    camera_head_output_path,
     camera_optical_world_pose,
     lidar_runtime_spec,
     write_camera_head_transforms,
@@ -342,10 +343,32 @@ class MotionTests(unittest.TestCase):
             sensor_transforms = json.loads((capture / "sensor_transforms.json").read_text(encoding="utf-8"))
             descriptor = sensor_transforms["dynamic_transform_artifacts"][0]
             artifact = capture / descriptor["path"]
+            static_edges = {
+                (item["parent"], item["child"])
+                for item in sensor_transforms["transforms"]
+            }
+            self.assertNotIn(("sensor_rig", "camera_link"), static_edges)
+            self.assertIn(("camera_link", "camera_optical_frame"), static_edges)
             self.assertEqual((descriptor["parent_frame"], descriptor["child_frame"]), ("sensor_rig", "camera_link"))
             self.assertEqual(descriptor["schema_version"], 1)
             self.assertEqual(descriptor["size_bytes"], artifact.stat().st_size)
             self.assertEqual(descriptor["sha256"], hashlib.sha256(artifact.read_bytes()).hexdigest())
+
+    def test_representative_capture_head_artifact_uses_guarded_directory_sibling(self):
+        root = Path(__file__).resolve().parents[1]
+        capture = root / "runs/test-representative"
+        args = SimpleNamespace(
+            capture_dir=str(capture),
+            status_path=str(capture / "status.json"),
+            camera_head_transforms_path="",
+        )
+        self.assertEqual(
+            camera_head_output_path(args, True),
+            capture.with_name("test-representative.camera_head_transforms.json"),
+        )
+        args.camera_head_transforms_path = str(capture / "camera_head_transforms.json")
+        with self.assertRaisesRegex(ValueError, "outside the representative capture directory"):
+            camera_head_output_path(args, True)
 
     def test_transform_interpolation_preserves_frames_and_rejects_bad_inputs(self):
         start = Transform("map", "rig", (0.0, 0.0, 0.0), quaternion_from_rpy_deg(0.0, 0.0, 20.0))

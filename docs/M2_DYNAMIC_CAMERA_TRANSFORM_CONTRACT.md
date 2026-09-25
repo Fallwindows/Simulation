@@ -34,7 +34,10 @@ with the post-update Isaac `/clock` timestamp:
 `camera_link -> camera_optical_frame` remains static with translation
 `[0, 0, 0]` m and ROS xyzw rotation `[0.5, -0.5, 0.5, -0.5]`.
 `sensor_rig -> lidar_link` also remains static. The dynamic camera transform is
-removed from `/tf_static`.
+removed from `/tf_static`. Capture-side `sensor_transforms.json` likewise omits
+the static `sensor_rig -> camera_link` row whenever the dynamic descriptor is
+present. The optical and LiDAR static rows remain. This produces one
+authoritative parent for every frame.
 
 RGB and CameraInfo use frame `camera_optical_frame`. Representative capture
 metadata records the composed world pose of `camera_optical_frame`. Tests prove
@@ -78,3 +81,19 @@ Every observed RGB timestamp must match an exported head sample within 1e-6
 seconds. The runtime fails the capture when that check fails and records the
 observed count, matched count, tolerance, and maximum absolute error in
 `camera_head_stamp_alignment`.
+
+Sensor-only capture validation resolves each declared artifact as a canonical
+path inside the capture root. It requires the artifact in the capture manifest,
+checks both the manifest and descriptor size/SHA-256 bindings, validates schema
+version, frames, direction, units, interpolation, optical child, sampling
+header, every finite unit-quaternion sample, and binds every timestamp in
+`rgb_frames.jsonl` to the exact validated sample bytes. Missing files, escaped
+paths, duplicate static/dynamic edges, bad hashes or sizes, malformed samples,
+and unmatched RGB timestamps fail closed.
+
+Full production metadata exports `capture/camera_head_transforms.json` before
+the manifest inventory is sealed. Selected-pose representative capture instead
+writes the artifact to the deterministic sibling
+`<capture-directory>.camera_head_transforms.json`. This keeps the guarded PNG
+directory empty for Replicator startup while the representative manifest binds
+the sibling's actual path, size, and SHA-256 in provenance.

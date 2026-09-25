@@ -45,12 +45,20 @@ def export_metadata(scenario_path: str | Path, capture_dir: str | Path, repo_roo
         "primitives": [dataclasses.asdict(item) for item in layout.primitives],
         "assets": [dataclasses.asdict(item) for item in layout.assets],
     }
+    static_transforms = [
+        item
+        for item in rig.transforms
+        if not (item.parent == "sensor_rig" and item.child == "camera_link")
+    ]
     transforms = {
         "units": "m",
         "rotation_order": "xyzw_ros",
         "mount_semantics": "all sensor mounts are local to sensor_rig; Isaac LiDAR input is converted to wxyz",
         "intrinsics": dataclasses.asdict(rig.camera_intrinsics),
-        "transforms": [dataclasses.asdict(item) for item in rig.transforms],
+        # The articulated camera edge is exclusively represented by the
+        # hash-bound dynamic artifact below.  Keeping a second static edge
+        # would make the transform graph ambiguous for replay consumers.
+        "transforms": [dataclasses.asdict(item) for item in static_transforms],
         "topics": rig.topics,
         "frames": rig.frames,
         "dynamic_transform_artifacts": [
