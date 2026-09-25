@@ -77,8 +77,14 @@ try {
   Copy-Item -LiteralPath (Join-Path $repo "config\contracts.yaml") -Destination (Join-Path $captureDir "contracts.yaml")
   Copy-Item -LiteralPath $scenarioPath -Destination (Join-Path $captureDir "scenario.yaml")
   $gitSha = (& git -C $repo rev-parse HEAD).Trim()
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gitSha)) { throw "Could not resolve capture source commit." }
+  $gitTree = (& git -C $repo rev-parse 'HEAD^{tree}').Trim()
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gitTree)) { throw "Could not resolve capture source tree." }
+  $gitStatus = @(& git -C $repo status --porcelain=v1 2>$null)
+  if ($LASTEXITCODE -ne 0) { throw "Could not verify capture source worktree state." }
+  if ($gitStatus.Count -ne 0) { throw "Production capture requires a clean source worktree." }
   [ordered]@{
-    capture_id=$captureId; git_sha=$gitSha; scenario=$scenarioPath
+    capture_id=$captureId; git_sha=$gitSha; git_tree=$gitTree; git_worktree_clean=$true; scenario=$scenarioPath
     scenario_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $scenarioPath).Hash.ToLowerInvariant()
     sensor_config=$sensorPath; sensor_config_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $sensorPath).Hash.ToLowerInvariant()
     camera=[ordered]@{ width_px=$expectedWidth; height_px=$expectedHeight; fps=$expectedFps; horizontal_fov_deg=[double]$sensorData.camera.horizontal_fov_deg }
@@ -147,10 +153,27 @@ try {
   if (-not [bool]$bagMeta.target_reached -or [Math]::Abs([double]$bagMeta.target_clock_s - $duration) -gt 1e-6 -or [double]$bagMeta.last_clock_s -lt $duration - 1e-3) { throw "Raw bag did not reach the absolute scenario horizon." }
   if ([int]$bagMeta.lidar_point_count_min -le 0) { throw "Raw bag contains an empty LiDAR cloud." }
   if ([double]$bagMeta.max_stamp_gap_s.PSObject.Properties["/sim/lidar/points"].Value -gt 0.2 + 1e-9) { throw "Raw bag LiDAR cadence gap exceeds 0.2 seconds." }
+  $rawRgbTopic = "/sim/camera/rgb/image_raw"
+  $rawRgbGapProperty = $bagMeta.max_stamp_gap_s.PSObject.Properties[$rawRgbTopic]
+  if ($null -eq $rawRgbGapProperty -or $null -eq $rawRgbGapProperty.Value) { throw "Raw bag RGB cadence receipt is missing." }
+  $rawRgbCadenceLimitS = (1.0 / $expectedFps) + 0.001
+  if ([double]$rawRgbGapProperty.Value -gt $rawRgbCadenceLimitS + 1e-9) { throw "Raw bag RGB cadence gap exceeds the configured frame period plus 1 ms." }
   if ([double]$bagMeta.max_rgb_lidar_skew_s -gt 0.017000001) { throw "Raw bag RGB/LiDAR timestamp skew exceeds 17,000,001 ns." }
   if (@($bagMeta.camera_info_frame_ids) -notcontains "camera_optical_frame") { throw "Observed CameraInfo frame is not camera_optical_frame." }
   if (@($bagMeta.lidar_frame_ids) -notcontains "lidar_link") { throw "Observed LiDAR frame is not lidar_link." }
   if (-not [bool]$rgb.cadence_contiguous -or [int]$rgb.invalid_frames -ne 0 -or [int]$rgb.nonincreasing_frames -ne 0) { throw "RGB video cadence is not contiguous and valid." }
+  $rawRgbCount = [int]$bagMeta.counts.PSObject.Properties[$rawRgbTopic].Value
+  $videoRgbCount = [int]$rgb.frame_count
+  # Both subscribers start before Isaac.  One boundary callback may differ as
+  # they independently stop at the absolute horizon; an internal raw drop is
+  # still rejected by the cadence-gap gate above.
+  $rgbCountBoundaryTolerance = 1
+  if ([Math]::Abs($rawRgbCount - $videoRgbCount) -gt $rgbCountBoundaryTolerance) { throw "Raw bag RGB count does not reconcile with the RGB video frame count." }
+  $rawRgbFirstS = [double]$bagMeta.first_stamp_s.PSObject.Properties[$rawRgbTopic].Value
+  $rawRgbLastS = [double]$bagMeta.last_stamp_s.PSObject.Properties[$rawRgbTopic].Value
+  $rgbFirstBoundarySkewS = [Math]::Abs($rawRgbFirstS - [double]$rgb.first_image_stamp_s)
+  $rgbLastBoundarySkewS = [Math]::Abs($rawRgbLastS - [double]$rgb.last_image_stamp_s)
+  if ($rgbFirstBoundarySkewS -gt $rawRgbCadenceLimitS + 1e-9 -or $rgbLastBoundarySkewS -gt $rawRgbCadenceLimitS + 1e-9) { throw "Raw bag and RGB video timestamp windows do not reconcile at their boundaries." }
   if ([int]$rgb.width -ne $expectedWidth -or [int]$rgb.height -ne $expectedHeight -or [Math]::Abs([double]$rgb.nominal_fps - $expectedFps) -gt 1e-9) { throw "RGB video dimensions or cadence do not match the production sensor config." }
   if ([double]$rgb.first_image_stamp_s -gt 0.1 + 1e-6 -or [double]$rgb.last_image_stamp_s -lt $duration - 1e-3) { throw "RGB video does not cover the complete scenario horizon." }
   if ($cameraInfo.frame_id -ne "camera_optical_frame" -or [int]$cameraInfo.width -ne $expectedWidth -or [int]$cameraInfo.height -ne $expectedHeight) { throw "Observed CameraInfo calibration does not match the RGB stream." }
@@ -165,9 +188,16 @@ try {
   }
   $topics = @($bagMeta.topics)
   $manifest = [ordered]@{
-    manifest_version=1; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha
+    manifest_version=1; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha; git_tree=$gitTree; git_worktree_clean=$true
     rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; duration_s=$duration
-    bag=[ordered]@{ uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s }
+    bag=[ordered]@{
+      uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s
+      rgb_reconciliation=[ordered]@{
+        raw_count=$rawRgbCount; video_count=$videoRgbCount; boundary_count_tolerance=$rgbCountBoundaryTolerance
+        raw_max_gap_s=[double]$rawRgbGapProperty.Value; max_allowed_gap_s=$rawRgbCadenceLimitS
+        first_boundary_skew_s=$rgbFirstBoundarySkewS; last_boundary_skew_s=$rgbLastBoundarySkewS
+      }
+    }
     rgb=[ordered]@{
       video="rgb_camera.mp4"; timestamp_index="rgb_frames.jsonl"; camera_info="camera_info.json"; metadata="rgb_video.json"
       frame_count=$rgb.frame_count; first_stamp_s=$rgb.first_image_stamp_s; last_stamp_s=$rgb.last_image_stamp_s

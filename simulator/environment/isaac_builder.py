@@ -78,9 +78,9 @@ STRUCTURAL_MATERIALS = {
         "round_edges_m": 0.003,
     },
     "ceiling_grid": {
-        "color": (0.63, 0.64, 0.62),
-        "roughness": 0.68,
-        "metallic": 0.10,
+        "color": (0.70, 0.705, 0.685),
+        "roughness": 0.72,
+        "metallic": 0.07,
         "round_edges_m": 0.002,
     },
     "light_panel": {
@@ -154,11 +154,20 @@ STRUCTURAL_MATERIALS = {
         "round_edges_m": 0.004,
     },
     "case_glass": {
-        "color": (0.42, 0.52, 0.54),
-        "roughness": 0.075,
-        "metallic": 0.04,
+        "color": (0.68, 0.75, 0.76),
+        "roughness": 0.035,
+        "metallic": 0.0,
+        "specular_level": 1.35,
         "round_edges_m": 0.001,
-        "opacity": 0.24,
+        "opacity": 0.11,
+    },
+    "case_glass_reflection": {
+        "color": (0.82, 0.90, 0.92),
+        "roughness": 0.025,
+        "metallic": 0.0,
+        "specular_level": 1.6,
+        "round_edges_m": 0.001,
+        "opacity": 0.16,
     },
     "case_handle": {
         "color": (0.58, 0.60, 0.60),
@@ -171,6 +180,18 @@ STRUCTURAL_MATERIALS = {
         "roughness": 0.64,
         "metallic": 0.0,
         "round_edges_m": 0.008,
+    },
+    "upright_slot": {
+        "color": (0.075, 0.082, 0.086),
+        "roughness": 0.52,
+        "metallic": 0.18,
+        "round_edges_m": 0.001,
+    },
+    "shelf_wear": {
+        "color": (0.54, 0.55, 0.55),
+        "roughness": 0.28,
+        "metallic": 0.12,
+        "round_edges_m": 0.001,
     },
     "end_product_red": {
         "color": (0.55, 0.10, 0.075),
@@ -211,10 +232,19 @@ _STRUCTURAL_VARIANTS = {
 }
 
 _SCENE_MATERIAL_ROOT = Path(__file__).resolve().parents[2] / "assets" / "scene" / "materials"
-_MICROTEXTURED_KINDS = {
-    "floor", "floor_tile_warm", "floor_tile_cool",
-    "shelf", "shelf_warm", "shelf_cool", "upright", "upright_warm",
-    "ceiling", "ceiling_tile_warm", "ceiling_tile_cool", "display_wood",
+_TEXTURE_SETS = {
+    "floor": ("terrazzo_albedo.png", "terrazzo_normal.png", "terrazzo_roughness.png", 0.18, 0.62, 3.0),
+    "floor_tile_warm": ("terrazzo_albedo.png", "terrazzo_normal.png", "terrazzo_roughness.png", 0.18, 0.62, 3.0),
+    "floor_tile_cool": ("terrazzo_albedo.png", "terrazzo_normal.png", "terrazzo_roughness.png", 0.18, 0.62, 3.0),
+    "shelf": ("powdercoat_albedo.png", "micro_normal.png", "micro_roughness.png", 0.28, 0.55, 7.0),
+    "shelf_warm": ("powdercoat_warm_albedo.png", "micro_normal.png", "micro_roughness.png", 0.28, 0.55, 7.0),
+    "shelf_cool": ("powdercoat_cool_albedo.png", "micro_normal.png", "micro_roughness.png", 0.28, 0.55, 7.0),
+    "upright": ("powdercoat_albedo.png", "micro_normal.png", "micro_roughness.png", 0.30, 0.58, 6.0),
+    "upright_warm": ("powdercoat_warm_albedo.png", "micro_normal.png", "micro_roughness.png", 0.30, 0.58, 6.0),
+    "ceiling": (None, "micro_normal.png", "micro_roughness.png", 0.10, 0.24, 8.0),
+    "ceiling_tile_warm": (None, "micro_normal.png", "micro_roughness.png", 0.10, 0.24, 8.0),
+    "ceiling_tile_cool": (None, "micro_normal.png", "micro_roughness.png", 0.10, 0.24, 8.0),
+    "display_wood": ("laminate_albedo.png", "micro_normal.png", "micro_roughness.png", 0.16, 0.42, 2.4),
 }
 
 
@@ -256,17 +286,23 @@ class IsaacAisleBuilder:
         material.set_input_values("diffuse_color_constant", values["color"])
         material.set_input_values("reflection_roughness_constant", [values["roughness"]])
         material.set_input_values("metallic_constant", [values["metallic"]])
+        if "specular_level" in values:
+            material.set_input_values("specular_level", [values["specular_level"]])
         material.set_input_values("round_edges_radius", [values["round_edges_m"]])
         material.set_input_values("round_edges_roundness", [0.35])
-        if kind in _MICROTEXTURED_KINDS:
-            normal_path = str((_SCENE_MATERIAL_ROOT / "micro_normal.png").resolve()).replace("\\", "/")
-            roughness_path = str((_SCENE_MATERIAL_ROOT / "micro_roughness.png").resolve()).replace("\\", "/")
+        if kind in _TEXTURE_SETS:
+            albedo_name, normal_name, roughness_name, bump, roughness_influence, texture_scale = _TEXTURE_SETS[kind]
+            if albedo_name:
+                albedo_path = str((_SCENE_MATERIAL_ROOT / albedo_name).resolve()).replace("\\", "/")
+                material.set_input_values("diffuse_texture", [albedo_path])
+            normal_path = str((_SCENE_MATERIAL_ROOT / normal_name).resolve()).replace("\\", "/")
+            roughness_path = str((_SCENE_MATERIAL_ROOT / roughness_name).resolve()).replace("\\", "/")
             material.set_input_values("normalmap_texture", [normal_path])
-            material.set_input_values("bump_factor", [0.12 if kind.startswith("shelf") or kind.startswith("upright") else 0.075])
+            material.set_input_values("bump_factor", [bump])
             material.set_input_values("reflectionroughness_texture", [roughness_path])
-            material.set_input_values("reflection_roughness_texture_influence", [0.22])
+            material.set_input_values("reflection_roughness_texture_influence", [roughness_influence])
             material.set_input_values("project_uvw", [True])
-            material.set_input_values("texture_scale", [(14.0, 14.0)])
+            material.set_input_values("texture_scale", [(texture_scale, texture_scale)])
         if "emission" in values:
             material.set_input_values("enable_emission", [True])
             material.set_input_values("emissive_color", values["emission"])

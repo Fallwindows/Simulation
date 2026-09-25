@@ -50,6 +50,13 @@ class CaptureGateTests(unittest.TestCase):
         self.assertIn('Production capture requires native camera resolution of at least 1920x1080.', source)
         self.assertIn('camera_info_provenance="observed_ros_message"', source)
         self.assertIn('sensor_config_sha256=', source)
+        self.assertIn('Production capture requires a clean source worktree.', source)
+        self.assertIn('git_tree=$gitTree', source)
+        self.assertIn('git_worktree_clean=$true', source)
+        self.assertIn('Raw bag RGB cadence gap exceeds the configured frame period plus 1 ms.', source)
+        self.assertIn('Raw bag RGB count does not reconcile with the RGB video frame count.', source)
+        self.assertIn('$rgbCountBoundaryTolerance = 1', source)
+        self.assertIn('rgb_reconciliation=', source)
         self.assertLess(source.index('RGB video cadence is not contiguous and valid.'), source.index('CAPTURE_COMPLETE'))
 
     def test_production_camera_is_native_1080_with_scaled_intrinsics(self):

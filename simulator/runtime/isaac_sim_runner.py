@@ -324,7 +324,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                 {
                     "name": f"ceiling_tile_{ceiling_row:02d}_{ceiling_column:02d}",
                     "center_m": (round(tile_x, 4), round(tile_y, 4), ceiling_z - 0.052),
-                    "size_m": (1.175, 0.575, 0.012),
+                    "size_m": (1.190, 0.590, 0.012),
                     "kind": "ceiling_tile_warm" if (ceiling_row + 2 * ceiling_column) % 5 else "ceiling_tile_cool",
                 }
             )
@@ -338,7 +338,7 @@ def store_shell_spec(environment) -> dict[str, object]:
             {
                 "name": f"ceiling_rail_long_{len(boxes):03d}",
                 "center_m": (shell_center_x, round(grid_y, 4), grid_z),
-                "size_m": (shell_length, 0.012, 0.018),
+                "size_m": (shell_length, 0.007, 0.012),
                 "kind": "ceiling_grid",
             }
         )
@@ -349,7 +349,7 @@ def store_shell_spec(environment) -> dict[str, object]:
             {
                 "name": f"ceiling_rail_cross_{len(boxes):03d}",
                 "center_m": (round(grid_x, 4), 0.0, grid_z),
-                "size_m": (0.012, shell_half_width * 2.0, 0.018),
+                "size_m": (0.007, shell_half_width * 2.0, 0.012),
                 "kind": "ceiling_grid",
             }
         )
@@ -389,33 +389,53 @@ def store_shell_spec(environment) -> dict[str, object]:
             fixture_index += 1
         fixture_x += 2.4
 
-    # Continuous under-shelf LED runs lift the vertical merchandise plane
-    # without raising the already-bright floor or flattening ceiling contrast.
+    # Recessed modular under-shelf LED runs lift the merchandise plane.  Short
+    # segments with bounded output variation avoid one repeated pool pattern
+    # while the emitters remain shielded behind the shelf fascia.
     strip_index = 0
     for strip_y, strip_rotation in ((-1.43, -72.0), (1.43, 72.0)):
         for strip_z in (0.58, 1.03, 1.48, 1.93):
-            for strip_x in (5.75, 17.75):
-                name = f"shelf_strip_{strip_index:02d}"
+            for section_index, section_center_x in enumerate((5.75, 17.75)):
+                for segment_index, x_offset in enumerate((-4.05, -1.35, 1.35, 4.05)):
+                    strip_x = section_center_x + x_offset
+                    name = f"shelf_strip_{strip_index:03d}"
+                    output_scale = (0.84, 1.06, 0.93, 1.12)[(segment_index + section_index) % 4]
+                    boxes.append(
+                        {
+                            "name": name,
+                            "center_m": (strip_x, strip_y, strip_z),
+                            "size_m": (2.54, 0.014, 0.010),
+                            "kind": "shelf_light",
+                        }
+                    )
+                    lights.append(
+                        {
+                            "name": name,
+                            "position_m": (strip_x, strip_y, strip_z - 0.012),
+                            "width_m": 2.48,
+                            "height_m": 0.022,
+                            "intensity": float(environment.lighting_lux) * 3.0 * output_scale,
+                            "color": (1.0, 0.905 + 0.008 * (segment_index % 2), 0.79 + 0.014 * (section_index % 2)),
+                            "rotation_rpy_deg": (strip_rotation, 0.0, 0.0),
+                        }
+                    )
+                    strip_index += 1
+
+    # Small perforation slots on the camera-facing upright edges add real
+    # fixture scale and break up the broad modular gray posts.
+    for row_y, front_sign in ((-1.65, 1.0), (1.65, -1.0)):
+        slot_y = row_y + front_sign * 0.276
+        for bay_index in range(20):
+            slot_x = 0.60 + bay_index * 1.20
+            for slot_index, slot_z in enumerate((0.38, 0.70, 1.02, 1.34, 1.66, 1.98)):
                 boxes.append(
                     {
-                        "name": name,
-                        "center_m": (strip_x, strip_y, strip_z),
-                        "size_m": (11.35, 0.016, 0.012),
-                        "kind": "shelf_light",
+                        "name": f"upright_slot_{'n' if row_y < 0 else 'p'}_{bay_index:02d}_{slot_index}",
+                        "center_m": (slot_x, slot_y, slot_z),
+                        "size_m": (0.020, 0.006, 0.058),
+                        "kind": "upright_slot",
                     }
                 )
-                lights.append(
-                    {
-                        "name": name,
-                        "position_m": (strip_x, strip_y, strip_z - 0.012),
-                        "width_m": 11.30,
-                        "height_m": 0.025,
-                        "intensity": float(environment.lighting_lux) * 3.0,
-                        "color": (1.0, 0.91, 0.80),
-                        "rotation_rpy_deg": (strip_rotation, 0.0, 0.0),
-                    }
-                )
-                strip_index += 1
 
     # Three deep refrigerated bays use real R5 catalog references behind
     # glass, with physical shelves, handles, and cool internal illumination.
@@ -452,20 +472,37 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "kind": "light_panel",
             }
         )
+        for door_index, door_y_offset in enumerate((-0.285, 0.285)):
+            boxes.append(
+                {
+                    "name": f"end_case_glass_{case_index}_{door_index}",
+                    "center_m": (shell_end_x - 0.645, case_y + door_y_offset, 1.24),
+                    "size_m": (0.012, 0.525, 1.90),
+                    "kind": "case_glass",
+                }
+            )
+            boxes.append(
+                {
+                    "name": f"end_case_handle_{case_index}_{door_index}",
+                    "center_m": (shell_end_x - 0.672, case_y + (-0.055 if door_index == 0 else 0.055), 1.26),
+                    "size_m": (0.030, 0.022, 0.78),
+                    "kind": "case_handle",
+                }
+            )
+            boxes.append(
+                {
+                    "name": f"end_case_reflection_{case_index}_{door_index}",
+                    "center_m": (shell_end_x - 0.654, case_y + door_y_offset - 0.11, 1.52),
+                    "size_m": (0.007, 0.025, 0.82),
+                    "kind": "case_glass_reflection",
+                }
+            )
         boxes.append(
             {
-                "name": f"end_case_glass_{case_index}",
-                "center_m": (shell_end_x - 0.645, case_y, 1.24),
-                "size_m": (0.012, 1.10, 1.90),
-                "kind": "case_glass",
-            }
-        )
-        boxes.append(
-            {
-                "name": f"end_case_handle_{case_index}",
-                "center_m": (shell_end_x - 0.665, case_y + 0.42, 1.24),
-                "size_m": (0.030, 0.025, 0.72),
-                "kind": "case_handle",
+                "name": f"end_case_center_mullion_{case_index}",
+                "center_m": (shell_end_x - 0.662, case_y, 1.24),
+                "size_m": (0.038, 0.042, 1.98),
+                "kind": "case_frame",
             }
         )
         boxes.append(
@@ -485,18 +522,19 @@ def store_shell_spec(environment) -> dict[str, object]:
                     "kind": "case_frame",
                 }
             )
-            for column, offset_y in enumerate((-0.43, -0.215, 0.0, 0.215, 0.43)):
+            for column, offset_y in enumerate((-0.4375, -0.2625, -0.0875, 0.0875, 0.2625, 0.4375)):
                 key = case_stock[case_index][(shelf_index + column) % len(case_stock[case_index])]
+                pose_offset = ((case_index * 5 + shelf_index * 3 + column) % 5) - 2
                 asset_references.append(
                     {
                         "name": f"end_case_stock_{case_index}_{shelf_index}_{column}",
                         "asset_key": key,
                         # Keep stock clearly behind the front glass plane so
                         # silhouettes, frames, and reflections remain legible.
-                        "position_xy_m": (shell_end_x - 0.46, case_y + offset_y),
-                        "support_z_m": shelf_z + 0.018,
-                        "rotation_rpy_deg": (0.0, 0.0, 90.0),
-                        "scale_xyz": (1.16, 1.10, 1.16),
+                        "position_xy_m": (shell_end_x - 0.46 - 0.003 * pose_offset, case_y + offset_y),
+                        "support_z_m": shelf_z + 0.018 + 0.002 * abs(pose_offset),
+                        "rotation_rpy_deg": (0.0, 0.0, 90.0 + 0.8 * pose_offset),
+                        "scale_xyz": (1.10 + 0.012 * pose_offset, 1.08, 1.10 + 0.01 * pose_offset),
                     }
                 )
         lights.append(
@@ -602,6 +640,65 @@ def store_shell_spec(environment) -> dict[str, object]:
             },
         ]
     )
+
+    # A small oblique riser presents four package fronts at useful pixel size
+    # in the unchanged 9-second camera pose.  Its aisle edge remains beyond
+    # y=-0.69 and does not cross the calibrated centre path.
+    boxes.extend(
+        [
+            {
+                "name": "hero_focus_plinth",
+                "center_m": (12.55, -1.115, 0.53),
+                "size_m": (0.55, 0.83, 0.70),
+                "kind": "display_wood",
+            },
+            {
+                "name": "hero_focus_top",
+                "center_m": (12.55, -1.115, 0.895),
+                "size_m": (0.59, 0.87, 0.030),
+                "kind": "shelf",
+            },
+        ]
+    )
+    focus_specs = (
+        ("cereal_sunrise", 12.46, -0.80, 74.0, 1.22, 0.915),
+        ("juice_citrus", 12.50, -0.98, 77.0, 1.32, 0.919),
+        ("coffee_bag", 12.47, -1.17, 72.0, 1.28, 0.912),
+        ("cereal_harvest", 12.53, -1.36, 76.0, 1.17, 0.917),
+    )
+    for focus_index, (key, product_x, product_y, yaw, scale, support_z) in enumerate(focus_specs):
+        asset_references.append(
+            {
+                "name": f"hero_focus_stock_{focus_index}",
+                "asset_key": key,
+                "position_xy_m": (product_x, product_y),
+                "support_z_m": support_z,
+                "rotation_rpy_deg": (0.0, 0.0, yaw),
+                "scale_xyz": (scale, scale, scale),
+            }
+        )
+    for price_index, price_y in enumerate((-0.84, -1.11, -1.38)):
+        asset_references.append(
+            {
+                "name": f"hero_focus_price_{price_index}",
+                "asset_key": "price_display",
+                "position_xy_m": (12.265, price_y),
+                "support_z_m": 0.900,
+                "rotation_rpy_deg": (0.0, 0.0, 90.0),
+                "scale_xyz": (0.82, 0.82, 0.82),
+            }
+        )
+    for basket_index, basket_x in enumerate((14.62, 14.86)):
+        asset_references.append(
+            {
+                "name": f"store_use_basket_{basket_index}",
+                "asset_key": "wicker_basket",
+                "position_xy_m": (basket_x, -1.12 + 0.035 * basket_index),
+                "support_z_m": 0.02 + 0.16 * basket_index,
+                "rotation_rpy_deg": (0.0, 0.0, 8.0 - 6.0 * basket_index),
+                "scale_xyz": (1.0, 1.0, 1.0),
+            }
+        )
     return {
         "ceiling_height_m": ceiling_z,
         "boxes": tuple(boxes),

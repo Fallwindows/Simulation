@@ -39,7 +39,7 @@ class SceneLookdevTests(unittest.TestCase):
         shelf_lights = [light for light in lights if light["name"].startswith("shelf_strip_")]
         self.assertTrue(all(light["position_m"][2] > self.environment.shelf_height_m for light in panel_lights))
         self.assertTrue(all(abs(light["rotation_rpy_deg"][0]) == 32.0 for light in panel_lights))
-        self.assertEqual(len(shelf_lights), 16)
+        self.assertEqual(len(shelf_lights), 64)
         self.assertTrue(all(light["position_m"][2] < self.environment.shelf_height_m for light in shelf_lights))
         self.assertTrue(all(abs(light["position_m"][1]) >= 1.42 for light in shelf_lights))
         self.assertGreater(spec["ambient_intensity"], 0.9 * self.environment.lighting_lux)
@@ -57,14 +57,16 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertNotIn("end_product_blue", kinds)
         self.assertIn("case_glass", kinds)
         self.assertIn("display_wood", kinds)
-        self.assertEqual(len([name for name in names if name.startswith("end_case_stock_")]), 60)
+        self.assertEqual(len([name for name in names if name.startswith("end_case_stock_")]), 72)
         self.assertEqual(len([name for name in names if name.startswith("hero_stock_")]), 18)
+        self.assertEqual(len([name for name in names if name.startswith("hero_focus_stock_")]), 4)
+        self.assertEqual(len([name for name in names if name.startswith("store_use_basket_")]), 2)
         self.assertIn("promo_market_sign", keys)
         self.assertIn("price_display", keys)
         self.assertIn("shelf_divider", keys)
         self.assertTrue({"milk_gallon", "juice_citrus", "icecream_tub"} <= keys)
         hero_references = [reference for reference in references if reference["name"].startswith("hero_")]
-        self.assertTrue(all(reference["position_xy_m"][1] <= -0.995 for reference in hero_references))
+        self.assertTrue(all(reference["position_xy_m"][1] <= -0.75 for reference in hero_references))
         signs = [reference for reference in references if reference["asset_key"] == "promo_market_sign"]
         self.assertEqual(len(signs), 2)
         self.assertTrue(all(reference["scale_xyz"][0] < 0.0 for reference in signs))
@@ -80,10 +82,18 @@ class SceneLookdevTests(unittest.TestCase):
         self.assertGreater(min(STRUCTURAL_MATERIALS["shelf"]["color"]), 0.30)
         self.assertLess(STRUCTURAL_MATERIALS["shelf"]["metallic"], 0.15)
         self.assertLess(STRUCTURAL_MATERIALS["case_glass"]["opacity"], 0.25)
+        self.assertGreater(STRUCTURAL_MATERIALS["case_glass"]["specular_level"], 1.0)
         material_root = Path(__file__).resolve().parents[1] / "assets/scene/materials"
         expected_hashes = {
-            "micro_normal.png": "3925c3836dede755963e2700ecb519b5685f1a4283d0891f9cbe4d4b79379f74",
-            "micro_roughness.png": "614f0f969e2f0026fcdf6062b0c812e1936177a27d92cc8137d48f5205a9f416",
+            "laminate_albedo.png": "6972934a14ca753359620076bd10fb03b0d54b1c3955f6309bae28791e8ba352",
+            "micro_normal.png": "5d546a9833c2e1d43a032701fc9f5062bbfc61ca79fc36afb4e726d83744458c",
+            "micro_roughness.png": "8784320cc59d1af241d71cc3a9cb0c3afddf1aeb3f94e4bcac737a3a12a5aa27",
+            "powdercoat_albedo.png": "cdddce3db1865f68d11c91eb416cc03fb1cb324549b5376a7f1e92cc10dff8a2",
+            "powdercoat_cool_albedo.png": "aba60805af3ea776d6b44c64a4fe4e042d72da1c28b13f8ea8c438ede1c00e0a",
+            "powdercoat_warm_albedo.png": "5ba7ac6449ad23d9efc3da84106b4cac8ee10810c2051ca4a92025c5cf661b3d",
+            "terrazzo_albedo.png": "b257a2b52a7b728e3ab6e91d4dadd317786594f17f6ce1b4223ed032f432e0e7",
+            "terrazzo_normal.png": "25c415432fd914acf5db378f4fbdef94314a520f69592782729a617203d41d72",
+            "terrazzo_roughness.png": "2e99d43ef48dd33d602da48e70b14feeb9ed369e2f5ad3fb443167239919a90f",
         }
         for filename, expected in expected_hashes.items():
             self.assertEqual(hashlib.sha256((material_root / filename).read_bytes()).hexdigest(), expected)
