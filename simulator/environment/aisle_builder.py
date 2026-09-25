@@ -64,6 +64,8 @@ def _stable_rng(seed: int, *parts: object) -> random.Random:
 
 def _zone_name(bay: int, bay_count: int, row_index: int) -> str:
     """Return the merchandising zone for a bay while mirroring both rows."""
+    if row_index == 0 and bay <= 1:
+        return "hero"
     # Put a compact produce section within the walking view rather than only
     # at the exit, so the RGB proof video visibly contains fruit.
     if 7 <= bay <= 10:
@@ -76,31 +78,46 @@ def _zone_name(bay: int, bay_count: int, row_index: int) -> str:
 
 
 def _zone_categories(zone: str, level: int) -> tuple[str, ...]:
+    if zone == "hero":
+        plan = (("cereal",), ("pantry_box",), ("snack_bag", "bagged_goods"), ("milk", "refrigerated"), ("beverage", "juice"))
+        return plan[level % len(plan)]
     if zone == "cereal":
-        # Adjacent cereal/snack products make each facing visually distinct
-        # while preserving the same aisle zoning and per-item semantics.
-        return ("cereal", "snacks")
+        plan = (("cereal",), ("pantry_box",), ("cereal",), ("pantry_box",), ("cereal",))
+        return plan[level % len(plan)]
     if zone == "snacks":
-        return ("snacks", "cereal")
+        plan = (("snack_bag", "snacks"), ("bagged_goods",), ("bakery", "snacks"), ("bagged_goods",), ("snack_bag", "snacks"))
+        return plan[level % len(plan)]
     if zone == "cans_jars":
-        return ("cans", "jars")
+        plan = (("cans",), ("jars",), ("condiments",), ("household",), ("cleaning",), ("cans",), ("jars",))
+        return plan[level % len(plan)]
     if zone == "beverage":
-        return ("juice", "water", "soda")
+        plan = (("milk",), ("refrigerated",), ("frozen",), ("beverage",), ("juice",), ("water", "soda"))
+        return plan[level % len(plan)]
     if zone == "produce":
         # The lowest shelf is occupied by explicit produce crates and fruit.
         # Upper shelves in the final bays remain useful beverage shelving.
-        return () if level == 0 else ("juice", "water", "soda")
+        plan = ((), ("fresh_produce",), ("fresh_produce",), ("beverage",), ("refrigerated",), ("juice",))
+        return plan[level % len(plan)]
     raise ValueError(f"Unknown aisle merchandising zone: {zone}")
 
 
 def _shelf_height_categories(zone: str, catalog: RetailAssetCatalog) -> tuple[str, ...]:
-    if zone == "produce":
-        return ("juice", "water", "soda", "produce_crate")
-    return _zone_categories(zone, 1)
+    zone_categories = {
+        "hero": ("cereal", "pantry_box", "snack_bag", "bagged_goods", "milk", "refrigerated", "beverage", "juice"),
+        "cereal": ("cereal", "pantry_box"),
+        "snacks": ("snack_bag", "snacks", "bagged_goods", "bakery"),
+        "cans_jars": ("cans", "jars", "condiments", "household", "cleaning"),
+        "beverage": ("milk", "refrigerated", "frozen", "beverage", "juice", "water", "soda"),
+        "produce": ("fresh_produce", "beverage", "refrigerated", "juice", "produce_crate", "produce_fixture"),
+    }
+    return zone_categories[zone]
 
 
 def _candidate_assets(catalog: RetailAssetCatalog, categories: tuple[str, ...]) -> tuple[RetailAsset, ...]:
-    candidates = tuple(asset for category in categories for asset in catalog.by_category(category))
+    candidates = tuple(sorted(
+        (asset for category in categories for asset in catalog.by_category(category)),
+        key=lambda asset: asset.asset_key,
+    ))
     if not candidates:
         raise ValueError(f"No retail assets are available for categories {categories!r}")
     return candidates
@@ -129,7 +146,7 @@ def shelf_positions_for_zone(config: AisleConfig, catalog: RetailAssetCatalog, z
 
 def shelf_level_counts_by_zone(config: AisleConfig, catalog: RetailAssetCatalog | None = None) -> dict[str, int]:
     catalog = catalog or load_retail_catalog(config.asset_manifest_path)
-    return {zone: shelf_level_count_for_zone(config, catalog, zone) for zone in ("cereal", "snacks", "cans_jars", "beverage", "produce")}
+    return {zone: shelf_level_count_for_zone(config, catalog, zone) for zone in ("hero", "cereal", "snacks", "cans_jars", "beverage", "produce")}
 
 
 def _make_asset(
@@ -141,17 +158,18 @@ def _make_asset(
     identity_parts: tuple[object, ...],
     name: str,
     scale_xyz: tuple[float, float, float] | None = None,
-    semantic_id_asset_key: str | None = None,
 ) -> AssetInstance:
     pose_rng = _stable_rng(config.seed, "pose", *identity_parts)
     yaw = 0.0 if row_y < 0.0 else 180.0
-    yaw += pose_rng.uniform(-3.6, 3.6) if record.model_type in {"box", "carton", "bottle", "can", "jar"} else pose_rng.uniform(-5.0, 5.0)
+    yaw += pose_rng.uniform(-3.6, 3.6) if record.intended_support == "shelf" else pose_rng.uniform(-2.0, 2.0)
     # Small per-object offsets make a row read as hand-stocked while remaining
     # safely inside the shelf footprint.  The RNG key is the semantic identity,
     # so inserting a facing cannot shift every later object's pose.
-    exact_support_placement = record.model_type == "crate" or (record.model_type == "fruit" and scale_xyz is not None)
-    x_offset = 0.0 if exact_support_placement else pose_rng.uniform(-0.011, 0.011)
-    depth_offset = 0.0 if exact_support_placement else pose_rng.uniform(-0.014, 0.014)
+    exact_support_placement = record.model_type in {
+        "crate", "angled_bin", "wicker_basket", "shelf_divider", "bottle_rack", "price_display",
+    } or (record.model_type == "fruit" and scale_xyz is not None)
+    x_offset = 0.0 if exact_support_placement else pose_rng.uniform(-0.0025, 0.0025)
+    depth_offset = 0.0 if exact_support_placement else pose_rng.uniform(-0.003, 0.003)
     px, py, pz = position
     scale = scale_xyz or (1.0, 1.0, 1.0)
     if record.model_type == "fruit" and scale_xyz is None:
@@ -169,19 +187,19 @@ def _make_asset(
         position_m=(px + x_offset, py + depth_offset, pz),
         rotation_rpy_deg=(0.0, 0.0, yaw),
         scale_xyz=scale,
-        semantic_id=f"retail/{semantic_id_asset_key or record.asset_key}/{suffix}",
+        semantic_id=f"retail/{record.asset_key}/{suffix}",
     )
 
 
 def _facing_count(config: AisleConfig, candidates: tuple[RetailAsset, ...], row: int, bay: int, level: int) -> int:
-    max_width = max(asset.dimensions_m[0] for asset in candidates)
+    min_width = min(asset.dimensions_m[0] for asset in candidates)
     usable_width = config.bay_width_m - 2.0 * config.edge_margin_m
-    capacity = max(1, int((usable_width + config.facing_gap_m) // (max_width + config.facing_gap_m)))
+    capacity = max(1, int((usable_width + config.facing_gap_m) // (min_width + config.facing_gap_m)))
     count_rng = _stable_rng(config.seed, "facing_count", row, bay, level)
     if capacity > 1 and count_rng.random() < 0.22:
         capacity -= 1
     # Keep the aisle richly stocked without turning each bay into a tiled wall.
-    return min(capacity, 5)
+    return min(capacity, 6)
 
 
 def _depth_offsets(config: AisleConfig, max_depth: float) -> tuple[float, ...]:
@@ -210,20 +228,15 @@ def _populate_shelf_products(
         return
     candidates = _candidate_assets(catalog, categories)
     facing_count = _facing_count(config, candidates, row_index, bay, level)
-    # Cycle through a deterministic, seeded starting point instead of making
-    # independent choices.  This keeps the richer catalog visible within a
-    # shelf section and still gives every physical facing its own identity.
-    start = _stable_rng(config.seed, "asset_start", row_index, bay, level).randrange(len(candidates))
-    selected = [candidates[(start + facing) % len(candidates)] for facing in range(facing_count)]
-    # Reserve one existing non-box package family in the first near-row bay.
-    # Keep its original box slot width and semantic ID
-    # so this bounded family change does not move neighboring slots or
-    # reidentify physical instances. The actual asset_key/category still name
-    # the referenced bottle for capture and catalog consumers.
-    original_slot_asset_keys = [asset.asset_key for asset in selected]
-    if row_index == 0 and bay == 0 and selected:
-        selected[0] = catalog.by_category("soda")[0]
-    slot_widths = [candidates[(start + facing) % len(candidates)].dimensions_m[0] for facing in range(facing_count)]
+    # Two neighboring facings share a SKU, as real merchandising blocks do.
+    # Key sorting above makes manifest ordering irrelevant to the selection.
+    start = (config.seed + row_index * bay_count + bay * 3 + level) % len(candidates)
+    selected = [candidates[(start + facing // 2) % len(candidates)] for facing in range(facing_count)]
+    usable_width = config.bay_width_m - 2.0 * config.edge_margin_m
+    while len(selected) > 1 and sum(asset.dimensions_m[0] for asset in selected) + config.facing_gap_m * (len(selected) - 1) > usable_width:
+        selected.pop()
+    facing_count = len(selected)
+    slot_widths = [asset.dimensions_m[0] for asset in selected]
     total_width = sum(slot_widths) + config.facing_gap_m * (facing_count - 1)
     cursor = -total_width / 2.0
     max_depth = max(asset.dimensions_m[1] for asset in selected)
@@ -247,7 +260,6 @@ def _populate_shelf_products(
                 (px, py, shelf_z + SHELF_THICKNESS_M / 2.0 + record.dimensions_m[2] / 2.0),
                 identity,
                 "product_" + "_".join(identity),
-                semantic_id_asset_key=original_slot_asset_keys[facing],
             ))
 
 
@@ -311,6 +323,68 @@ def _populate_produce(
         ))
 
 
+def _populate_store_fixtures(
+    assets: list[AssetInstance],
+    catalog: RetailAssetCatalog,
+    config: AisleConfig,
+    shelf_positions: dict[tuple[int, int], tuple[float, ...]],
+) -> None:
+    """Place bounded shelf hardware and empty produce bins without product overlap."""
+    price = catalog.by_key("price_display")
+    divider = catalog.by_key("shelf_divider")
+    rack = catalog.by_key("bottle_rack")
+    bin_keys = ("angled_produce_bin", "wicker_basket")
+
+    # Hero price labels attach to the front lip; dividers occupy the unused
+    # outer 3 cm rather than cutting through the centered product block.
+    for bay in (0, 1):
+        row_index = 0
+        row_y = config.shelf_rows_y_m[row_index]
+        front_sign = 1.0
+        bay_center = config.bay_width_m / 2.0 + bay * config.bay_width_m
+        for level, shelf_z in enumerate(shelf_positions[(row_index, bay)]):
+            identity = ("fixture", "price", "r0", f"b{bay}", f"l{level}")
+            price_position = (
+                bay_center,
+                row_y + front_sign * (config.shelf_depth_m / 2.0 + price.dimensions_m[1] / 2.0),
+                shelf_z,
+            )
+            assets.append(_make_asset(price, config, row_index, row_y, price_position, identity, "_".join(identity)))
+            if level in (1, 3):
+                divider_identity = ("fixture", "divider", "r0", f"b{bay}", f"l{level}")
+                divider_position = (
+                    bay_center + config.bay_width_m / 2.0 - config.edge_margin_m - divider.dimensions_m[0] / 2.0,
+                    row_y,
+                    shelf_z + SHELF_THICKNESS_M / 2.0 + divider.dimensions_m[2] / 2.0,
+                )
+                assets.append(_make_asset(divider, config, row_index, row_y, divider_position, divider_identity, "_".join(divider_identity)))
+
+    # Produce level zero is intentionally product-free, so racks/bins have
+    # dedicated shelf footprints and cannot clip regular stock.
+    for offset, bay in enumerate(range(7, 11)):
+        shelf_z = shelf_positions[(1, bay)][0]
+        row_y = config.shelf_rows_y_m[1]
+        record = catalog.by_key(bin_keys[offset % len(bin_keys)])
+        identity = ("fixture", "produce", "r1", f"b{bay}")
+        position = (
+            config.bay_width_m / 2.0 + bay * config.bay_width_m,
+            row_y,
+            shelf_z + SHELF_THICKNESS_M / 2.0 + record.dimensions_m[2] / 2.0,
+        )
+        assets.append(_make_asset(record, config, 1, row_y, position, identity, "_".join(identity)))
+
+    for bay in (7, 8):
+        shelf_z = shelf_positions[(0, bay)][0]
+        row_y = config.shelf_rows_y_m[0]
+        identity = ("fixture", "rack", "r0", f"b{bay}")
+        position = (
+            config.bay_width_m / 2.0 + bay * config.bay_width_m,
+            row_y,
+            shelf_z + SHELF_THICKNESS_M / 2.0 + rack.dimensions_m[2] / 2.0,
+        )
+        assets.append(_make_asset(rack, config, 0, row_y, position, identity, "_".join(identity)))
+
+
 def build_aisle_layout(config: AisleConfig) -> AisleLayout:
     """Build the original open aisle with dimension-aware, dense stocking."""
     catalog = load_retail_catalog(config.asset_manifest_path)
@@ -332,6 +406,8 @@ def build_aisle_layout(config: AisleConfig) -> AisleLayout:
             for side in (-1.0, 1.0):
                 y = row_y + side * config.shelf_depth_m * 0.42
                 primitives.append(Box(f"upright_r{row_index}_b{bay}_{int(side)}", (x, y, config.floor_z_m + config.shelf_height_m / 2.0), (0.08, 0.08, config.shelf_height_m), "upright"))
+
+    _populate_store_fixtures(assets, catalog, config, shelf_positions)
 
     # Keep one clearly visible produce run on the near row so the walkthrough
     # actually presents fruit before the aisle exit.  It remains grouped at

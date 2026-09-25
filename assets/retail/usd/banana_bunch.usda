@@ -1,0 +1,173 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    kind = "component"
+) {
+    def Xform "Geometry" {
+        def Xform "Banana0" {
+            double3 xformOp:translate = (-0.06000, 0.00000, -0.00840)
+            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Banana1" {
+            double3 xformOp:translate = (-0.02000, 0.00000, -0.00840)
+            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Banana2" {
+            double3 xformOp:translate = (0.02000, 0.00000, -0.00840)
+            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Banana3" {
+            double3 xformOp:translate = (0.06000, 0.00000, -0.00840)
+            double3 xformOp:scale = (0.08170, 0.04410, 0.08820)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Xform "Crown" {
+            double3 xformOp:translate = (0.00000, 0.00000, 0.02310)
+            double3 xformOp:scale = (0.05320, 0.03570, 0.03360)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Sphere "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double radius = 0.5
+                rel material:binding = </Asset/Looks/Front>
+            }
+        }
+        def Cylinder "Stem" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 14
+            double radius = 0.00760
+            double height = 0.02520
+            double3 xformOp:translate = (0, 0, 0.03885)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Stem>
+        }
+    }
+    def Scope "Looks" {
+        def Material "Body" {
+            token outputs:surface.connect = </Asset/Looks/Body/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.88235, 0.75294, 0.21569)
+                float inputs:roughness = 0.6200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Front" {
+            token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+            def Shader "Texture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/banana_bunch.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.37255, 0.47451, 0.21176)
+                float inputs:roughness = 0.5400
+                float inputs:metallic = 0.0000
+                color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
+                token outputs:surface
+            }
+        }
+        def Material "Metal" {
+            token outputs:surface.connect = </Asset/Looks/Metal/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.48000, 0.52000, 0.55000)
+                float inputs:roughness = 0.2800
+                float inputs:metallic = 0.7000
+                token outputs:surface
+            }
+        }
+        def Material "Stem" {
+            token outputs:surface.connect = </Asset/Looks/Stem/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.12000, 0.23000, 0.08000)
+                float inputs:roughness = 0.7200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Glass" {
+            token outputs:surface.connect = </Asset/Looks/Glass/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.55000, 0.68000, 0.58000)
+                float inputs:roughness = 0.1600
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.7200
+                token outputs:surface
+            }
+        }
+        def Material "Paper" {
+            token outputs:surface.connect = </Asset/Looks/Paper/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.82000, 0.79000, 0.69000)
+                float inputs:roughness = 0.7800
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Clear" {
+            token outputs:surface.connect = </Asset/Looks/Clear/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74000, 0.86000, 0.91000)
+                float inputs:roughness = 0.1200
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.3800
+                token outputs:surface
+            }
+        }
+        def Material "Dark" {
+            token outputs:surface.connect = </Asset/Looks/Dark/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
+                float inputs:roughness = 0.3800
+                float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+    }
+}

@@ -1,0 +1,172 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    kind = "component"
+) {
+    def Xform "Geometry" {
+        def Cylinder "JarBody" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 32
+            double radius = 0.02530
+            double height = 0.09360
+            double3 xformOp:translate = (0, 0, -0.00960)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Glass>
+        }
+        def Cylinder "BaseFoot" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 32
+            double radius = 0.02378
+            double height = 0.00720
+            double3 xformOp:translate = (0, 0, -0.05640)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Glass>
+        }
+        def Mesh "Shoulder" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.025300, 0.000000, 0.032400), (0.024814, 0.004936, 0.032400), (0.023374, 0.009682, 0.032400), (0.021036, 0.014056, 0.032400), (0.017890, 0.017890, 0.032400), (0.014056, 0.021036, 0.032400), (0.009682, 0.023374, 0.032400), (0.004936, 0.024814, 0.032400), (0.000000, 0.025300, 0.032400), (-0.004936, 0.024814, 0.032400), (-0.009682, 0.023374, 0.032400), (-0.014056, 0.021036, 0.032400), (-0.017890, 0.017890, 0.032400), (-0.021036, 0.014056, 0.032400), (-0.023374, 0.009682, 0.032400), (-0.024814, 0.004936, 0.032400), (-0.025300, 0.000000, 0.032400), (-0.024814, -0.004936, 0.032400), (-0.023374, -0.009682, 0.032400), (-0.021036, -0.014056, 0.032400), (-0.017890, -0.017890, 0.032400), (-0.014056, -0.021036, 0.032400), (-0.009682, -0.023374, 0.032400), (-0.004936, -0.024814, 0.032400), (-0.000000, -0.025300, 0.032400), (0.004936, -0.024814, 0.032400), (0.009682, -0.023374, 0.032400), (0.014056, -0.021036, 0.032400), (0.017890, -0.017890, 0.032400), (0.021036, -0.014056, 0.032400), (0.023374, -0.009682, 0.032400), (0.024814, -0.004936, 0.032400), (0.020746, 0.000000, 0.046800), (0.020347, 0.004047, 0.046800), (0.019167, 0.007939, 0.046800), (0.017250, 0.011526, 0.046800), (0.014670, 0.014670, 0.046800), (0.011526, 0.017250, 0.046800), (0.007939, 0.019167, 0.046800), (0.004047, 0.020347, 0.046800), (0.000000, 0.020746, 0.046800), (-0.004047, 0.020347, 0.046800), (-0.007939, 0.019167, 0.046800), (-0.011526, 0.017250, 0.046800), (-0.014670, 0.014670, 0.046800), (-0.017250, 0.011526, 0.046800), (-0.019167, 0.007939, 0.046800), (-0.020347, 0.004047, 0.046800), (-0.020746, 0.000000, 0.046800), (-0.020347, -0.004047, 0.046800), (-0.019167, -0.007939, 0.046800), (-0.017250, -0.011526, 0.046800), (-0.014670, -0.014670, 0.046800), (-0.011526, -0.017250, 0.046800), (-0.007939, -0.019167, 0.046800), (-0.004047, -0.020347, 0.046800), (-0.000000, -0.020746, 0.046800), (0.004047, -0.020347, 0.046800), (0.007939, -0.019167, 0.046800), (0.011526, -0.017250, 0.046800), (0.014670, -0.014670, 0.046800), (0.017250, -0.011526, 0.046800), (0.019167, -0.007939, 0.046800), (0.020347, -0.004047, 0.046800)]
+            int[] faceVertexCounts = [32, 32, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 0, 1, 33, 32, 1, 2, 34, 33, 2, 3, 35, 34, 3, 4, 36, 35, 4, 5, 37, 36, 5, 6, 38, 37, 6, 7, 39, 38, 7, 8, 40, 39, 8, 9, 41, 40, 9, 10, 42, 41, 10, 11, 43, 42, 11, 12, 44, 43, 12, 13, 45, 44, 13, 14, 46, 45, 14, 15, 47, 46, 15, 16, 48, 47, 16, 17, 49, 48, 17, 18, 50, 49, 18, 19, 51, 50, 19, 20, 52, 51, 20, 21, 53, 52, 21, 22, 54, 53, 22, 23, 55, 54, 23, 24, 56, 55, 24, 25, 57, 56, 25, 26, 58, 57, 26, 27, 59, 58, 27, 28, 60, 59, 28, 29, 61, 60, 29, 30, 62, 61, 30, 31, 63, 62, 31, 0, 32, 63]
+            rel material:binding = </Asset/Looks/Glass>
+        }
+        def Cylinder "TwistLid" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 32
+            double radius = 0.02226
+            double height = 0.01680
+            double3 xformOp:translate = (0, 0, 0.05160)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Metal>
+        }
+        def Cylinder "ShakerInsert" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            int vertices = 24
+            double radius = 0.01771
+            double height = 0.00420
+            double3 xformOp:translate = (0, 0, 0.04320)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            rel material:binding = </Asset/Looks/Paper>
+        }
+        def Mesh "FrontPanel" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.02420, 0.02950, -0.02419), (0.02420, 0.02950, -0.02419), (0.02420, 0.02950, 0.02419), (-0.02420, 0.02950, 0.02419)]
+            int[] faceVertexCounts = [4]
+            # Winding and the authored +Y normal must agree; viewed from the
+            # local front (+Y), this order faces outward and preserves upright UVs.
+            int[] faceVertexIndices = [0, 3, 2, 1]
+            normal3f[] normals = [(0, 1, 0)] (
+                interpolation = "uniform"
+            )
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "vertex"
+            )
+            rel material:binding = </Asset/Looks/Front>
+        }
+    }
+    def Scope "Looks" {
+        def Material "Body" {
+            token outputs:surface.connect = </Asset/Looks/Body/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.67059, 0.34902, 0.16471)
+                float inputs:roughness = 0.6200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Front" {
+            token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "StReader" {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+            def Shader "Texture" {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @../textures/spice_jar.png@
+                float2 inputs:st.connect = </Asset/Looks/Front/StReader.outputs:result>
+                float3 outputs:rgb
+            }
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.92941, 0.80784, 0.37647)
+                float inputs:roughness = 0.5400
+                float inputs:metallic = 0.0000
+                color3f inputs:diffuseColor.connect = </Asset/Looks/Front/Texture.outputs:rgb>
+                token outputs:surface
+            }
+        }
+        def Material "Metal" {
+            token outputs:surface.connect = </Asset/Looks/Metal/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.48000, 0.52000, 0.55000)
+                float inputs:roughness = 0.2800
+                float inputs:metallic = 0.7000
+                token outputs:surface
+            }
+        }
+        def Material "Stem" {
+            token outputs:surface.connect = </Asset/Looks/Stem/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.12000, 0.23000, 0.08000)
+                float inputs:roughness = 0.7200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Glass" {
+            token outputs:surface.connect = </Asset/Looks/Glass/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.55000, 0.68000, 0.58000)
+                float inputs:roughness = 0.1600
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.7200
+                token outputs:surface
+            }
+        }
+        def Material "Paper" {
+            token outputs:surface.connect = </Asset/Looks/Paper/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.82000, 0.79000, 0.69000)
+                float inputs:roughness = 0.7800
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Clear" {
+            token outputs:surface.connect = </Asset/Looks/Clear/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74000, 0.86000, 0.91000)
+                float inputs:roughness = 0.1200
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.3800
+                token outputs:surface
+            }
+        }
+        def Material "Dark" {
+            token outputs:surface.connect = </Asset/Looks/Dark/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
+                float inputs:roughness = 0.3800
+                float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+    }
+}

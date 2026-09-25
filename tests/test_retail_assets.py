@@ -1,5 +1,11 @@
 import re
 import math
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
 import unittest
 from collections import Counter
 from dataclasses import replace
@@ -12,7 +18,7 @@ from simulator.environment.aisle_builder import (
     shelf_level_counts_by_zone,
 )
 from simulator.environment.retail_catalog import load_retail_catalog
-from tools.retail_assets.generate_packaging import ASSET_SPECS, _asset_usda
+from tools.retail_assets.generate_packaging import ASSET_SPECS, _asset_usda, generate_library
 
 
 def _authored_z_bounds(source, asset_key):
@@ -23,9 +29,13 @@ def _authored_z_bounds(source, asset_key):
     ):
         body = match.group(1)
         height = float(re.search(r'double height = ([0-9.]+)', body).group(1))
-        translate = re.search(r'xformOp:translate = \(0, 0, (-?[0-9.]+)\)', body)
-        center_z = float(translate.group(1)) if translate else 0.0
-        bounds.extend((center_z - height / 2.0, center_z + height / 2.0))
+        radius = float(re.search(r'double radius = ([0-9.]+)', body).group(1))
+        axis_match = re.search(r'uniform token axis = "([XYZ])"', body)
+        axis = axis_match.group(1) if axis_match else "Z"
+        translate = re.search(r'xformOp:translate = \(([^)]+)\)', body)
+        center_z = float(translate.group(1).split(",")[2]) if translate else 0.0
+        half_z = height / 2.0 if axis == "Z" else radius
+        bounds.extend((center_z - half_z, center_z + half_z))
 
     for match in re.finditer(r'point3f\[\] points = \[([^]]+)\]', source, re.DOTALL):
         points = [
@@ -36,13 +46,25 @@ def _authored_z_bounds(source, asset_key):
 
     for match in re.finditer(
         r'def Xform "[^"]+"\s*\{\s*double3 xformOp:translate = \(([^)]+)\)'
-        r'\s*double3 xformOp:scale = \(([^)]+)\).*?def Cube',
+        r'\s*double3 xformOp:scale = \(([^)]+)\)'
+        r'\s*uniform token\[\] xformOpOrder = \[[^]]+\]\s*def Cube',
         source,
         re.DOTALL,
     ):
         center_z = float(match.group(1).split(",")[-1])
         half_z = float(match.group(2).split(",")[-1])
         bounds.extend((center_z - half_z, center_z + half_z))
+
+    for match in re.finditer(
+        r'def Xform "[^"]+"\s*\{\s*double3 xformOp:translate = \(([^)]+)\)'
+        r'\s*double3 xformOp:scale = \(([^)]+)\)'
+        r'\s*uniform token\[\] xformOpOrder = \[[^]]+\]\s*def Sphere',
+        source,
+        re.DOTALL,
+    ):
+        center_z = float(match.group(1).split(",")[-1])
+        size_z = float(match.group(2).split(",")[-1])
+        bounds.extend((center_z - size_z / 2.0, center_z + size_z / 2.0))
 
     if not bounds:
         raise AssertionError(f"No supported authored geometry found for {asset_key}")
@@ -67,7 +89,7 @@ class RetailAssetTests(unittest.TestCase):
                 cls.shelves[(row, bay, level)] = primitive
 
     def test_catalog_is_complete_and_portable(self):
-        self.assertEqual(len(self.catalog.assets), 34)
+        self.assertEqual(len(self.catalog.assets), 79)
         for asset in self.catalog.assets:
             self.assertTrue(asset.usd_path.is_file(), asset.asset_key)
             self.assertTrue(asset.texture_path.is_file(), asset.asset_key)
@@ -182,7 +204,7 @@ class RetailAssetTests(unittest.TestCase):
         placed_keys = {asset.asset_key for asset in self.layout.assets if asset.category != "cereal"}
         placed = [self.catalog_by_key[key] for key in placed_keys]
         used_model_types = {asset.model_type for asset in placed}
-        self.assertTrue({"carton", "bottle", "can", "jar", "fruit"}.issubset(used_model_types))
+        self.assertTrue({"milk_jug", "pillow_bag", "short_can", "jam_jar", "banana_bunch"}.issubset(used_model_types))
         # These independent catalog bounds represent the geometry actually
         # referenced into this layout, rather than a count of category labels.
         heights = {asset.dimensions_m[2] for asset in placed if asset.model_type != "fruit"}
@@ -194,35 +216,15 @@ class RetailAssetTests(unittest.TestCase):
         self.assertGreaterEqual(len(horizontal_ratios), 3)
         self.assertGreater(max(heights) - min(heights), 0.12)
 
-        # The near-row first bay includes a visibly distinct, already
-        # cataloged bottle family at every shelf level. Slots, two-depth
-        # occupancy, and physical IDs remain the same as the box-only layout.
-        original_slot_keys = {
-            0: "cereal_honey",
-            1: "snack_wafer",
-            2: "snack_wafer",
-            3: "cereal_harvest",
-            4: "snack_popcorn",
-        }
-        for level, original_key in original_slot_keys.items():
-            facings = [
-                asset for asset in self.layout.assets
-                if asset.name.startswith(f"product_r0_b0_l{level}_") and asset.name.endswith("_f0")
-            ]
-            self.assertEqual({asset.asset_key for asset in facings}, {"soda_orbit"})
-            self.assertEqual({self.catalog_by_key[asset.asset_key].model_type for asset in facings}, {"bottle"})
-            self.assertEqual(
-                {asset.semantic_id for asset in facings},
-                {
-                    f"retail/{original_key}/r0/b0/l{level}/d0/f0",
-                    f"retail/{original_key}/r0/b0/l{level}/d1/f0",
-                },
-            )
+        # Semantic SKU and referenced physical asset must agree.  This guards
+        # the former cereal-ID/soda-geometry substitution.
+        for asset in self.layout.assets:
+            self.assertEqual(asset.semantic_id.split("/")[1], asset.asset_key)
 
     def test_dimension_aware_shelf_levels_are_dense_but_clear(self):
         counts = shelf_level_counts_by_zone(self.config, self.catalog)
-        self.assertEqual(counts, {"cereal": 5, "snacks": 5, "cans_jars": 7, "beverage": 6, "produce": 6})
-        self.assertEqual(len(self.shelves), 229)
+        self.assertEqual(counts, {"hero": 5, "cereal": 5, "snacks": 6, "cans_jars": 5, "beverage": 5, "produce": 5})
+        self.assertEqual(len(self.shelves), 205)
         for row in range(2):
             for bay in range(self.bay_count):
                 levels = [key for key in self.shelves if key[:2] == (row, bay)]
@@ -231,26 +233,176 @@ class RetailAssetTests(unittest.TestCase):
                 self.assertEqual(len(set(z_values)), len(z_values))
 
     def test_dense_count_and_real_depth_facings(self):
-        self.assertGreaterEqual(len(self.layout.assets), 1800)
+        self.assertGreaterEqual(len(self.layout.assets), 1900)
         self.assertLessEqual(len(self.layout.assets), 2300)
-        self.assertGreater(len(self.layout.assets), 4 * 433)
-        self.assertGreaterEqual(len({asset.asset_key for asset in self.layout.assets}), 30)
+        self.assertGreaterEqual(len({asset.asset_key for asset in self.layout.assets}), 70)
         regular = [asset for asset in self.layout.assets if asset.category != "produce_crate"]
         self.assertTrue(any("/d1/" in asset.semantic_id for asset in regular))
-        self.assertEqual(Counter(asset.category for asset in self.layout.assets), Counter({
-                "cereal": 398,
-                "snacks": 279,
-                "cans": 177,
-                "juice": 374,
-                "soda": 356,
-                "jars": 115,
-                "water": 196,
-            "red_apples": 24,
-            "green_apples": 24,
-            "oranges": 24,
-            "lemons": 24,
-            "produce_crate": 4,
-        }))
+        counts = Counter(asset.category for asset in self.layout.assets)
+        for category in (
+            "cereal", "pantry_box", "snack_bag", "bagged_goods", "bakery",
+            "milk", "refrigerated", "frozen", "beverage", "juice", "cans",
+            "jars", "condiments", "cleaning", "household", "fresh_produce",
+            "produce_crate", "produce_fixture", "shelf_fixture",
+        ):
+            self.assertGreater(counts[category], 0, category)
+
+    def test_new_physical_type_register_is_auditable_and_instantiated(self):
+        root = Path(__file__).resolve().parents[1]
+        register = json.loads((root / "assets/retail/asset_register.json").read_text(encoding="utf-8"))
+        audit = register["audit"]
+        self.assertEqual(audit["baseline_type_count"], 34)
+        self.assertEqual(audit["new_type_count"], 45)
+        self.assertEqual(audit["new_unique_geometry_signature_count"], 45)
+        self.assertGreaterEqual(len(audit["new_assembly_profiles"]), 45)
+        self.assertTrue({"pantry", "refrigerated", "beverage", "produce", "household", "fixtures"}.issubset(audit["new_departments"]))
+        self.assertEqual(register["provenance"]["provider"], "project-authored deterministic procedural geometry")
+        self.assertIn("license", register["provenance"])
+
+        new_assets = [asset for asset in self.catalog.assets if asset.introduced_in == "G02-A"]
+        self.assertEqual(len(new_assets), 45)
+        self.assertEqual(len({asset.geometry_signature for asset in new_assets}), 45)
+        self.assertEqual(len({asset.geometry_scope_sha256 for asset in new_assets}), 45)
+        self.assertTrue(all(len(asset.assembly_parts) >= 3 for asset in new_assets))
+        self.assertTrue(all(len(asset.material_classes) >= 2 for asset in new_assets))
+        placed_new_keys = {
+            asset.asset_key for asset in self.layout.assets
+            if self.catalog_by_key[asset.asset_key].introduced_in == "G02-A"
+        }
+        self.assertEqual(placed_new_keys, {asset.asset_key for asset in new_assets})
+
+    def test_checked_in_library_matches_deterministic_regeneration(self):
+        root = Path(__file__).resolve().parents[1]
+        scratch = root / "review" / f".test-retail-{os.getpid()}-regeneration"
+        shutil.rmtree(scratch, ignore_errors=True)
+        scratch.mkdir(parents=True)
+        try:
+            generated_manifest = generate_library(scratch)
+            generated_root = generated_manifest.parent
+            committed_root = root / "assets/retail"
+            self.assertEqual(generated_manifest.read_bytes(), (committed_root / "manifest.json").read_bytes())
+            self.assertEqual((generated_root / "asset_register.json").read_bytes(), (committed_root / "asset_register.json").read_bytes())
+            for asset in self.catalog.assets:
+                self.assertEqual(
+                    hashlib.sha256((generated_root / "usd" / f"{asset.asset_key}.usda").read_bytes()).hexdigest(),
+                    hashlib.sha256(asset.usd_path.read_bytes()).hexdigest(),
+                )
+                self.assertEqual(
+                    hashlib.sha256((generated_root / "textures" / f"{asset.asset_key}.png").read_bytes()).hexdigest(),
+                    hashlib.sha256(asset.texture_path.read_bytes()).hexdigest(),
+                )
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    def test_manifest_order_and_python_hash_seed_do_not_change_layout(self):
+        root = Path(__file__).resolve().parents[1]
+        source_manifest = json.loads((root / "assets/retail/manifest.json").read_text(encoding="utf-8"))
+        scratch = root / "review" / f".test-retail-{os.getpid()}-ordering"
+        shutil.rmtree(scratch, ignore_errors=True)
+        scratch.mkdir(parents=True)
+        try:
+            reordered = dict(source_manifest)
+            reordered_entries = []
+            for entry in reversed(source_manifest["assets"]):
+                copied = dict(entry)
+                copied["usd_path"] = str((root / "assets/retail" / entry["usd_path"]).resolve())
+                copied["texture_path"] = str((root / "assets/retail" / entry["texture_path"]).resolve())
+                reordered_entries.append(copied)
+            reordered["assets"] = reordered_entries
+            reordered_path = scratch / "manifest.json"
+            reordered_path.write_text(json.dumps(reordered), encoding="utf-8")
+            alternate = build_aisle_layout(replace(self.config, asset_manifest_path=str(reordered_path)))
+            self.assertEqual(alternate.primitives, self.layout.primitives)
+            self.assertEqual(alternate.assets, self.layout.assets)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+        scenario_path = root / "config/scenarios/baseline_straight.yaml"
+        script = (
+            "import hashlib,json; from pathlib import Path; "
+            "from simulator.config.loader import load_scenario; "
+            "from simulator.environment.aisle_builder import build_aisle_layout; "
+            f"layout=build_aisle_layout(load_scenario(Path({str(scenario_path)!r})).environment); "
+            "payload=[a.__dict__ for a in layout.assets]; "
+            "print(hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest())"
+        )
+        digests = []
+        for seed in ("1", "8675309"):
+            environment = dict(os.environ)
+            environment["PYTHONHASHSEED"] = seed
+            digests.append(subprocess.check_output(
+                [sys.executable, "-c", script], cwd=root, env=environment, text=True
+            ).strip())
+        self.assertEqual(digests[0], digests[1])
+
+    def test_hero_bays_exercise_new_silhouettes_and_group_skus(self):
+        hero = [
+            asset for asset in self.layout.assets
+            if asset.name.startswith(("product_r0_b0_", "product_r0_b1_"))
+        ]
+        hero_records = [self.catalog_by_key[asset.asset_key] for asset in hero]
+        self.assertGreaterEqual(len({record.asset_key for record in hero_records}), 20)
+        self.assertGreaterEqual(len({record.assembly_profile for record in hero_records}), 12)
+        self.assertGreaterEqual(sum(record.introduced_in == "G02-A" for record in {r.asset_key: r for r in hero_records}.values()), 12)
+        self.assertTrue({"milk_jug", "pillow_bag", "window_box", "grip_bottle"}.issubset(
+            {record.assembly_profile for record in hero_records}
+        ))
+        by_slot = {}
+        for asset in hero:
+            match = re.match(r"product_r0_b(\d+)_l(\d+)_d(\d+)_f(\d+)$", asset.name)
+            self.assertIsNotNone(match)
+            bay, level, depth, facing = (int(value) for value in match.groups())
+            by_slot[(bay, level, depth, facing)] = asset.asset_key
+        grouped_pairs = 0
+        for bay, level, depth, facing in list(by_slot):
+            if facing % 2 == 0 and (bay, level, depth, facing + 1) in by_slot:
+                self.assertEqual(by_slot[(bay, level, depth, facing)], by_slot[(bay, level, depth, facing + 1)])
+                grouped_pairs += 1
+        self.assertGreaterEqual(grouped_pairs, 12)
+
+    def test_rotated_bounds_have_support_clearance_and_no_facing_overlap(self):
+        negative_aisle_edge = -math.inf
+        positive_aisle_edge = math.inf
+        facing_groups = {}
+        depth_groups = {}
+        for asset in self.layout.assets:
+            record = self.catalog_by_key[asset.asset_key]
+            yaw = math.radians(asset.rotation_rpy_deg[2])
+            width = record.dimensions_m[0] * asset.scale_xyz[0]
+            depth = record.dimensions_m[1] * asset.scale_xyz[1]
+            half_x = abs(math.cos(yaw)) * width / 2.0 + abs(math.sin(yaw)) * depth / 2.0
+            half_y = abs(math.sin(yaw)) * width / 2.0 + abs(math.cos(yaw)) * depth / 2.0
+            if asset.position_m[1] < 0.0:
+                negative_aisle_edge = max(negative_aisle_edge, asset.position_m[1] + half_y)
+            else:
+                positive_aisle_edge = min(positive_aisle_edge, asset.position_m[1] - half_y)
+
+            match = re.match(r"product_r(\d+)_b(\d+)_l(\d+)_d(\d+)_f(\d+)$", asset.name)
+            if match:
+                row, bay, level, depth_index, facing = (int(value) for value in match.groups())
+                facing_groups.setdefault((row, bay, level, depth_index), []).append((asset.position_m[0], half_x, asset.semantic_id))
+                depth_groups.setdefault((row, bay, level, facing), []).append((asset.position_m[1], half_y, asset.semantic_id))
+
+                shelf = self.shelves[(row, bay, level)]
+                local_bottom, local_top = _authored_z_bounds(record.usd_path.read_text(encoding="utf-8"), asset.asset_key)
+                actual_bottom = asset.position_m[2] + local_bottom * asset.scale_xyz[2]
+                actual_top = asset.position_m[2] + local_top * asset.scale_xyz[2]
+                shelf_top = shelf.center_m[2] + SHELF_THICKNESS_M / 2.0
+                self.assertLessEqual(abs(actual_bottom - shelf_top), 0.001, asset.semantic_id)
+                next_shelf = self.shelves.get((row, bay, level + 1))
+                if next_shelf is not None:
+                    clearance = next_shelf.center_m[2] - SHELF_THICKNESS_M / 2.0 - actual_top
+                    self.assertGreaterEqual(clearance, self.config.shelf_clearance_m - 1e-5, asset.semantic_id)
+
+        self.assertGreaterEqual(positive_aisle_edge - negative_aisle_edge, 1.375)
+        for objects in facing_groups.values():
+            objects.sort()
+            for left, right in zip(objects, objects[1:]):
+                self.assertGreaterEqual(right[0] - right[1] - (left[0] + left[1]), -0.001, (left[2], right[2]))
+        for objects in depth_groups.values():
+            objects.sort()
+            for first, second in zip(objects, objects[1:]):
+                self.assertGreaterEqual(second[0] - second[1] - (first[0] + first[1]), -0.001, (first[2], second[2]))
 
     def test_every_physical_object_has_one_unique_identity(self):
         ids = [asset.instance_id for asset in self.layout.assets]
