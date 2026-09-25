@@ -1,0 +1,446 @@
+{
+  "asset_id": "shopping_cart",
+  "asset_type": "store_context",
+  "basket": {
+    "construction": "open_wire_lattice",
+    "opaque_shell": false,
+    "open_top": true,
+    "top_opening_corners_m": [
+      [
+        -0.355,
+        -0.282,
+        0.875
+      ],
+      [
+        0.5,
+        -0.282,
+        0.875
+      ],
+      [
+        0.5,
+        0.282,
+        0.875
+      ],
+      [
+        -0.355,
+        0.282,
+        0.875
+      ]
+    ],
+    "usable_interior_aabb_m": {
+      "max": [
+        0.42,
+        0.235,
+        0.845
+      ],
+      "min": [
+        -0.3,
+        -0.235,
+        0.525
+      ]
+    }
+  },
+  "casters": {
+    "centers_m": [
+      [
+        -0.335,
+        -0.258,
+        0.068
+      ],
+      [
+        -0.335,
+        0.258,
+        0.068
+      ],
+      [
+        0.375,
+        -0.258,
+        0.068
+      ],
+      [
+        0.375,
+        0.258,
+        0.068
+      ]
+    ],
+    "count": 4,
+    "wheel_contact_z_m": 0.0,
+    "wheel_radius_m": 0.068,
+    "wheel_width_m": 0.038
+  },
+  "collision": {
+    "primitives": [
+      {
+        "center_m": [
+          0.02,
+          -0.252,
+          0.18
+        ],
+        "name": "FrameBaseLeft",
+        "role": "frame",
+        "shape": "box",
+        "size_m": [
+          0.802,
+          0.04,
+          0.06
+        ]
+      },
+      {
+        "center_m": [
+          0.02,
+          0.252,
+          0.18
+        ],
+        "name": "FrameBaseRight",
+        "role": "frame",
+        "shape": "box",
+        "size_m": [
+          0.802,
+          0.04,
+          0.06
+        ]
+      },
+      {
+        "center_m": [
+          -0.401,
+          -0.252,
+          0.55
+        ],
+        "name": "RearPostLeft",
+        "role": "frame",
+        "shape": "box",
+        "size_m": [
+          0.06,
+          0.06,
+          0.75
+        ]
+      },
+      {
+        "center_m": [
+          -0.401,
+          0.252,
+          0.55
+        ],
+        "name": "RearPostRight",
+        "role": "frame",
+        "shape": "box",
+        "size_m": [
+          0.06,
+          0.06,
+          0.75
+        ]
+      },
+      {
+        "center_m": [
+          0.073,
+          -0.282,
+          0.668
+        ],
+        "name": "BasketLeft",
+        "role": "basket_side",
+        "shape": "box",
+        "size_m": [
+          0.875,
+          0.026,
+          0.44
+        ]
+      },
+      {
+        "center_m": [
+          0.073,
+          0.282,
+          0.668
+        ],
+        "name": "BasketRight",
+        "role": "basket_side",
+        "shape": "box",
+        "size_m": [
+          0.875,
+          0.026,
+          0.44
+        ]
+      },
+      {
+        "center_m": [
+          0.478,
+          0.0,
+          0.665
+        ],
+        "name": "BasketFront",
+        "role": "basket_front",
+        "shape": "box",
+        "size_m": [
+          0.056,
+          0.58,
+          0.44
+        ]
+      },
+      {
+        "center_m": [
+          -0.34,
+          0.0,
+          0.69
+        ],
+        "name": "BasketRear",
+        "role": "basket_rear",
+        "shape": "box",
+        "size_m": [
+          0.05,
+          0.58,
+          0.4
+        ]
+      },
+      {
+        "center_m": [
+          -0.5,
+          0.0,
+          1.01
+        ],
+        "name": "Handle",
+        "role": "handle",
+        "shape": "box",
+        "size_m": [
+          0.036,
+          0.6,
+          0.036
+        ]
+      },
+      {
+        "center_m": [
+          -0.335,
+          -0.258,
+          0.068
+        ],
+        "name": "CasterRearLeft",
+        "role": "caster",
+        "shape": "box",
+        "size_m": [
+          0.14,
+          0.05,
+          0.136
+        ]
+      },
+      {
+        "center_m": [
+          -0.335,
+          0.258,
+          0.068
+        ],
+        "name": "CasterRearRight",
+        "role": "caster",
+        "shape": "box",
+        "size_m": [
+          0.14,
+          0.05,
+          0.136
+        ]
+      },
+      {
+        "center_m": [
+          0.375,
+          -0.258,
+          0.068
+        ],
+        "name": "CasterFrontLeft",
+        "role": "caster",
+        "shape": "box",
+        "size_m": [
+          0.14,
+          0.05,
+          0.136
+        ]
+      },
+      {
+        "center_m": [
+          0.375,
+          0.258,
+          0.068
+        ],
+        "name": "CasterFrontRight",
+        "role": "caster",
+        "shape": "box",
+        "size_m": [
+          0.14,
+          0.05,
+          0.136
+        ]
+      }
+    ],
+    "purpose": "guide",
+    "representation": "authored_box_proxies"
+  },
+  "coordinate_system": {
+    "forward_axis": "+X",
+    "handle_side": "-X",
+    "up_axis": "+Z"
+  },
+  "dimensions_m": {
+    "height_z": 1.03,
+    "length_x": 1.03,
+    "width_y": 0.6
+  },
+  "footprint": {
+    "aabb_xy_m": {
+      "max": [
+        0.512,
+        0.3
+      ],
+      "min": [
+        -0.518,
+        -0.3
+      ]
+    },
+    "corners_xy_m": [
+      [
+        -0.518,
+        -0.3
+      ],
+      [
+        0.512,
+        -0.3
+      ],
+      [
+        0.512,
+        0.3
+      ],
+      [
+        -0.518,
+        0.3
+      ]
+    ]
+  },
+  "geometry": {
+    "role_counts": {
+      "basket_floor_wire": 18,
+      "basket_perimeter": 8,
+      "basket_wire": 52,
+      "caster_fork": 8,
+      "caster_stem": 4,
+      "frame": 8,
+      "handle": 1,
+      "handle_support": 2,
+      "lower_rack": 9,
+      "wheel": 4,
+      "wheel_hub": 4
+    },
+    "tube_count": 118,
+    "visual_primitive_types": [
+      "capped_cylinder"
+    ]
+  },
+  "materials": [
+    {
+      "base_color": [
+        0.31,
+        0.33,
+        0.35
+      ],
+      "metallic": 0.88,
+      "name": "Steel",
+      "roughness": 0.24,
+      "shader": "UsdPreviewSurface"
+    },
+    {
+      "base_color": [
+        0.48,
+        0.51,
+        0.54
+      ],
+      "metallic": 0.82,
+      "name": "ZincWire",
+      "roughness": 0.29,
+      "shader": "UsdPreviewSurface"
+    },
+    {
+      "base_color": [
+        0.025,
+        0.105,
+        0.21
+      ],
+      "metallic": 0.0,
+      "name": "HandlePolymer",
+      "roughness": 0.33,
+      "shader": "UsdPreviewSurface"
+    },
+    {
+      "base_color": [
+        0.012,
+        0.014,
+        0.017
+      ],
+      "metallic": 0.0,
+      "name": "Rubber",
+      "roughness": 0.78,
+      "shader": "UsdPreviewSurface"
+    }
+  ],
+  "oriented_bounding_box": {
+    "axes": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "center_m": [
+      -0.003,
+      0.0,
+      0.515
+    ],
+    "half_extents_m": [
+      0.515,
+      0.3,
+      0.515
+    ],
+    "max_m": [
+      0.512,
+      0.3,
+      1.03
+    ],
+    "min_m": [
+      -0.518,
+      -0.3,
+      0.0
+    ]
+  },
+  "placement": {
+    "corridor_membership": "unassigned; scene owner must place outside M1 if used as context",
+    "ground_plane_z_m": 0.0,
+    "independently_placeable": true,
+    "pivot_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "requires_human": false,
+    "root_prim": "/ShoppingCart",
+    "scene_placement": "unassigned"
+  },
+  "provenance": {
+    "generator": "tools/generate_shopping_cart.py",
+    "license": "project-authored",
+    "method": "procedural original geometry"
+  },
+  "schema_version": 1,
+  "units": "meters",
+  "visual_targets": [
+    {
+      "path": "references/storyboard/02_walk_forward_rgb.png",
+      "sha256": "1dd93c320ce31c79eaa1a40c7e3b96507656ae59ab28eadec7d94e089cfc77d7"
+    },
+    {
+      "path": "references/storyboard/03_explore_shelves_rgb.png",
+      "sha256": "09154a4f078b9d625c4cb80bd3a9e46397c49159338cdfba98929eab2dd39297"
+    }
+  ]
+}
