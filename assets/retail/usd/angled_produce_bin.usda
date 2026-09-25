@@ -1,0 +1,185 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    kind = "component"
+) {
+    def Xform "Geometry" {
+        def Mesh "SlopedBase" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.23000, -0.18000, -0.11760), (0.23000, -0.18000, -0.11760), (-0.23000, -0.18000, -0.05520), (-0.23000, 0.18000, -0.11760), (0.23000, 0.18000, -0.11760), (-0.23000, 0.18000, -0.05520)]
+            int[] faceVertexCounts = [3, 3, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 5, 4, 0, 3, 4, 1, 1, 4, 5, 2, 2, 5, 3, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Xform "BinFeet" {
+            double3 xformOp:translate = (0.00000, 0.00000, -0.11520)
+            double3 xformOp:scale = (0.21160, 0.15120, 0.00480)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Dark>
+            }
+        }
+        def Xform "LowFront" {
+            double3 xformOp:translate = (0.00000, 0.16560, -0.05280)
+            double3 xformOp:scale = (0.23000, 0.01250, 0.05040)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
+        def Xform "HighBack" {
+            double3 xformOp:translate = (0.00000, -0.16560, 0.00000)
+            double3 xformOp:scale = (0.23000, 0.01250, 0.12000)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+        def Mesh "LeftCheek" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(-0.22870, -0.18000, -0.12000), (-0.20370, -0.18000, -0.12000), (-0.22870, -0.18000, 0.12000), (-0.22870, 0.18000, -0.12000), (-0.20370, 0.18000, -0.12000), (-0.22870, 0.18000, 0.12000)]
+            int[] faceVertexCounts = [3, 3, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 5, 4, 0, 3, 4, 1, 1, 4, 5, 2, 2, 5, 3, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Mesh "RightCheek" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        ) {
+            point3f[] points = [(0.20370, -0.18000, -0.12000), (0.22870, -0.18000, -0.12000), (0.20370, -0.18000, 0.12000), (0.20370, 0.18000, -0.12000), (0.22870, 0.18000, -0.12000), (0.20370, 0.18000, 0.12000)]
+            int[] faceVertexCounts = [3, 3, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 5, 4, 0, 3, 4, 1, 1, 4, 5, 2, 2, 5, 3, 0]
+            rel material:binding = </Asset/Looks/Body>
+        }
+        def Xform "FrontRail" {
+            double3 xformOp:translate = (0.00000, 0.15840, 0.00480)
+            double3 xformOp:scale = (0.20240, 0.00900, 0.00960)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Accent>
+            }
+        }
+        def Xform "RearRail" {
+            double3 xformOp:translate = (0.00000, -0.15840, 0.06720)
+            double3 xformOp:scale = (0.20240, 0.00900, 0.00960)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Cube "Shape" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                double size = 2.0
+                rel material:binding = </Asset/Looks/Body>
+            }
+        }
+    }
+    def Scope "Looks" {
+        def Material "Body" {
+            token outputs:surface.connect = </Asset/Looks/Body/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.43922, 0.34118, 0.23137)
+                float inputs:roughness = 0.8200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Front" {
+            token outputs:surface.connect = </Asset/Looks/Front/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.60392, 0.46667, 0.27059)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Metal" {
+            token outputs:surface.connect = </Asset/Looks/Metal/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.48000, 0.52000, 0.55000)
+                float inputs:roughness = 0.2800
+                float inputs:metallic = 0.7000
+                token outputs:surface
+            }
+        }
+        def Material "Stem" {
+            token outputs:surface.connect = </Asset/Looks/Stem/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.12000, 0.23000, 0.08000)
+                float inputs:roughness = 0.7200
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Glass" {
+            token outputs:surface.connect = </Asset/Looks/Glass/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.55000, 0.68000, 0.58000)
+                float inputs:roughness = 0.1600
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.7200
+                token outputs:surface
+            }
+        }
+        def Material "Paper" {
+            token outputs:surface.connect = </Asset/Looks/Paper/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.82000, 0.79000, 0.69000)
+                float inputs:roughness = 0.7800
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+        def Material "Clear" {
+            token outputs:surface.connect = </Asset/Looks/Clear/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.74000, 0.86000, 0.91000)
+                float inputs:roughness = 0.1200
+                float inputs:metallic = 0.0000
+                float inputs:opacity = 0.3800
+                token outputs:surface
+            }
+        }
+        def Material "Dark" {
+            token outputs:surface.connect = </Asset/Looks/Dark/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.05500, 0.06500, 0.07500)
+                float inputs:roughness = 0.3800
+                float inputs:metallic = 0.0500
+                token outputs:surface
+            }
+        }
+        def Material "Accent" {
+            token outputs:surface.connect = </Asset/Looks/Accent/Preview.outputs:surface>
+            def Shader "Preview" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.60392, 0.46667, 0.27059)
+                float inputs:roughness = 0.8000
+                float inputs:metallic = 0.0000
+                token outputs:surface
+            }
+        }
+    }
+}
