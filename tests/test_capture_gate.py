@@ -1,9 +1,11 @@
 import time
 import unittest
+import os
+import subprocess
 from pathlib import Path
 
 from evaluation.rgb_video_recorder import RgbVideoRecorder
-from simulator.capture.rosbag_capture import _maximum_nearest_skew_s
+from simulator.capture.rosbag_capture import _maximum_nearest_skew_s, _strictly_increasing_stamps
 from simulator.config.loader import load_scenario
 from simulator.sensors.rig import make_camera_intrinsics
 
@@ -19,6 +21,11 @@ class CaptureGateTests(unittest.TestCase):
             places=9,
         )
         self.assertIsNone(_maximum_nearest_skew_s([], [0.0]))
+
+    def test_raw_rgb_timestamps_reject_duplicates_and_regressions(self):
+        self.assertTrue(_strictly_increasing_stamps([0.0, 1.0 / 30.0, 2.0 / 30.0]))
+        self.assertFalse(_strictly_increasing_stamps([0.0, 0.0, 1.0 / 30.0]))
+        self.assertFalse(_strictly_increasing_stamps([0.0, 1.0 / 30.0, 0.02]))
 
     def test_rgb_clock_target_is_absolute_scenario_horizon(self):
         recorder = RgbVideoRecorder.__new__(RgbVideoRecorder)
@@ -55,9 +62,59 @@ class CaptureGateTests(unittest.TestCase):
         self.assertIn('git_worktree_clean=$true', source)
         self.assertIn('Raw bag RGB cadence gap exceeds the configured frame period plus 1 ms.', source)
         self.assertIn('Raw bag RGB count does not reconcile with the RGB video frame count.', source)
-        self.assertIn('$rgbCountBoundaryTolerance = 1', source)
+        self.assertIn('Raw bag RGB image and CameraInfo counts do not match.', source)
+        self.assertIn('$rgbCountBoundaryTolerance = 0', source)
         self.assertIn('rgb_reconciliation=', source)
+        self.assertIn('Raw bag RGB timestamps must be strictly increasing with no duplicates.', source)
+        self.assertIn('Production capture requires -Realtime pacing for lossless ROS consumers.', source)
+        self.assertIn('requested_realtime_factor=$RealtimeFactor', source)
+        self.assertIn('Isaac runtime pacing receipt does not match the requested realtime factor.', source)
+        self.assertEqual(source.count('Assert-CaptureSourceUnchanged'), 2)
+        self.assertLess(source.rindex('Assert-CaptureSourceUnchanged'), source.index('CAPTURE_COMPLETE'))
         self.assertLess(source.index('RGB video cadence is not contiguous and valid.'), source.index('CAPTURE_COMPLETE'))
+
+    def test_capture_source_guard_rejects_tracked_mutation(self):
+        guard = ROOT / "scripts/capture_source_guard.ps1"
+        repository = ROOT / "runs/capture_source_guard_fixture"
+        repository.mkdir(parents=True, exist_ok=True)
+        git_command = repository / "git.cmd"
+        dirty_flag = repository / "dirty.flag"
+        dirty_flag.unlink(missing_ok=True)
+        try:
+            sha = "a" * 40
+            tree = "b" * 40
+            git_command.write_text(
+                "@echo off\n"
+                f'if "%3"=="rev-parse" if "%4"=="HEAD" echo {sha}\n'
+                f'if "%3"=="rev-parse" if not "%4"=="HEAD" echo {tree}\n'
+                'if "%3"=="status" if exist "%2\\dirty.flag" echo  M tracked.txt\n',
+                encoding="ascii",
+            )
+            command = (
+                f". '{guard}'; Assert-CaptureSourceUnchanged -Repo '{repository}' "
+                f"-ExpectedSha '{sha}' -ExpectedTree '{tree}'"
+            )
+            environment = dict(os.environ)
+            environment["PATH"] = f"{repository}{os.pathsep}{environment['PATH']}"
+            clean = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            dirty_flag.write_text("tracked mutation\n", encoding="utf-8")
+            dirty = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertNotEqual(dirty.returncode, 0)
+            self.assertIn("Capture source changed or became dirty", dirty.stderr)
+        finally:
+            dirty_flag.unlink(missing_ok=True)
+            git_command.unlink(missing_ok=True)
 
     def test_production_camera_is_native_1080_with_scaled_intrinsics(self):
         preview = load_scenario(ROOT / "config/scenarios/walking_baseline.yaml")

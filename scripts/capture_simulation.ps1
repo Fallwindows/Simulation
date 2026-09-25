@@ -7,6 +7,8 @@ param(
   [int]$StartupTimeoutSeconds = 600,
   [int]$ProgressTimeoutSeconds = 60,
   [switch]$Realtime,
+  [ValidateRange(0.05, 1.0)]
+  [double]$RealtimeFactor = 0.25,
   [switch]$Gui,
   [switch]$Headless
 )
@@ -14,7 +16,9 @@ $ErrorActionPreference = "Stop"
 if ($Gui -and $Headless) { throw "Choose either -Gui or -Headless, not both." }
 if ($StartupTimeoutSeconds -lt 300) { throw "StartupTimeoutSeconds must allow a cold Isaac startup (minimum 300)." }
 if ($ProgressTimeoutSeconds -lt 10) { throw "ProgressTimeoutSeconds must be at least 10." }
+if (-not $Realtime) { throw "Production capture requires -Realtime pacing for lossless ROS consumers." }
 . (Join-Path $PSScriptRoot "resolve_runtime_paths.ps1")
+. (Join-Path $PSScriptRoot "capture_source_guard.ps1")
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $pixi = Resolve-PixiExecutable $PixiPath
 $workspace = Resolve-RosWorkspace $RosWorkspace
@@ -89,6 +93,7 @@ try {
     sensor_config=$sensorPath; sensor_config_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $sensorPath).Hash.ToLowerInvariant()
     camera=[ordered]@{ width_px=$expectedWidth; height_px=$expectedHeight; fps=$expectedFps; horizontal_fov_deg=[double]$sensorData.camera.horizontal_fov_deg }
     rmw=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; started_utc=(Get-Date).ToUniversalTime().ToString("o"); duration_s=$duration
+    pacing=[ordered]@{ enabled=$true; requested_realtime_factor=$RealtimeFactor }
   } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $captureDir "provenance.json") -Encoding UTF8
   [ordered]@{
@@ -116,7 +121,7 @@ try {
   $simStatus = Join-Path $captureDir "isaac_runtime_status.json"
   $simArgs = @{
     Scenario=$scenarioPath; PixiPath=$pixi; RosWorkspace=$workspace; IsaacPython=$IsaacPython
-    StatusPath=$simStatus; RequireSensorSamples=$true
+    StatusPath=$simStatus; RequireSensorSamples=$true; RealtimeFactor=$RealtimeFactor
   }
   if ($Frames -gt 0) { $simArgs.Frames = $Frames }
   if ($Realtime) { $simArgs.Realtime = $true }
@@ -138,6 +143,7 @@ try {
   if ([int]$runtime.observed_rgb_frames -le 0 -or [int]$runtime.observed_clock_samples -le 0 -or [int]$runtime.observed_lidar_clouds -le 0) { throw "Isaac runtime status contains an empty required sensor stream." }
   if ([int]$runtime.lidar_cloud_points.sample_count -le 0 -or [int]$runtime.lidar_cloud_points.min_points -le 0) { throw "Isaac runtime status has no real RTX LiDAR returns." }
   if ([bool]$runtime.ground_truth_odometry_leakage) { throw "Isaac runtime reported ground-truth odometry leakage." }
+  if (-not [bool]$runtime.pacing.enabled -or [Math]::Abs([double]$runtime.pacing.requested_realtime_factor - $RealtimeFactor) -gt 1e-9) { throw "Isaac runtime pacing receipt does not match the requested realtime factor." }
   if ([double]$runtime.timestamp_alignment.rgb.max_abs_offset_s -gt (1.0 / 60.0 + 1e-9) -or [double]$runtime.timestamp_alignment.lidar.max_abs_offset_s -gt (1.0 / 60.0 + 1e-9)) { throw "Isaac sensor timestamps are not aligned to /clock within one simulation tick." }
   if ($rgb.status -ne "complete") { throw "RGB capture did not complete." }
   if ($bagMeta.status -ne "complete") { throw "Raw bag capture did not complete." }
@@ -159,16 +165,19 @@ try {
   $rawRgbCadenceLimitS = (1.0 / $expectedFps) + 0.001
   if ([double]$rawRgbGapProperty.Value -gt $rawRgbCadenceLimitS + 1e-9) { throw "Raw bag RGB cadence gap exceeds the configured frame period plus 1 ms." }
   if ([double]$bagMeta.max_rgb_lidar_skew_s -gt 0.017000001) { throw "Raw bag RGB/LiDAR timestamp skew exceeds 17,000,001 ns." }
+  if ([int]$bagMeta.stamp_nonincreasing.PSObject.Properties["/sim/camera/rgb/image_raw"].Value -ne 0) { throw "Raw bag RGB timestamps must be strictly increasing with no duplicates." }
   if (@($bagMeta.camera_info_frame_ids) -notcontains "camera_optical_frame") { throw "Observed CameraInfo frame is not camera_optical_frame." }
   if (@($bagMeta.lidar_frame_ids) -notcontains "lidar_link") { throw "Observed LiDAR frame is not lidar_link." }
   if (-not [bool]$rgb.cadence_contiguous -or [int]$rgb.invalid_frames -ne 0 -or [int]$rgb.nonincreasing_frames -ne 0) { throw "RGB video cadence is not contiguous and valid." }
   $rawRgbCount = [int]$bagMeta.counts.PSObject.Properties[$rawRgbTopic].Value
+  $rawCameraInfoCount = [int]$bagMeta.counts.PSObject.Properties["/sim/camera/rgb/camera_info"].Value
   $videoRgbCount = [int]$rgb.frame_count
-  # Both subscribers start before Isaac.  One boundary callback may differ as
-  # they independently stop at the absolute horizon; an internal raw drop is
-  # still rejected by the cadence-gap gate above.
-  $rgbCountBoundaryTolerance = 1
-  if ([Math]::Abs($rawRgbCount - $videoRgbCount) -gt $rgbCountBoundaryTolerance) { throw "Raw bag RGB count does not reconcile with the RGB video frame count." }
+  # All subscribers start before Isaac and observe the same absolute horizon;
+  # exact counts are required.  CameraInfo is the publisher-side cadence
+  # witness, so an image-only raw drop cannot hide behind a boundary allowance.
+  $rgbCountBoundaryTolerance = 0
+  if ($rawRgbCount -ne $rawCameraInfoCount) { throw "Raw bag RGB image and CameraInfo counts do not match." }
+  if ($rawRgbCount -ne $videoRgbCount) { throw "Raw bag RGB count does not reconcile with the RGB video frame count." }
   $rawRgbFirstS = [double]$bagMeta.first_stamp_s.PSObject.Properties[$rawRgbTopic].Value
   $rawRgbLastS = [double]$bagMeta.last_stamp_s.PSObject.Properties[$rawRgbTopic].Value
   $rgbFirstBoundarySkewS = [Math]::Abs($rawRgbFirstS - [double]$rgb.first_image_stamp_s)
@@ -181,6 +190,7 @@ try {
 
   & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") ros2 bag info $bagUri | Set-Content -LiteralPath (Join-Path $captureDir "bag_info.txt") -Encoding UTF8
   if ($LASTEXITCODE -ne 0) { throw "ros2 bag info failed for $bagUri." }
+  Assert-CaptureSourceUnchanged -Repo $repo -ExpectedSha $gitSha -ExpectedTree $gitTree
   $files = @()
   Get-ChildItem -LiteralPath $captureDir -File -Recurse | Where-Object { $_.Name -notin @("capture_manifest.json") } | ForEach-Object {
     $relative = $_.FullName.Substring($captureDir.Length + 1).Replace("\", "/")
@@ -190,10 +200,11 @@ try {
   $manifest = [ordered]@{
     manifest_version=1; status="complete"; capture_id=$captureId; scenario=$scenarioPath; git_sha=$gitSha; git_tree=$gitTree; git_worktree_clean=$true
     rmw_implementation=$env:RMW_IMPLEMENTATION; ros_domain_id=[int]$env:ROS_DOMAIN_ID; duration_s=$duration
+    pacing=$runtime.pacing
     bag=[ordered]@{
       uri="sensors_bag"; storage_id="sqlite3"; topics=$topics; counts=$bagMeta.counts; first_clock_s=$bagMeta.first_clock_s; last_clock_s=$bagMeta.last_clock_s
       rgb_reconciliation=[ordered]@{
-        raw_count=$rawRgbCount; video_count=$videoRgbCount; boundary_count_tolerance=$rgbCountBoundaryTolerance
+        raw_count=$rawRgbCount; camera_info_count=$rawCameraInfoCount; video_count=$videoRgbCount; boundary_count_tolerance=$rgbCountBoundaryTolerance
         raw_max_gap_s=[double]$rawRgbGapProperty.Value; max_allowed_gap_s=$rawRgbCadenceLimitS
         first_boundary_skew_s=$rgbFirstBoundarySkewS; last_boundary_skew_s=$rgbLastBoundarySkewS
       }
@@ -214,6 +225,7 @@ try {
   $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $captureDir "capture_manifest.json") -Encoding UTF8
   & $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python -m simulator.capture.manifest --validate-archive $captureDir | Set-Content -LiteralPath (Join-Path $logsDir "capture_archive_validation.json") -Encoding UTF8
   if ($LASTEXITCODE -ne 0) { throw "Full capture archive validation failed." }
+  Assert-CaptureSourceUnchanged -Repo $repo -ExpectedSha $gitSha -ExpectedTree $gitTree
   New-Item -ItemType File -Force -Path (Join-Path $captureDir "CAPTURE_COMPLETE") | Out-Null
   Write-Host "Capture complete: $captureDir"
 } finally {

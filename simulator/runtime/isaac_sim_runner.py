@@ -75,6 +75,12 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--frames", type=int, default=0, help="Simulation frames; 0 derives the count from the trajectory duration")
     parser.add_argument("--headless", action="store_true", help="Run without the Isaac Sim viewport")
     parser.add_argument("--realtime", action="store_true", help="Pace the simulation at 60 Hz for external ROS/dashboard consumers")
+    parser.add_argument(
+        "--realtime-factor",
+        type=float,
+        default=1.0,
+        help="Wall-clock pacing factor when --realtime is set (0.25 gives consumers 4x wall time)",
+    )
     parser.add_argument("--renderer", default="RaytracedLighting")
     parser.add_argument("--status-path", default=str(REPO_ROOT / "runs/isaac_runtime_status.json"))
     parser.add_argument("--capture-dir", default="", help="Empty directory for selected-pose lossless PNG output")
@@ -88,6 +94,16 @@ def _args() -> argparse.Namespace:
         help="Build and drive the scene for look-development without starting ROS or RTX LiDAR",
     )
     return parser.parse_args()
+
+
+def _paced_wall_period_s(realtime: bool, realtime_factor: float, simulation_dt_s: float = 1.0 / 60.0) -> float | None:
+    """Return the minimum wall period for one simulation tick."""
+
+    if not realtime:
+        return None
+    if not math.isfinite(realtime_factor) or realtime_factor <= 0.0 or realtime_factor > 1.0:
+        raise ValueError("realtime factor must be finite and in (0, 1]")
+    return simulation_dt_s / realtime_factor
 
 
 def _sha256_path(path: Path) -> str:
@@ -534,7 +550,7 @@ def store_shell_spec(environment) -> dict[str, object]:
                         "position_xy_m": (shell_end_x - 0.46 - 0.003 * pose_offset, case_y + offset_y),
                         "support_z_m": shelf_z + 0.018 + 0.002 * abs(pose_offset),
                         "rotation_rpy_deg": (0.0, 0.0, 90.0 + 0.8 * pose_offset),
-                        "scale_xyz": (1.10 + 0.012 * pose_offset, 1.08, 1.10 + 0.01 * pose_offset),
+                        "scale_xyz": (-(1.10 + 0.012 * pose_offset), 1.08, 1.10 + 0.01 * pose_offset),
                     }
                 )
         lights.append(
@@ -661,10 +677,10 @@ def store_shell_spec(environment) -> dict[str, object]:
         ]
     )
     focus_specs = (
-        ("cereal_sunrise", 12.46, -0.80, 74.0, 1.22, 0.915),
+        ("cereal_sunrise", 12.46, -0.75, 74.0, 1.22, 0.915),
         ("juice_citrus", 12.50, -0.98, 77.0, 1.32, 0.919),
-        ("coffee_bag", 12.47, -1.17, 72.0, 1.28, 0.912),
-        ("cereal_harvest", 12.53, -1.36, 76.0, 1.17, 0.917),
+        ("coffee_bag", 12.47, -1.21, 72.0, 1.28, 0.912),
+        ("cereal_harvest", 12.53, -1.44, 76.0, 1.17, 0.917),
     )
     for focus_index, (key, product_x, product_y, yaw, scale, support_z) in enumerate(focus_specs):
         asset_references.append(
@@ -674,7 +690,10 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "position_xy_m": (product_x, product_y),
                 "support_z_m": support_z,
                 "rotation_rpy_deg": (0.0, 0.0, yaw),
-                "scale_xyz": (scale, scale, scale),
+                # These oblique facings expose the authored reverse UV side;
+                # reflect X exactly as the validated market sign does so text
+                # reads normally from the approaching camera.
+                "scale_xyz": (-scale, scale, scale),
             }
         )
     for price_index, price_y in enumerate((-0.84, -1.11, -1.38)):
@@ -685,20 +704,42 @@ def store_shell_spec(environment) -> dict[str, object]:
                 "position_xy_m": (12.265, price_y),
                 "support_z_m": 0.900,
                 "rotation_rpy_deg": (0.0, 0.0, 90.0),
-                "scale_xyz": (0.82, 0.82, 0.82),
+                "scale_xyz": (-0.82, 0.82, 0.82),
             }
         )
-    for basket_index, basket_x in enumerate((14.62, 14.86)):
+    basket_specs = ((14.55, -1.32, 8.0), (15.10, -1.10, 2.0))
+    for basket_index, (basket_x, basket_y, basket_yaw) in enumerate(basket_specs):
         asset_references.append(
             {
                 "name": f"store_use_basket_{basket_index}",
                 "asset_key": "wicker_basket",
-                "position_xy_m": (basket_x, -1.12 + 0.035 * basket_index),
-                "support_z_m": 0.02 + 0.16 * basket_index,
-                "rotation_rpy_deg": (0.0, 0.0, 8.0 - 6.0 * basket_index),
+                "position_xy_m": (basket_x, basket_y),
+                "support_z_m": 0.02,
+                "rotation_rpy_deg": (0.0, 0.0, basket_yaw),
                 "scale_xyz": (1.0, 1.0, 1.0),
             }
         )
+    # One suspended category blade breaks the tunnel symmetry and provides a
+    # familiar retail wayfinding cue while clearing both camera and LiDAR.
+    for rod_index, rod_y in enumerate((-0.88, -0.32)):
+        boxes.append(
+            {
+                "name": f"category_sign_rod_{rod_index}",
+                "center_m": (7.60, rod_y, 2.63),
+                "size_m": (0.016, 0.016, 0.34),
+                "kind": "case_frame",
+            }
+        )
+    asset_references.append(
+        {
+            "name": "suspended_category_sign",
+            "asset_key": "promo_market_sign",
+            "position_xy_m": (7.60, -0.60),
+            "support_z_m": 2.18,
+            "rotation_rpy_deg": (0.0, 0.0, 90.0),
+            "scale_xyz": (-0.88, 0.88, 0.88),
+        }
+    )
     return {
         "ceiling_height_m": ceiling_z,
         "boxes": tuple(boxes),
@@ -710,7 +751,92 @@ def store_shell_spec(environment) -> dict[str, object]:
     }
 
 
-def _build_store_shell(stage, environment, builder) -> int:
+def runtime_dense_stock_references(layout, environment) -> tuple[dict[str, object], ...]:
+    """Fill only measured edge gaps in existing front-facing SKU blocks."""
+
+    from simulator.environment.retail_catalog import load_retail_catalog
+
+    catalog = load_retail_catalog(environment.asset_manifest_path)
+    references: list[dict[str, object]] = []
+    for shelf in layout.primitives:
+        if shelf.kind != "shelf" or not shelf.name.startswith("shelf_r"):
+            continue
+        _, row_part, bay_part, level_part = shelf.name.split("_")
+        row_index = int(row_part[1:])
+        bay_index = int(bay_part[1:])
+        level_index = int(level_part[1:])
+        identity_marker = f"/r{row_index}/b{bay_index}/l{level_index}/d0/"
+        existing = sorted(
+            (asset for asset in layout.assets if identity_marker in asset.semantic_id),
+            key=lambda asset: asset.position_m[0],
+        )
+        if not existing:
+            continue
+        occupied: list[tuple[float, float, object]] = []
+        for asset in existing:
+            record = catalog.by_key(asset.asset_key)
+            half_width = record.dimensions_m[0] * abs(asset.scale_xyz[0]) / 2.0
+            occupied.append((asset.position_m[0] - half_width, asset.position_m[0] + half_width, asset))
+        shelf_min = shelf.center_m[0] - shelf.size_m[0] / 2.0 + environment.edge_margin_m
+        shelf_max = shelf.center_m[0] + shelf.size_m[0] / 2.0 - environment.edge_margin_m
+        front_sign = 1.0 if shelf.center_m[1] < 0.0 else -1.0
+        for side_name, source_asset in (("left", occupied[0][2]), ("right", occupied[-1][2])):
+            record = catalog.by_key(source_asset.asset_key)
+            cursor = occupied[0][0] if side_name == "left" else occupied[-1][1]
+            for fill_index in range(2):
+                variation = ((row_index * 17 + bay_index * 7 + level_index * 3 + fill_index) % 5) - 2
+                scale = 0.98 + 0.012 * variation
+                half_width = record.dimensions_m[0] * scale / 2.0
+                if side_name == "left":
+                    product_x = cursor - environment.facing_gap_m - half_width
+                    if product_x - half_width < shelf_min - 1e-9:
+                        break
+                    cursor = product_x - half_width
+                else:
+                    product_x = cursor + environment.facing_gap_m + half_width
+                    if product_x + half_width > shelf_max + 1e-9:
+                        break
+                    cursor = product_x + half_width
+                product_y = shelf.center_m[1] + front_sign * (
+                    environment.shelf_depth_m / 2.0
+                    - record.dimensions_m[1] * scale / 2.0
+                    - environment.edge_margin_m
+                )
+                references.append(
+                    {
+                        "name": f"dense_stock_r{row_index}_b{bay_index}_l{level_index}_{side_name}_{fill_index}",
+                        "asset_key": record.asset_key,
+                        "position_xy_m": (product_x, product_y),
+                        "support_z_m": shelf.center_m[2] + shelf.size_m[2] / 2.0,
+                        "rotation_rpy_deg": (
+                            0.0,
+                            0.0,
+                            (0.0 if shelf.center_m[1] < 0.0 else 180.0) + 0.65 * variation,
+                        ),
+                        "scale_xyz": (scale, scale, scale),
+                    }
+                )
+        # Irregularly spaced real price displays replace some blank rail runs.
+        if (row_index * 11 + bay_index * 5 + level_index * 3) % 7 in (0, 1):
+            price = catalog.by_key("price_display")
+            price_offset = (-0.22, 0.12, 0.28)[(bay_index + level_index) % 3]
+            references.append(
+                {
+                    "name": f"dense_price_r{row_index}_b{bay_index}_l{level_index}",
+                    "asset_key": "price_display",
+                    "position_xy_m": (
+                        shelf.center_m[0] + price_offset,
+                        shelf.center_m[1] + front_sign * (environment.shelf_depth_m / 2.0 + price.dimensions_m[1] / 2.0),
+                    ),
+                    "support_z_m": shelf.center_m[2] + shelf.size_m[2] / 2.0,
+                    "rotation_rpy_deg": (0.0, 0.0, 0.0 if shelf.center_m[1] < 0.0 else 180.0),
+                    "scale_xyz": (0.82, 0.82, 0.82),
+                }
+            )
+    return tuple(references)
+
+
+def _build_store_shell(stage, environment, builder, layout=None) -> int:
     from pxr import Gf, UsdGeom, UsdLux
 
     spec = store_shell_spec(environment)
@@ -740,7 +866,10 @@ def _build_store_shell(stage, environment, builder) -> int:
     from simulator.environment.retail_catalog import load_retail_catalog
 
     catalog = load_retail_catalog(environment.asset_manifest_path)
-    for asset_spec in spec["asset_references"]:
+    asset_references = list(spec["asset_references"])
+    if layout is not None:
+        asset_references.extend(runtime_dense_stock_references(layout, environment))
+    for asset_spec in asset_references:
         record = catalog.by_key(asset_spec["asset_key"])
         x, y = asset_spec["position_xy_m"]
         z = asset_spec["support_z_m"] + record.dimensions_m[2] * asset_spec["scale_xyz"][2] / 2.0
@@ -755,7 +884,7 @@ def _build_store_shell(stage, environment, builder) -> int:
     ambient = UsdLux.DomeLight.Define(stage, "/World/GroceryAisle/lighting/ambient_bounce")
     ambient.GetIntensityAttr().Set(spec["ambient_intensity"])
     ambient.GetColorAttr().Set(Gf.Vec3f(0.92, 0.95, 1.0))
-    return len(spec["boxes"]) + len(spec["lights"]) + len(spec["asset_references"]) + 1
+    return len(spec["boxes"]) + len(spec["lights"]) + len(asset_references) + 1
 
 
 def _build_world(stage, scenario):
@@ -774,7 +903,7 @@ def _build_world(stage, scenario):
     layout = build_aisle_layout(scenario.environment)
     builder = IsaacAisleBuilder(stage=stage)
     primitive_count = builder.build(layout, "/World/GroceryAisle")
-    primitive_count += _build_store_shell(stage, scenario.environment, builder)
+    primitive_count += _build_store_shell(stage, scenario.environment, builder, layout)
 
     return layout, primitive_count
 
@@ -1004,6 +1133,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
     if args.frames < 0:
         raise ValueError("--frames must be non-negative")
+    simulation_dt_s = 1.0 / 60.0
+    paced_wall_period_s = _paced_wall_period_s(args.realtime, args.realtime_factor, simulation_dt_s)
     scenario = load_scenario(args.scenario)
     trajectory_cls = WalkingTrajectory if scenario.trajectory.name.lower() == "walking" else StraightTrajectory
     trajectory = trajectory_cls(scenario.trajectory)
@@ -1068,7 +1199,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             rig_api = UsdGeom.XformCommonAPI(stage.GetPrimAtPath("/World/SensorRig"))
             last_timestamp_s = None
             render_phase_offsets_s = []
-            simulation_dt_s = 1.0 / 60.0
+            simulation_wall_started = time.perf_counter()
             for frame in range(frames):
                 wall_start = time.perf_counter()
                 timeline_before_s = float(timeline.get_current_time())
@@ -1088,8 +1219,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 if representative_capture is not None and frame in selected_capture_frames:
                     representative_capture.capture(frame, timestamp_s, sample, timeline)
                 last_timestamp_s = timestamp_s
-                if args.realtime:
-                    time.sleep(max(0.0, simulation_dt_s - (time.perf_counter() - wall_start)))
+                if paced_wall_period_s is not None:
+                    time.sleep(max(0.0, paced_wall_period_s - (time.perf_counter() - wall_start)))
+
+            simulation_wall_elapsed_s = time.perf_counter() - simulation_wall_started
 
             capture_result = None
             if representative_capture is not None:
@@ -1117,6 +1250,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 "last_rig_position_m": list(sample.position_m),
                 "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
                 "sensor_publishers_started": False,
+                "pacing": {
+                    "enabled": args.realtime,
+                    "requested_realtime_factor": args.realtime_factor if args.realtime else None,
+                    "wall_elapsed_s": simulation_wall_elapsed_s,
+                    "measured_realtime_factor": (frames * simulation_dt_s) / simulation_wall_elapsed_s,
+                },
                 "ros_environment": ros_environment,
             }
             Path(args.status_path).parent.mkdir(parents=True, exist_ok=True)
@@ -1197,7 +1336,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         timeline = get_timeline_interface()
         last_timestamp_s: float | None = None
         render_phase_offsets_s: list[float] = []
-        simulation_dt_s = 1.0 / 60.0
+        simulation_wall_started = time.perf_counter()
         for frame in range(frames):
             wall_start = time.perf_counter()
             timeline_before_s = float(timeline.get_current_time())
@@ -1226,8 +1365,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             if representative_capture is not None and frame in selected_capture_frames:
                 representative_capture.capture(frame, timestamp_s, sample, timeline)
             last_timestamp_s = timestamp_s
-            if args.realtime:
-                time.sleep(max(0.0, (1.0 / 60.0) - (time.perf_counter() - wall_start)))
+            if paced_wall_period_s is not None:
+                time.sleep(max(0.0, paced_wall_period_s - (time.perf_counter() - wall_start)))
+
+        simulation_wall_elapsed_s = time.perf_counter() - simulation_wall_started
 
         runtime_ok = True
         print("[grocery-runtime] simulation completed", flush=True)
@@ -1258,6 +1399,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "observed_lidar_clouds": len(lidar_stamps),
             "clock_source": "Isaac timeline current_time",
             "ros_callback_service": "MultiThreadedExecutor background thread",
+            "pacing": {
+                "enabled": args.realtime,
+                "requested_realtime_factor": args.realtime_factor if args.realtime else None,
+                "wall_elapsed_s": simulation_wall_elapsed_s,
+                "measured_realtime_factor": (frames * simulation_dt_s) / simulation_wall_elapsed_s,
+            },
             "timestamp_phase": {
                 "clock_reference": TOPICS["clock"],
                 "truth_and_rig_source": "Isaac timeline current_time",

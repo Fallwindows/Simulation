@@ -1,10 +1,19 @@
 import unittest
 import hashlib
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
 from simulator.environment.isaac_builder import STRUCTURAL_MATERIALS
-from simulator.runtime.isaac_sim_runner import lidar_runtime_spec, store_shell_spec
+from simulator.environment.aisle_builder import build_aisle_layout
+from simulator.environment.retail_catalog import load_retail_catalog
+from simulator.config.loader import load_scenario
+from simulator.runtime.isaac_sim_runner import (
+    _paced_wall_period_s,
+    lidar_runtime_spec,
+    runtime_dense_stock_references,
+    store_shell_spec,
+)
 from simulator.runtime.representative_capture import (
     MAX_CAPTURE_FRAMES,
     parse_capture_frames,
@@ -68,10 +77,78 @@ class SceneLookdevTests(unittest.TestCase):
         hero_references = [reference for reference in references if reference["name"].startswith("hero_")]
         self.assertTrue(all(reference["position_xy_m"][1] <= -0.75 for reference in hero_references))
         signs = [reference for reference in references if reference["asset_key"] == "promo_market_sign"]
-        self.assertEqual(len(signs), 2)
+        self.assertEqual(len(signs), 3)
         self.assertTrue(all(reference["scale_xyz"][0] < 0.0 for reference in signs))
         hero_stock = [reference for reference in references if reference["name"].startswith("hero_stock_")]
         self.assertGreaterEqual(min(reference["position_xy_m"][0] for reference in hero_stock), 12.7)
+
+    def test_hero_focus_and_store_baskets_have_positive_3d_clearance(self):
+        scenario = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
+        catalog = load_retail_catalog(scenario.environment.asset_manifest_path)
+        references = store_shell_spec(self.environment)["asset_references"]
+
+        def projections(reference):
+            record = catalog.by_key(reference["asset_key"])
+            width = record.dimensions_m[0] * abs(reference["scale_xyz"][0])
+            depth = record.dimensions_m[1] * abs(reference["scale_xyz"][1])
+            yaw = math.radians(reference["rotation_rpy_deg"][2])
+            axis_x = (math.cos(yaw), math.sin(yaw))
+            axis_y = (-math.sin(yaw), math.cos(yaw))
+            center = reference["position_xy_m"]
+            corners = tuple(
+                (
+                    center[0] + sx * width * axis_x[0] / 2.0 + sy * depth * axis_y[0] / 2.0,
+                    center[1] + sx * width * axis_x[1] / 2.0 + sy * depth * axis_y[1] / 2.0,
+                )
+                for sx in (-1.0, 1.0)
+                for sy in (-1.0, 1.0)
+            )
+            return record, (axis_x, axis_y), corners
+
+        def overlaps(first, second):
+            first_record, first_axes, first_corners = projections(first)
+            second_record, second_axes, second_corners = projections(second)
+            first_z = (
+                first["support_z_m"],
+                first["support_z_m"] + first_record.dimensions_m[2] * abs(first["scale_xyz"][2]),
+            )
+            second_z = (
+                second["support_z_m"],
+                second["support_z_m"] + second_record.dimensions_m[2] * abs(second["scale_xyz"][2]),
+            )
+            if min(first_z[1], second_z[1]) - max(first_z[0], second_z[0]) <= 1e-4:
+                return False
+            for axis in (*first_axes, *second_axes):
+                first_interval = [corner[0] * axis[0] + corner[1] * axis[1] for corner in first_corners]
+                second_interval = [corner[0] * axis[0] + corner[1] * axis[1] for corner in second_corners]
+                if min(max(first_interval), max(second_interval)) - max(min(first_interval), min(second_interval)) <= 1e-4:
+                    return False
+            return True
+
+        for prefix in ("hero_focus_stock_", "store_use_basket_"):
+            group = [reference for reference in references if reference["name"].startswith(prefix)]
+            for index, first in enumerate(group):
+                for second in group[index + 1 :]:
+                    self.assertFalse(overlaps(first, second), f"{first['name']} overlaps {second['name']}")
+
+    def test_runtime_stock_fills_measured_edge_gaps_with_real_catalog_assets(self):
+        scenario = load_scenario(Path(__file__).resolve().parents[1] / "config/scenarios/walking_baseline.yaml")
+        layout = build_aisle_layout(scenario.environment)
+        references = runtime_dense_stock_references(layout, scenario.environment)
+        names = [reference["name"] for reference in references]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertGreaterEqual(len(references), 200)
+        self.assertGreaterEqual(sum(reference["asset_key"] == "price_display" for reference in references), 30)
+        self.assertTrue(all(reference["support_z_m"] > 0.0 for reference in references))
+        self.assertTrue(all(reference["asset_key"] != "promo_market_sign" for reference in references))
+
+    def test_realtime_factor_expands_wall_period_without_changing_simulation_dt(self):
+        self.assertIsNone(_paced_wall_period_s(False, 0.25))
+        self.assertAlmostEqual(_paced_wall_period_s(True, 1.0), 1.0 / 60.0)
+        self.assertAlmostEqual(_paced_wall_period_s(True, 0.25), 1.0 / 15.0)
+        for invalid in (0.0, -1.0, 1.01, float("inf"), float("nan")):
+            with self.assertRaisesRegex(ValueError, "realtime factor"):
+                _paced_wall_period_s(True, invalid)
 
     def test_structural_variation_is_bounded_and_shelves_are_not_near_black(self):
         self.assertIn("floor_tile_warm", STRUCTURAL_MATERIALS)

@@ -25,6 +25,8 @@ TOPIC_TYPES = {
 WRITER_CLOSE_TIMEOUT_S = 5.0
 DEFAULT_PROGRESS_TIMEOUT_S = 60.0
 TARGET_TOLERANCE_S = 1e-3
+RAW_IMAGE_QOS_DEPTH = 128
+ROSBAG_CACHE_BYTES = 512 * 1024 * 1024
 
 
 def _maximum_nearest_skew_s(reference_stamps: list[float], candidate_stamps: list[float]) -> float | None:
@@ -40,6 +42,12 @@ def _maximum_nearest_skew_s(reference_stamps: list[float], candidate_stamps: lis
             cursor += 1
         maximum = max(maximum, abs(candidates[cursor] - reference))
     return maximum
+
+
+def _strictly_increasing_stamps(stamps: list[float]) -> bool:
+    """Reject duplicate and regressing sensor timestamps."""
+
+    return all(current > previous + 1e-9 for previous, current in zip(stamps, stamps[1:]))
 
 
 def _bounded_resource_close(resource, method_name: str, timeout_s: float) -> BaseException | None:
@@ -87,7 +95,7 @@ class RawCaptureWriter:
         duration_s: float,
         startup_timeout_s: float,
         progress_timeout_s: float = DEFAULT_PROGRESS_TIMEOUT_S,
-        post_target_wall_s: float = 2.0,
+        post_target_wall_s: float = 5.0,
     ):
         import rclpy
         from rclpy.node import Node
@@ -120,6 +128,7 @@ class RawCaptureWriter:
         self.last_stamp_s: dict[str, float | None] = {topic: None for topic in TOPIC_TYPES}
         self.max_stamp_gap_s: dict[str, float | None] = {topic: None for topic in TOPIC_TYPES}
         self.stamp_regressions = {topic: 0 for topic in TOPIC_TYPES}
+        self.stamp_nonincreasing = {topic: 0 for topic in TOPIC_TYPES}
         self.rgb_stamps_s: list[float] = []
         self.lidar_stamps_s: list[float] = []
         self.camera_info_frame_ids: set[str] = set()
@@ -133,8 +142,13 @@ class RawCaptureWriter:
         self.node = Node("grocery_sim_raw_capture_writer")
         self.writer = rosbag2_py.SequentialWriter()
         self.output.parent.mkdir(parents=True, exist_ok=True)
+        storage_options = rosbag2_py.StorageOptions(uri=str(self.output), storage_id="sqlite3")
+        # 1080p RGB is about 6 MiB per sample.  A bounded rosbag cache keeps
+        # SQLite flush latency out of the ROS callback and the deeper DDS
+        # history absorbs short writer stalls without dropping source frames.
+        storage_options.max_cache_size = ROSBAG_CACHE_BYTES
         self.writer.open(
-            rosbag2_py.StorageOptions(uri=str(self.output), storage_id="sqlite3"),
+            storage_options,
             rosbag2_py.ConverterOptions(input_serialization_format="cdr", output_serialization_format="cdr"),
         )
         for topic_id, (topic, type_name) in enumerate(TOPIC_TYPES.items()):
@@ -149,7 +163,14 @@ class RawCaptureWriter:
             "/tf_static": TFMessage,
         }
         for topic, message_type in message_types.items():
-            qos = 100 if topic in ("/clock", "/tf", "/tf_static") else 10
+            if topic == "/sim/camera/rgb/image_raw":
+                qos = RAW_IMAGE_QOS_DEPTH
+            elif topic == "/sim/camera/rgb/camera_info":
+                qos = RAW_IMAGE_QOS_DEPTH
+            elif topic == "/sim/lidar/points":
+                qos = 32
+            else:
+                qos = 256
             self.node.create_subscription(message_type, topic, self._callback(topic), qos)
 
     def _callback(self, topic: str):
@@ -189,9 +210,11 @@ class RawCaptureWriter:
             previous_stamp = self.last_stamp_s[topic]
             if previous_stamp is not None:
                 gap = stamp_s - float(previous_stamp)
+                if gap <= 1e-9:
+                    self.stamp_nonincreasing[topic] += 1
                 if gap < -1e-9:
                     self.stamp_regressions[topic] += 1
-                elif gap > 0.0:
+                elif gap > 1e-9:
                     previous_max = self.max_stamp_gap_s[topic]
                     self.max_stamp_gap_s[topic] = gap if previous_max is None else max(float(previous_max), gap)
             self.last_stamp_s[topic] = stamp_s if previous_stamp is None else max(float(previous_stamp), stamp_s)
@@ -250,18 +273,30 @@ class RawCaptureWriter:
             self.clock_regressions == 0
             and self.stamp_regressions["/sim/camera/rgb/image_raw"] == 0
             and self.stamp_regressions["/sim/lidar/points"] == 0
+            and self.stamp_nonincreasing["/sim/camera/rgb/image_raw"] == 0
+            and self.stamp_nonincreasing["/sim/lidar/points"] == 0
+            and _strictly_increasing_stamps(self.rgb_stamps_s)
+            and _strictly_increasing_stamps(self.lidar_stamps_s)
         )
         complete = target_reached and all_topics_positive and lidar_nonempty and ordered
         result = {
             "status": "complete" if complete else "failed",
             "uri": self.output.name,
             "storage_id": "sqlite3",
+            "writer_cache_bytes": ROSBAG_CACHE_BYTES,
+            "subscriber_qos_depths": {
+                "rgb_image": RAW_IMAGE_QOS_DEPTH,
+                "camera_info": RAW_IMAGE_QOS_DEPTH,
+                "lidar": 32,
+                "clock_tf": 256,
+            },
             "topics": list(TOPIC_TYPES),
             "counts": self.counts,
             "first_stamp_s": self.first_stamp_s,
             "last_stamp_s": self.last_stamp_s,
             "max_stamp_gap_s": self.max_stamp_gap_s,
             "stamp_regressions": self.stamp_regressions,
+            "stamp_nonincreasing": self.stamp_nonincreasing,
             "first_clock_s": self.first_clock_s,
             "last_clock_s": self.last_clock_s,
             "target_clock_s": self.target_clock_s,
@@ -292,6 +327,7 @@ def main() -> None:
     import rclpy
 
     rclpy.init()
+    metadata_path = Path(args.metadata)
     writer: RawCaptureWriter | None = None
     error: BaseException | None = None
     try:
@@ -302,8 +338,7 @@ def main() -> None:
             args.progress_timeout_seconds,
         )
         writer.spin_until_done()
-        result = writer.close()
-        Path(args.metadata).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        writer.close()
     except BaseException as exc:
         error = exc
     finally:
@@ -317,6 +352,16 @@ def main() -> None:
                     error.add_note(f"Raw bag cleanup also failed: {close_error}")
         if rclpy.ok():
             rclpy.shutdown()
+    # Preserve the exact failed receipt as well as successful metadata.  The
+    # production wrapper still rejects status=failed, but diagnostics must not
+    # lose the stream counts/cadence that explain the failure.
+    close_result = None if writer is None else getattr(writer, "_close_result", None)
+    if close_result is not None:
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.write_text(
+            json.dumps(close_result, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     if error is not None:
         raise error
 

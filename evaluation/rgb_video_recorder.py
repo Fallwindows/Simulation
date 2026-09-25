@@ -14,12 +14,13 @@ import numpy as np
 
 RGB_TOPIC = "/sim/camera/rgb/image_raw"
 CLOCK_TOPIC = "/clock"
-POST_TARGET_GRACE_S = 1.0
+POST_TARGET_GRACE_S = 5.0
 WRITER_CLOSE_TIMEOUT_S = 5.0
 DEFAULT_PROGRESS_TIMEOUT_S = 60.0
 NOMINAL_FPS = 30.0
 FRAME_PERIOD_S = 1.0 / NOMINAL_FPS
 FRAME_GAP_TOLERANCE_S = 1e-6
+RGB_SUBSCRIPTION_DEPTH = 64
 
 
 def _bounded_resource_close(resource, method_name: str, timeout_s: float) -> BaseException | None:
@@ -84,7 +85,9 @@ def _decode_image(message) -> np.ndarray | None:
     packed_row_bytes = width * channels
     if step < packed_row_bytes:
         return None
-    data = np.frombuffer(bytes(message.data), dtype=np.uint8)
+    # rclpy's uint8 sequence supports the buffer protocol; avoid a full 6 MiB
+    # Python bytes copy for every native 1080p frame.
+    data = np.frombuffer(message.data, dtype=np.uint8)
     required_bytes = step * height
     if data.size < required_bytes:
         return None
@@ -152,9 +155,9 @@ class RgbVideoRecorder:
         self._closed = False
         self._close_metadata: dict[str, object] | None = None
         self.close_timeout_s = WRITER_CLOSE_TIMEOUT_S
-        self.node.create_subscription(Image, RGB_TOPIC, self._on_image, 5)
-        self.node.create_subscription(CameraInfo, "/sim/camera/rgb/camera_info", self._on_camera_info, 10)
-        self.node.create_subscription(Clock, CLOCK_TOPIC, self._on_clock, 20)
+        self.node.create_subscription(Image, RGB_TOPIC, self._on_image, RGB_SUBSCRIPTION_DEPTH)
+        self.node.create_subscription(CameraInfo, "/sim/camera/rgb/camera_info", self._on_camera_info, 64)
+        self.node.create_subscription(Clock, CLOCK_TOPIC, self._on_clock, 256)
 
     def _on_clock(self, message) -> None:
         stamp_s = _clock_stamp(message)

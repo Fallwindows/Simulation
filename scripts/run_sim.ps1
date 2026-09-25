@@ -5,6 +5,8 @@ param(
   [string]$RosWorkspace = "",
   [int]$Frames = 0,
   [switch]$Realtime,
+  [ValidateRange(0.05, 1.0)]
+  [double]$RealtimeFactor = 1.0,
   [string]$StatusPath = "",
   [switch]$PreflightOnly,
   [switch]$StartZenohRouter,
@@ -69,7 +71,7 @@ $runtime = Join-Path $repo "simulator\runtime\isaac_sim_runner.py"
 $arguments = @($runtime, "--scenario", $scenarioPath, "--status-path", $status, "--renderer", $Renderer)
 if ($Frames -gt 0) { $arguments += @("--frames", $Frames) }
 if ($Headless) { $arguments += "--headless" }
-if ($Realtime) { $arguments += "--realtime" }
+if ($Realtime) { $arguments += @("--realtime", "--realtime-factor", ([string]$RealtimeFactor)) }
 if ($CaptureOnly) { $arguments += "--capture-only" }
 if ($CaptureDir) {
   $capturePathCandidate = if ([IO.Path]::IsPathRooted($CaptureDir)) { $CaptureDir } else { Join-Path $repo $CaptureDir }
