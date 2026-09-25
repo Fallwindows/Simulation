@@ -19,7 +19,9 @@
       "fall_s": 2.0,
       "yaw_offset_deg": -23.0,
       "pitch_offset_deg": 10.0,
-      "lateral_offset_m": -0.08
+      "lateral_offset_m": -0.04,
+      "framing_target": "products_and_price_rail",
+      "allow_foreground_support_crop": true
     },
     {
       "center_s": 17.0,
@@ -27,7 +29,9 @@
       "fall_s": 2.0,
       "yaw_offset_deg": -23.0,
       "pitch_offset_deg": 10.0,
-      "lateral_offset_m": -0.08
+      "lateral_offset_m": -0.04,
+      "framing_target": "products_and_price_rail",
+      "allow_foreground_support_crop": true
     }
   ]
 }

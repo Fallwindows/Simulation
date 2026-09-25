@@ -29,6 +29,10 @@ class PoseSample:
     timestamp_s: float
     position_m: tuple[float, float, float]
     orientation_xyzw: tuple[float, float, float, float]
+    # Dynamic camera_link articulation relative to its configured rig mount.
+    # Keeping it in the deterministic sample makes the rendered pose and ROS
+    # TF observable from the same timestamped source.
+    camera_link_orientation_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -133,6 +137,11 @@ def interpolate_pose(start: PoseSample, end: PoseSample, timestamp_s: float) -> 
         timestamp_s,
         interpolate_position(start.position_m, end.position_m, fraction),
         quaternion_slerp(start.orientation_xyzw, end.orientation_xyzw, fraction),
+        quaternion_slerp(
+            start.camera_link_orientation_xyzw,
+            end.camera_link_orientation_xyzw,
+            fraction,
+        ),
     )
 
 
@@ -186,6 +195,14 @@ class WalkingTrajectory(StraightTrajectory):
 
         y = y0 + self.config.sway_amplitude_m * gait_scale * sway_wave + look_y
         z = z0 + self.config.bob_amplitude_m * gait_scale * bob_wave
-        yaw = self.config.yaw_deg + self.config.yaw_amplitude_deg * gait_scale * sway_wave + look_yaw
-        pitch = self.config.pitch_amplitude_deg * gait_scale * pitch_wave + look_pitch
-        return PoseSample(t, (x, y, z), quaternion_from_rpy_deg(0.0, pitch, yaw))
+        # The mobile rig follows its direction of travel; the camera head owns
+        # the composed shelf look.  LiDAR and rig ground truth therefore remain
+        # physically aligned while the camera motion is explicitly exported.
+        yaw = self.config.yaw_deg + self.config.yaw_amplitude_deg * gait_scale * sway_wave
+        pitch = self.config.pitch_amplitude_deg * gait_scale * pitch_wave
+        return PoseSample(
+            t,
+            (x, y, z),
+            quaternion_from_rpy_deg(0.0, pitch, yaw),
+            quaternion_from_rpy_deg(0.0, look_pitch, look_yaw),
+        )

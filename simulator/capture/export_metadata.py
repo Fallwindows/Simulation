@@ -11,6 +11,8 @@ from simulator.capture.inventory import export_inventory
 from simulator.capture.manifest import build_experiment_hashes, write_json
 from simulator.config.loader import load_scenario
 from simulator.environment.aisle_builder import build_aisle_layout
+from simulator.motion.trajectory import StraightTrajectory, WalkingTrajectory
+from simulator.runtime.isaac_sim_runner import write_camera_head_transforms
 from simulator.sensors.rig import build_sensor_rig_description
 
 
@@ -22,6 +24,16 @@ def export_metadata(scenario_path: str | Path, capture_dir: str | Path, repo_roo
     scenario = load_scenario(scenario_file)
     layout = build_aisle_layout(scenario.environment)
     rig = build_sensor_rig_description(scenario.camera, scenario.lidar)
+    scenario_links = json.loads(scenario_file.read_text(encoding="utf-8"))
+    trajectory_file = (scenario_file.parent / scenario_links["trajectory"]).resolve()
+    trajectory_cls = WalkingTrajectory if scenario.trajectory.name.lower() == "walking" else StraightTrajectory
+    head_artifact_path = target / "camera_head_transforms.json"
+    head_artifact = write_camera_head_transforms(
+        head_artifact_path,
+        trajectory_cls(scenario.trajectory),
+        scenario,
+        trajectory_file,
+    )
     hashes = build_experiment_hashes(scenario_file, root)
     export_inventory(scenario_file, target)
 
@@ -41,6 +53,16 @@ def export_metadata(scenario_path: str | Path, capture_dir: str | Path, repo_roo
         "transforms": [dataclasses.asdict(item) for item in rig.transforms],
         "topics": rig.topics,
         "frames": rig.frames,
+        "dynamic_transform_artifacts": [
+            {
+                "parent_frame": "sensor_rig",
+                "child_frame": "camera_link",
+                "path": head_artifact_path.name,
+                "sha256": head_artifact["sha256"],
+                "size_bytes": head_artifact_path.stat().st_size,
+                "schema_version": head_artifact["version"],
+            }
+        ],
     }
     effective = {
         "scenario": scenario.name,

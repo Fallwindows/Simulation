@@ -98,6 +98,11 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--capture-height", type=int, default=720)
     parser.add_argument("--capture-rt-subframes", type=int, default=4)
     parser.add_argument(
+        "--camera-head-transforms-path",
+        default="",
+        help="Dynamic sensor_rig->camera_link JSON; defaults beside --status-path",
+    )
+    parser.add_argument(
         "--capture-only",
         action="store_true",
         help="Build and drive the scene for look-development without starting ROS or RTX LiDAR",
@@ -123,7 +128,11 @@ def _sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _capture_provenance(args: argparse.Namespace, scenario) -> dict[str, object]:
+def _capture_provenance(
+    args: argparse.Namespace,
+    scenario,
+    camera_head_artifact: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Bind representative pixels to source, inputs, and renderer settings."""
 
     def git(*git_args: str) -> str:
@@ -149,7 +158,7 @@ def _capture_provenance(args: argparse.Namespace, scenario) -> dict[str, object]
             config_inputs.append({"role": role, "path": str(input_path), "sha256": _sha256_path(input_path)})
     asset_manifest = Path(scenario.environment.asset_manifest_path).resolve()
     scene_material_manifest = (REPO_ROOT / "assets" / "scene" / "materials" / "manifest.json").resolve()
-    return {
+    provenance = {
         "git_commit": git("rev-parse", "HEAD"),
         "git_tree": git("rev-parse", "HEAD^{tree}"),
         "git_worktree_dirty": bool(git("status", "--porcelain")),
@@ -164,6 +173,9 @@ def _capture_provenance(args: argparse.Namespace, scenario) -> dict[str, object]
         "capture_only": bool(args.capture_only),
         "simulation_hz": 60.0,
     }
+    if camera_head_artifact is not None:
+        provenance["camera_head_transforms"] = camera_head_artifact
+    return provenance
 
 
 def _sim_time_message(seconds: float):
@@ -171,6 +183,158 @@ def _sim_time_message(seconds: float):
 
     whole = int(seconds)
     return Time(sec=whole, nanosec=int((seconds - whole) * 1_000_000_000))
+
+
+def camera_mount_orientation(sample, camera_config):
+    """Return the sampled sensor_rig -> camera_link rotation.
+
+    The configured mount is composed with the trajectory's explicit head
+    articulation.  This pure helper is shared by USD, ROS TF, capture metadata,
+    and dependency-light tests so those outputs cannot silently diverge.
+    """
+
+    from simulator.sensors.transforms import (
+        quaternion_from_rpy_deg,
+        quaternion_multiply,
+        quaternion_normalize,
+    )
+
+    configured_mount = quaternion_from_rpy_deg(*camera_config.pose_in_rig.rpy_deg)
+    return quaternion_normalize(
+        quaternion_multiply(configured_mount, sample.camera_link_orientation_xyzw)
+    )
+
+
+def camera_link_world_pose(sample, camera_config):
+    """Compose the rig and sampled head poses for capture provenance."""
+
+    from simulator.motion.trajectory import PoseSample
+    from simulator.sensors.transforms import Transform, compose
+
+    rig_world = Transform("sim_world", "sensor_rig", sample.position_m, sample.orientation_xyzw)
+    rig_camera = Transform(
+        "sensor_rig",
+        "camera_link",
+        camera_config.pose_in_rig.position_m,
+        camera_mount_orientation(sample, camera_config),
+    )
+    world_camera = compose(rig_world, rig_camera)
+    return PoseSample(sample.timestamp_s, world_camera.translation_m, world_camera.rotation_xyzw)
+
+
+def camera_optical_world_pose(sample, camera_config):
+    """Return the ROS camera optical frame pose in the simulation world."""
+
+    from simulator.motion.trajectory import PoseSample
+    from simulator.sensors.transforms import Transform, camera_optical_quaternion, compose
+
+    camera_link = camera_link_world_pose(sample, camera_config)
+    world_link = Transform(
+        "sim_world",
+        "camera_link",
+        camera_link.position_m,
+        camera_link.orientation_xyzw,
+    )
+    link_optical = Transform(
+        "camera_link",
+        "camera_optical_frame",
+        (0.0, 0.0, 0.0),
+        camera_optical_quaternion(),
+    )
+    world_optical = compose(world_link, link_optical)
+    return PoseSample(sample.timestamp_s, world_optical.translation_m, world_optical.rotation_xyzw)
+
+
+def camera_head_stamp_alignment(
+    rgb_timestamps_s: list[float],
+    artifact_timestamps_s: list[float],
+    tolerance_s: float = 1e-6,
+) -> dict[str, object]:
+    """Prove observed RGB stamps address exported head samples by time."""
+
+    deltas = [
+        min(abs(rgb_stamp - artifact_stamp) for artifact_stamp in artifact_timestamps_s)
+        for rgb_stamp in rgb_timestamps_s
+    ]
+    max_delta = max(deltas, default=None)
+    return {
+        "observed_rgb_stamps": len(rgb_timestamps_s),
+        "matched_head_samples": sum(delta <= tolerance_s for delta in deltas),
+        "tolerance_s": tolerance_s,
+        "max_abs_delta_s": max_delta,
+        "all_rgb_stamps_matched": max_delta is None or max_delta <= tolerance_s,
+    }
+
+
+def write_camera_head_transforms(
+    path: str | Path,
+    trajectory,
+    scenario,
+    trajectory_config_path: str | Path,
+) -> dict[str, object]:
+    """Write the versioned replay contract for the articulated camera mount."""
+
+    output_path = Path(path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    trajectory_path = Path(trajectory_config_path).resolve()
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD", "HEAD^{tree}"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    samples = trajectory.sample_many()
+    contract = {
+        "schema": "grocery.camera_head_transforms",
+        "version": 1,
+        "frames": {
+            "parent": "sensor_rig",
+            "child": "camera_link",
+            "optical_child": "camera_optical_frame",
+        },
+        "direction": "parent_to_child",
+        "translation_units": "m",
+        "timestamp_units": "s",
+        "timestamp_domain": "Isaac simulation time (/clock)",
+        "sample_hz": scenario.trajectory.sample_hz,
+        "duration_s": scenario.trajectory.duration_s,
+        "interpolation": {
+            "translation": "linear",
+            "rotation": "shortest_arc_quaternion_slerp_xyzw",
+            "range": "closed_0_to_duration_no_extrapolation",
+        },
+        "composition": "q_sensor_rig_camera_link = q_configured_mount * q_head_articulation",
+        "source": {
+            "trajectory_config": {
+                "path": str(trajectory_path),
+                "sha256": _sha256_path(trajectory_path),
+            },
+            "git_commit": revision[0],
+            "git_tree": revision[1],
+        },
+        "static_child_transform": {
+            "parent": "camera_link",
+            "child": "camera_optical_frame",
+            "translation_m": [0.0, 0.0, 0.0],
+            "rotation_xyzw": [0.5, -0.5, 0.5, -0.5],
+        },
+        "samples": [
+            {
+                "timestamp_s": sample.timestamp_s,
+                "translation_m": list(scenario.camera.pose_in_rig.position_m),
+                "rotation_xyzw": list(camera_mount_orientation(sample, scenario.camera)),
+            }
+            for sample in samples
+        ],
+    }
+    output_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+    return {
+        "path": str(output_path),
+        "sha256": _sha256_path(output_path),
+        "schema": contract["schema"],
+        "version": contract["version"],
+    }
 
 
 def lidar_runtime_spec(lidar_config) -> dict[str, object]:
@@ -1197,7 +1361,7 @@ def _publish_ground_truth(publisher, sample, timestamp_s: float):
     publisher.publish(message)
 
 
-def _publish_tf(publisher, sample, timestamp_s: float) -> None:
+def _publish_tf(publisher, sample, timestamp_s: float, scenario) -> None:
     from geometry_msgs.msg import TransformStamped
     from tf2_msgs.msg import TFMessage
     from simulator.ros.topic_contract import FRAMES
@@ -1209,7 +1373,15 @@ def _publish_tf(publisher, sample, timestamp_s: float) -> None:
     message.child_frame_id = FRAMES["truth_sensor_rig"]
     message.transform.translation.x, message.transform.translation.y, message.transform.translation.z = sample.position_m
     message.transform.rotation.x, message.transform.rotation.y, message.transform.rotation.z, message.transform.rotation.w = sample.orientation_xyzw
-    publisher.publish(TFMessage(transforms=[message]))
+
+    camera = TransformStamped()
+    camera.header.stamp = stamp
+    camera.header.frame_id = FRAMES["sensor_rig"]
+    camera.child_frame_id = FRAMES["camera_link"]
+    camera.transform.translation.x, camera.transform.translation.y, camera.transform.translation.z = scenario.camera.pose_in_rig.position_m
+    camera_rotation = camera_mount_orientation(sample, scenario.camera)
+    camera.transform.rotation.x, camera.transform.rotation.y, camera.transform.rotation.z, camera.transform.rotation.w = camera_rotation
+    publisher.publish(TFMessage(transforms=[message, camera]))
 
 
 def _publish_static_tf(broadcaster, scenario) -> None:
@@ -1228,7 +1400,6 @@ def _publish_static_tf(broadcaster, scenario) -> None:
         message.transform.rotation.x, message.transform.rotation.y, message.transform.rotation.z, message.transform.rotation.w = rotation
         transforms.append(message)
 
-    add(FRAMES["sensor_rig"], FRAMES["camera_link"], scenario.camera.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.camera.pose_in_rig.rpy_deg))
     add(FRAMES["camera_link"], FRAMES["camera_optical"], (0.0, 0.0, 0.0), camera_optical_quaternion())
     add(FRAMES["sensor_rig"], FRAMES["lidar_link"], scenario.lidar.pose_in_rig.position_m, quaternion_from_rpy_deg(*scenario.lidar.pose_in_rig.rpy_deg))
     broadcaster.sendTransform(transforms)
@@ -1252,6 +1423,20 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     scenario = load_scenario(args.scenario)
     trajectory_cls = WalkingTrajectory if scenario.trajectory.name.lower() == "walking" else StraightTrajectory
     trajectory = trajectory_cls(scenario.trajectory)
+    scenario_path = Path(args.scenario).resolve()
+    scenario_links = json.loads(scenario_path.read_text(encoding="utf-8"))
+    trajectory_config_path = (scenario_path.parent / scenario_links["trajectory"]).resolve()
+    camera_head_path = (
+        Path(args.camera_head_transforms_path).resolve()
+        if args.camera_head_transforms_path
+        else Path(args.status_path).resolve().with_name("camera_head_transforms.json")
+    )
+    camera_head_artifact = write_camera_head_transforms(
+        camera_head_path,
+        trajectory,
+        scenario,
+        trajectory_config_path,
+    )
     frames = args.frames if args.frames > 0 else max(1, math.ceil(scenario.trajectory.duration_s * 60.0))
     from simulator.runtime.representative_capture import parse_capture_frames, validate_capture_dimensions
 
@@ -1298,7 +1483,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 selected_capture_frames,
                 args.capture_rt_subframes,
                 seed=scenario.seed,
-                provenance=_capture_provenance(args, scenario),
+                provenance=_capture_provenance(args, scenario, camera_head_artifact),
             )
         if args.capture_only:
             print("[grocery-runtime] initializing capture-only simulation", flush=True)
@@ -1311,6 +1496,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
             timeline = get_timeline_interface()
             rig_api = UsdGeom.XformCommonAPI(stage.GetPrimAtPath("/World/SensorRig"))
+            camera_link_api = UsdGeom.XformCommonAPI(stage.GetPrimAtPath("/World/SensorRig/camera_link"))
             last_timestamp_s = None
             render_phase_offsets_s = []
             simulation_wall_started = time.perf_counter()
@@ -1324,6 +1510,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                     Gf.Vec3f(*rpy_deg_from_quaternion(commanded_sample.orientation_xyzw)),
                     UsdGeom.XformCommonAPI.RotationOrderXYZ,
                 )
+                camera_link_api.SetRotate(
+                    Gf.Vec3f(*rpy_deg_from_quaternion(camera_mount_orientation(commanded_sample, scenario.camera))),
+                    UsdGeom.XformCommonAPI.RotationOrderXYZ,
+                )
                 simulation_app.update()
                 timestamp_s = float(timeline.get_current_time())
                 if last_timestamp_s is not None and timestamp_s <= last_timestamp_s:
@@ -1331,7 +1521,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 render_phase_offsets_s.append(timestamp_s - commanded_timestamp_s)
                 sample = trajectory.sample(timestamp_s)
                 if representative_capture is not None and frame in selected_capture_frames:
-                    representative_capture.capture(frame, timestamp_s, sample, timeline)
+                    representative_capture.capture(
+                        frame,
+                        timestamp_s,
+                        camera_optical_world_pose(sample, scenario.camera),
+                        timeline,
+                    )
                 last_timestamp_s = timestamp_s
                 if paced_wall_period_s is not None:
                     time.sleep(max(0.0, paced_wall_period_s - (time.perf_counter() - wall_start)))
@@ -1363,6 +1558,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 },
                 "last_rig_position_m": list(sample.position_m),
                 "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
+                "last_camera_mount_orientation_xyzw": list(camera_mount_orientation(sample, scenario.camera)),
+                "camera_pose_source": "world camera_optical_frame composed from sampled rig, dynamic camera link, and static optical transform",
+                "camera_head_transforms": camera_head_artifact,
                 "sensor_publishers_started": False,
                 "pacing": {
                     "enabled": args.realtime,
@@ -1445,6 +1643,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
         rig_prim = stage.GetPrimAtPath("/World/SensorRig")
         rig_api = UsdGeom.XformCommonAPI(rig_prim)
+        camera_link_api = UsdGeom.XformCommonAPI(stage.GetPrimAtPath("/World/SensorRig/camera_link"))
         from omni.timeline import get_timeline_interface
 
         timeline = get_timeline_interface()
@@ -1468,6 +1667,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
             sampled_rpy_deg = rpy_deg_from_quaternion(commanded_sample.orientation_xyzw)
             rig_api.SetRotate(Gf.Vec3f(*sampled_rpy_deg), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+            camera_link_api.SetRotate(
+                Gf.Vec3f(*rpy_deg_from_quaternion(camera_mount_orientation(commanded_sample, scenario.camera))),
+                UsdGeom.XformCommonAPI.RotationOrderXYZ,
+            )
             simulation_app.update()
             timestamp_s = float(timeline.get_current_time())
             if last_timestamp_s is not None and timestamp_s <= last_timestamp_s:
@@ -1475,14 +1678,27 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             render_phase_offsets_s.append(timestamp_s - commanded_timestamp_s)
             sample = trajectory.sample(timestamp_s)
             _publish_ground_truth(gt_pub, sample, timestamp_s)
-            _publish_tf(tf_pub, sample, timestamp_s)
+            _publish_tf(tf_pub, sample, timestamp_s, scenario)
             if representative_capture is not None and frame in selected_capture_frames:
-                representative_capture.capture(frame, timestamp_s, sample, timeline)
+                representative_capture.capture(
+                    frame,
+                    timestamp_s,
+                    camera_optical_world_pose(sample, scenario.camera),
+                    timeline,
+                )
             last_timestamp_s = timestamp_s
             if paced_wall_period_s is not None:
                 time.sleep(max(0.0, paced_wall_period_s - (time.perf_counter() - wall_start)))
 
         simulation_wall_elapsed_s = time.perf_counter() - simulation_wall_started
+        head_stamp_alignment = camera_head_stamp_alignment(
+            rgb_stamps,
+            [item.timestamp_s for item in trajectory.sample_many()],
+        )
+        if not head_stamp_alignment["all_rgb_stamps_matched"]:
+            raise RuntimeError(
+                "observed RGB timestamps do not match the exported camera head transform samples"
+            )
 
         runtime_ok = True
         print("[grocery-runtime] simulation completed", flush=True)
@@ -1509,6 +1725,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "camera_cadence": camera_cadence,
             "observed_rgb_frames": len(rgb_stamps),
             "observed_rgb_stamp_sha256": stamp_sequence_sha256(rgb_stamps),
+            "camera_head_stamp_alignment": head_stamp_alignment,
             "observed_rgb_hz": (len(rgb_stamps) - 1) / (rgb_stamps[-1] - rgb_stamps[0]) if len(rgb_stamps) > 1 and rgb_stamps[-1] > rgb_stamps[0] else None,
             "observed_clock_samples": len(clock_stamps),
             "observed_lidar_clouds": len(lidar_stamps),
@@ -1530,6 +1747,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 "render_phase_offset_max_abs_s": None if not render_phase_offsets_s else max(abs(value) for value in render_phase_offsets_s),
             },
             "static_tf_topic": "/tf_static",
+            "dynamic_camera_tf_topic": "/tf",
+            "dynamic_camera_tf": {
+                "parent": FRAMES["sensor_rig"],
+                "child": FRAMES["camera_link"],
+                "timestamp_source": "Isaac timeline current_time",
+                "rotation_source": "configured camera pose_in_rig composed with trajectory sample camera_link_orientation_xyzw",
+            },
             "truth_tf_child_frame": FRAMES["truth_sensor_rig"],
             "lidar_config": lidar_spec,
             "timestamp_alignment": {
@@ -1548,6 +1772,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             },
             "rig_orientation_source": "trajectory.sample.orientation_xyzw",
             "last_rig_orientation_xyzw": list(sample.orientation_xyzw),
+            "last_camera_mount_orientation_xyzw": list(camera_mount_orientation(sample, scenario.camera)),
+            "camera_pose_source": "world camera_optical_frame composed from sampled rig, dynamic camera link, and static optical transform",
+            "camera_head_transforms": camera_head_artifact,
             "ground_truth_odometry_leakage": False,
             "representative_capture": capture_result,
             "ros_environment": ros_environment,

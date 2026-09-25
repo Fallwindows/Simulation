@@ -64,11 +64,18 @@ class ConfigTests(unittest.TestCase):
             "yaw_offset_deg": -23.0,
             "pitch_offset_deg": 10.0,
             "lateral_offset_m": -0.08,
+            "framing_target": "products_and_price_rail",
+            "allow_foreground_support_crop": True,
         }])
         self.assertEqual(_trajectory(valid).look_beats[0].center_s, 9.0)
+        self.assertTrue(_trajectory(valid).look_beats[0].allow_foreground_support_crop)
         with self.assertRaisesRegex(ValueError, "fit inside"):
             _trajectory(dict(base, look_beats=[dict(valid["look_beats"][0], center_s=1.0, rise_s=2.0)]))
         with self.assertRaisesRegex(ValueError, "non-overlapping"):
             _trajectory(dict(base, look_beats=[valid["look_beats"][0], {
                 "center_s": 10.0, "rise_s": 2.0, "fall_s": 1.0,
             }]))
+        with self.assertRaisesRegex(ValueError, "framing_target"):
+            _trajectory(dict(base, look_beats=[dict(valid["look_beats"][0], framing_target="plinth-ish")]))
+        with self.assertRaisesRegex(ValueError, "must be boolean"):
+            _trajectory(dict(base, look_beats=[dict(valid["look_beats"][0], allow_foreground_support_crop=1)]))

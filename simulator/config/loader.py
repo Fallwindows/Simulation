@@ -100,6 +100,8 @@ class LookBeatConfig:
     yaw_offset_deg: float
     pitch_offset_deg: float
     lateral_offset_m: float
+    framing_target: str = "products_and_price_rail"
+    allow_foreground_support_crop: bool = False
 
 
 @dataclass(frozen=True)
@@ -252,6 +254,17 @@ def _trajectory(data: dict[str, Any]) -> TrajectoryConfig:
         if index and start_s < previous_end_s:
             raise ValueError("trajectory.look_beats must be ordered and non-overlapping")
         previous_end_s = end_s
+        framing_target = raw.get("framing_target", "products_and_price_rail")
+        if framing_target not in {"products_and_price_rail", "full_support"}:
+            raise ValueError(
+                f"trajectory.look_beats[{index}].framing_target must be "
+                "products_and_price_rail or full_support"
+            )
+        allow_support_crop = raw.get("allow_foreground_support_crop", False)
+        if not isinstance(allow_support_crop, bool):
+            raise ValueError(
+                f"trajectory.look_beats[{index}].allow_foreground_support_crop must be boolean"
+            )
         look_beats.append(
             LookBeatConfig(
                 center_s=center_s,
@@ -260,6 +273,8 @@ def _trajectory(data: dict[str, Any]) -> TrajectoryConfig:
                 yaw_offset_deg=_finite(raw.get("yaw_offset_deg", 0.0), f"trajectory.look_beats[{index}].yaw_offset_deg"),
                 pitch_offset_deg=_finite(raw.get("pitch_offset_deg", 0.0), f"trajectory.look_beats[{index}].pitch_offset_deg"),
                 lateral_offset_m=_finite(raw.get("lateral_offset_m", 0.0), f"trajectory.look_beats[{index}].lateral_offset_m"),
+                framing_target=framing_target,
+                allow_foreground_support_crop=allow_support_crop,
             )
         )
     return TrajectoryConfig(
