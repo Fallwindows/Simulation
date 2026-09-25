@@ -1,0 +1,136 @@
+{
+  "spec_sha256": "6d0fae8094f5abfbf9e5180e8120e795752a54775d9914a6e006cd1fb9706966",
+  "manifest_sha256": "7a96ab10aa1e4b7c9c36523137b3580af64f1c8480563cfb615618a625b2e69f",
+  "images": [
+    {
+      "shot": 1,
+      "path": "references\\storyboard\\01_enter_aisle_rgb.png",
+      "sha256": "b068c43f1a5ff34d9d4573cfe641f0cc3f1fa9255c65f5ef57cb856bdecf6f0a",
+      "expected_sha256": "b068c43f1a5ff34d9d4573cfe641f0cc3f1fa9255c65f5ef57cb856bdecf6f0a",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 2,
+      "path": "references\\storyboard\\02_walk_forward_rgb.png",
+      "sha256": "1dd93c320ce31c79eaa1a40c7e3b96507656ae59ab28eadec7d94e089cfc77d7",
+      "expected_sha256": "1dd93c320ce31c79eaa1a40c7e3b96507656ae59ab28eadec7d94e089cfc77d7",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 3,
+      "path": "references\\storyboard\\03_explore_shelves_rgb.png",
+      "sha256": "09154a4f078b9d625c4cb80bd3a9e46397c49159338cdfba98929eab2dd39297",
+      "expected_sha256": "09154a4f078b9d625c4cb80bd3a9e46397c49159338cdfba98929eab2dd39297",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 4,
+      "path": "references\\storyboard\\04_approach_end_rgb.png",
+      "sha256": "3303fe6d984a99d5946a0edd1241751ce408f737076d59b74e1d208356363551",
+      "expected_sha256": "3303fe6d984a99d5946a0edd1241751ce408f737076d59b74e1d208356363551",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 5,
+      "path": "references\\storyboard\\05_look_at_products_rgb.png",
+      "sha256": "f9111fa7a641a68af08200ee966c7bb1c8a40cfe0542487b3bde620144234bca",
+      "expected_sha256": "f9111fa7a641a68af08200ee966c7bb1c8a40cfe0542487b3bde620144234bca",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 6,
+      "path": "references\\storyboard\\06_first_person_sensor_activation.png",
+      "sha256": "14ba4786710ea2f2c1fe2d5ec9d933599f6c99408850156e982e92a5f08804ca",
+      "expected_sha256": "14ba4786710ea2f2c1fe2d5ec9d933599f6c99408850156e982e92a5f08804ca",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 7,
+      "path": "references\\storyboard\\07_environment_lidar.png",
+      "sha256": "59ff6095d129bac1c33c4d7b364dad8a5a3a71704d6c39d0d3dec871ab018123",
+      "expected_sha256": "59ff6095d129bac1c33c4d7b364dad8a5a3a71704d6c39d0d3dec871ab018123",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 8,
+      "path": "references\\storyboard\\08_persistent_3d_map.png",
+      "sha256": "f7903b9164b5e7e2c3403b243a131bbc0399f225a63465f6ac05133ab495a22f",
+      "expected_sha256": "f7903b9164b5e7e2c3403b243a131bbc0399f225a63465f6ac05133ab495a22f",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 9,
+      "path": "references\\storyboard\\09_object_level_reconstruction.png",
+      "sha256": "baf57184e5955ff2cc51e895443b0bc92554525c30a56a6f420b5d3b807b9952",
+      "expected_sha256": "baf57184e5955ff2cc51e895443b0bc92554525c30a56a6f420b5d3b807b9952",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 10,
+      "path": "references\\storyboard\\10_object_details.png",
+      "sha256": "939e7f22d478d683a184d4deec7cd92649a609092cf8fd0e0937ddf8892ae189",
+      "expected_sha256": "939e7f22d478d683a184d4deec7cd92649a609092cf8fd0e0937ddf8892ae189",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 11,
+      "path": "references\\storyboard\\11_complete_aisle_map.png",
+      "sha256": "5dee1a798cb557bfb83f27a1f8b91819ba908df46d6ce608109dc26243ad9c42",
+      "expected_sha256": "5dee1a798cb557bfb83f27a1f8b91819ba908df46d6ce608109dc26243ad9c42",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "shot": 12,
+      "path": "references\\storyboard\\12_final_shot.png",
+      "sha256": "5061ad30addf9f9a5336f804e8e13ea78e148055b43164a2db50c029c0b57a77",
+      "expected_sha256": "5061ad30addf9f9a5336f804e8e13ea78e148055b43164a2db50c029c0b57a77",
+      "visually_inspected": true,
+      "width": 1672,
+      "height": 941
+    }
+  ],
+  "roles": [
+    {
+      "path": "agent_roles/orchestrator_agent.md",
+      "sha256": "95aaa613483275a5e1c4bef8cccb21ff3741cf99ea8a862f5dad27566ffe20c1",
+      "readable": true
+    },
+    {
+      "path": "agent_roles/programmer_agent.md",
+      "sha256": "7b3d6f96c59d7b3e9e6fb39654964b4b95e2f05f997b1b9fdfed1b41febaee22",
+      "readable": true
+    },
+    {
+      "path": "agent_roles/README.md",
+      "sha256": "c71575186a5f8dbff99289eb245a87e3bd938fe175619c337996f55131adda34",
+      "readable": true
+    },
+    {
+      "path": "agent_roles/reviewer_agent.md",
+      "sha256": "71afca1e2f0ae64c8be7719ce8f1e0a8ea2cbebaea30ebbf1ea62f3459836023",
+      "readable": true
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "function": "Get-FrameCount",
+  "language": "PowerShell",
+  "domain": {
+    "seconds": "nonnegative integer",
+    "fps": "positive integer"
+  },
+  "required_cases": [
+    { "seconds": 0, "fps": 30, "expected": 0 },
+    { "seconds": 1, "fps": 30, "expected": 30 },
+    { "seconds": 45, "fps": 30, "expected": 1350 }
+  ]
+}

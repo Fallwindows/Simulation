@@ -1,0 +1,80 @@
+{
+  "status": "complete",
+  "purpose": "forensic comparable before frame",
+  "source": {
+    "commit": "d5e825c8f6dab77aa6a1007c9731c226b588dfcf",
+    "tree": "a9d85319fb018a94de695d44d085633f19cdc008",
+    "workspace": "C:\\Users\\suyog\\OneDrive\\Documents\\ChatGPT\\Simulation",
+    "selected_inputs_match_head": true,
+    "input_sha256": {
+      "simulator/runtime/isaac_sim_runner.py": "ae3c24d94d59c1a7bcfa66504c01ffc7c758099aeacd20de372c0506e8d34beb",
+      "simulator/config/loader.py": "386a30d1633b1e228aa8b80a060499cf0dc010e79f9a26dd8adfdd13af0deee7",
+      "simulator/environment/isaac_builder.py": "1efdbf83e42a644fffb8389b09efa77b65f1bbddb31fb171b609ec48e6aa23a2",
+      "simulator/environment/aisle_builder.py": "6cbd79c48a4f7cacc57ddcb9bd8cfbf45289fe6bf9f7bab96b405cfff4b2d561",
+      "simulator/environment/retail_catalog.py": "cacab5119647eb38e86c939d8d3c043fb0444cebf714e4049479f971fde2d359",
+      "simulator/motion/trajectory.py": "f522e56d48da47d8df685066eb58fbf279fff1ebeb13dfba4911b430f74a5ac5",
+      "simulator/sensors/transforms.py": "b56b08e66341edbf223a62dd179a91584d0113462a93ef29449b44e52e0fc8ab",
+      "config/scenarios/walking_baseline.yaml": "d7adb75180e9f4db272d6f6cf98dceb7d1327864aa483d91036912d490abc483",
+      "config/environments/baseline_aisle.yaml": "d56968271f002f16c6ce616ccf0d70050ac2ecbf1e99720d7d38da30c57056d7",
+      "config/sensors/baseline_rgb_lidar.yaml": "3339a0cca53e079f8a16f2530fe67adefb28fd944c998112116f8cdcf898dc01",
+      "config/trajectories/walking.yaml": "f291c7c7a502709ac5c8ccbfefc7fd5a58a4c765aa040f561ccaf87394222b84",
+      "assets/retail/manifest.json": "431972a8931001380d119e1d5d18bf0d4d74d18f9d8f93a85e747597712d346a"
+    },
+    "script": "C:\\Users\\suyog\\OneDrive\\Documents\\ChatGPT\\Simulation\\review\\evidence\\forensic-preview-20260922\\capture_frozen_rgb_t020000ms.py",
+    "script_sha256": "f59cb8b31e29304d1bbb71c4be616d24e4400502513e70ef7767c8608ab259a6"
+  },
+  "runtime": {
+    "launcher": "C:/isaacsim/python.bat",
+    "isaac_version": "6.1.0-rc.26+release.49347.2d230af4.gl",
+    "renderer": "RaytracedLighting",
+    "headless": true,
+    "ros_enabled": false,
+    "opencv_used": false,
+    "capture_api": "omni.replicator.core rgb annotator + functional.write_image",
+    "rt_subframes": 8,
+    "captured_frame_count": 1
+  },
+  "scene": {
+    "scenario": "C:\\Users\\suyog\\OneDrive\\Documents\\ChatGPT\\Simulation\\config\\scenarios\\walking_baseline.yaml",
+    "camera_path": "/World/SensorRig/camera_link/camera_optical_frame",
+    "capture_time_s": 20.0,
+    "rig_position_m": [
+      21.5,
+      -1.5430549669256653e-16,
+      0.0
+    ],
+    "rig_orientation_xyzw": [
+      1.0072028557306334e-18,
+      0.013089595571344443,
+      -7.694023552746591e-17,
+      0.9999143275740071
+    ],
+    "primitive_count": 2305
+  },
+  "image": {
+    "path": "C:\\Users\\suyog\\OneDrive\\Documents\\ChatGPT\\Simulation\\review\\evidence\\forensic-preview-20260922\\before_rgb_t020000ms.png",
+    "width": 1280,
+    "height": 720,
+    "mode": "RGBA",
+    "channel_extrema": [
+      [
+        1,
+        243
+      ],
+      [
+        0,
+        237
+      ],
+      [
+        0,
+        243
+      ],
+      [
+        255,
+        255
+      ]
+    ],
+    "size_bytes": 402191,
+    "sha256": "094a3601d9737150fc7bc55a42baf083750f44e436b6e85a471a037313d41441"
+  }
+}

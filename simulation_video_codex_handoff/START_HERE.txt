@@ -1,0 +1,7 @@
+SUPERSEDED TRANSFER INSTRUCTIONS — do not copy this package over the repository.
+
+1. The canonical authority is the repository-root EXECUTION_OVERRIDES.md, AGENTS.md, SIMULATION_VIDEO_IMPLEMENTATION_SPEC.md, and agent_roles/ files.
+2. Use GPT-5.6 Sol with high reasoning effort for the orchestrator and every subagent, while keeping implementation and review in separate sessions.
+3. The current delivery is native 1920×1080 at 30 fps for exactly 45 seconds and 1,350 frames, with 720p previews and 4K deferred.
+4. Reuse IMPLEMENTATION_JOURNAL.md and review/setup-20260920/report.md. Do not reinstall these historical package defaults or repeat the artificial setup rehearsal.
+5. Use GOAL.txt only as a short pointer to the canonical root files.

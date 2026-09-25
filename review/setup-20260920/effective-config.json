@@ -1,0 +1,28 @@
+{
+  "model": "gpt-6-astra",
+  "effort": "medium",
+  "agents": {
+    "enabled": true,
+    "max_concurrent_threads_per_session": 6,
+    "max_depth": null,
+    "default_subagent_model": "gpt-5.6-luna",
+    "default_subagent_reasoning_effort": "high",
+    "job_max_runtime_seconds": null,
+    "interrupt_message": null
+  },
+  "layers": [
+    {
+      "type": "project",
+      "dotCodexFolder": "C:\\Users\\suyog\\OneDrive\\Documents\\ChatGPT\\Simulation\\.codex"
+    },
+    {
+      "type": "user",
+      "file": "C:\\Users\\suyog\\.codex\\config.toml",
+      "profile": null
+    },
+    {
+      "type": "system",
+      "file": "C:\\ProgramData\\OpenAI\\Codex\\config.toml"
+    }
+  ]
+}
