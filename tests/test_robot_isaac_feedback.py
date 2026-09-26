@@ -29,6 +29,7 @@ from robot_spike.production.locomotion import (
     LocomotionFeedback,
     PlanarPose,
 )
+from robot_spike.production.model import load_production_spec
 from robot_spike.production.run_locomotion_smoke import (
     EVIDENCE_FILES,
     ISAAC_API_SOURCE_FILES,
@@ -44,6 +45,7 @@ from robot_spike.production.run_locomotion_smoke import (
     _startup_feedback_failures,
     _settle_gated_ramp_targets,
     _staged_double_support_startup,
+    _supported_zero_pose_reset,
     _terminate_process,
     _validate_arguments,
     acceptance_spec_identity,
@@ -675,6 +677,44 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(len(gait_commands), 1)
         self.assertLess(startup_calls[0], gait_constructors[0])
         self.assertLess(gait_constructors[0], gait_commands[0])
+
+        reset_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "reset"
+        ]
+        self.assertEqual(len(reset_calls), 1)
+        reset_keywords = {keyword.arg for keyword in reset_calls[0].keywords}
+        self.assertEqual(reset_keywords, {"root_position_m"})
+
+    def test_supported_zero_pose_reset_is_derived_from_exact_urdf_geometry(self):
+        spec = load_production_spec(ROOT / "robot_spike" / "production")
+        supported = _supported_zero_pose_reset(spec)
+
+        self.assertEqual(spec.root_position_m, (0.0, 0.0, 0.635))
+        self.assertAlmostEqual(supported["root_position_m"][2], 0.630346, places=12)
+        self.assertAlmostEqual(
+            supported["configured_zero_pose_floor_gap_m"], 0.004654, places=12
+        )
+        self.assertAlmostEqual(
+            supported["maximum_seeded_penetration_m"], 0.00000133615, places=12
+        )
+        self.assertLessEqual(
+            supported["seeded_plane_spread_m"], supported["plane_tolerance_m"]
+        )
+        self.assertTrue(
+            all(
+                abs(value) <= 1.0e-12
+                for value in supported["seeded_sphere_low_z_world_m"]["right"]
+            )
+        )
+
+    def test_supported_zero_pose_reset_fails_closed_on_incompatible_plane(self):
+        spec = load_production_spec(ROOT / "robot_spike" / "production")
+        with self.assertRaisesRegex(ValueError, "support-plane tolerance"):
+            _supported_zero_pose_reset(spec, plane_tolerance_m=1.0e-7)
 
     def test_smoke_arguments_fail_before_isaac_for_invalid_values(self):
         valid = {

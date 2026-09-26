@@ -399,6 +399,26 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-e95721e\locomotion_smoke_status.json`;
   the Kit log is
   `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_073705.log`.
+- `RST-004-F15`: exact integration
+  `efdf53e222bfd4321f03a58811a03c44cc81dddb` failed closed during pre-ramp
+  stabilization at step 126 and 1.116667 s. Root tilt reached 0.213279 rad
+  against the unchanged 0.20944 rad gate; speed was 0.25449 m/s, angular
+  speed was 0.55367 rad/s, and measured support margin was -0.0593401 m.
+  No ramp or gait command ran. The trace starts with the configured root at
+  Z=0.635 m and authored zero-pose sphere lows 4.654 mm above the floor. It
+  then records free fall to Z=0.630339 m, bilateral impact near 795/816 N,
+  and monotonic pitch/COM drift while the all-zero drive targets are held.
+  The successor derives the **sole explicit reset** root height from the exact
+  production URDF zero-pose chain and authored sole collision spheres. It uses
+  Z=0.630346 m: all right sphere lows are on Z=0 and all left lows penetrate
+  only 1.33615 micrometres, with a 1.33615 micrometre bilateral spread inside
+  the unchanged 0.5 mm support-plane tolerance. Joint reset values remain
+  all zero. After that reset, motion still uses drive position targets only;
+  every contact, stability, clearance, sole-angle, tracking, and handoff gate
+  remains unchanged and fail closed. The receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-efdf53e\locomotion_smoke_status.json`;
+  the Kit log is
+  `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_075615.log`.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 

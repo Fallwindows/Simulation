@@ -17,6 +17,7 @@ from pathlib import Path
 import subprocess
 import sys
 import traceback
+import xml.etree.ElementTree as ET
 from typing import Any, Callable
 
 from robot_spike.production.isaac_feedback import (
@@ -37,7 +38,7 @@ from robot_spike.production.locomotion import (
     PlanarPose,
     symmetric_crouch_targets,
 )
-from robot_spike.production.model import load_production_spec
+from robot_spike.production.model import ProductionRobotSpec, load_production_spec
 from robot_spike.production.runtime import ArticulationController, IsaacRobotLoader
 
 
@@ -71,6 +72,168 @@ ISAAC_API_SOURCE_FILES = (
     "exts/isaacsim.core.simulation_manager/isaacsim/core/simulation_manager/impl/simulation_manager.py",
     "extscache/omni.physics.tensors-110.3.2+110.3.0.wx64.r.cp312.u7f4/omni/physics/tensors/api.py",
 )
+
+
+RotationMatrix = tuple[tuple[float, float, float], ...]
+RigidTransform = tuple[RotationMatrix, tuple[float, float, float]]
+
+
+def _rotation_from_rpy(rpy: tuple[float, float, float]) -> RotationMatrix:
+    roll, pitch, yaw = rpy
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return (
+        (cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr),
+        (sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr),
+        (-sp, cp * sr, cp * cr),
+    )
+
+
+def _matrix_multiply(
+    left: RotationMatrix,
+    right: RotationMatrix,
+) -> RotationMatrix:
+    values = tuple(
+        tuple(
+            sum(left[row][k] * right[k][column] for k in range(3))
+            for column in range(3)
+        )
+        for row in range(3)
+    )
+    return values  # type: ignore[return-value]
+
+
+def _rotate_vector(
+    rotation: RotationMatrix, vector: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    return tuple(
+        sum(rotation[row][column] * vector[column] for column in range(3))
+        for row in range(3)
+    )  # type: ignore[return-value]
+
+
+def _supported_zero_pose_reset(
+    spec: ProductionRobotSpec,
+    *,
+    floor_z_m: float = 0.0,
+    plane_tolerance_m: float = 0.0005,
+) -> dict[str, Any]:
+    """Derive the sole explicit reset height from zero-pose URDF sole geometry."""
+
+    if not math.isfinite(floor_z_m):
+        raise ValueError("reset support floor height must be finite")
+    if not math.isfinite(plane_tolerance_m) or plane_tolerance_m <= 0.0:
+        raise ValueError("reset support plane tolerance must be finite and positive")
+    if any(abs(float(spec.reset_joint_positions[name])) > 1.0e-12 for name in LEG_JOINTS):
+        raise ValueError("supported reset derivation requires zero leg joint positions")
+    expected_orientation = (1.0, 0.0, 0.0, 0.0)
+    if any(
+        abs(float(observed) - expected) > 1.0e-12
+        for observed, expected in zip(spec.root_orientation_wxyz, expected_orientation)
+    ):
+        raise ValueError("supported reset derivation requires identity root orientation")
+
+    try:
+        robot = ET.parse(spec.model.path).getroot()
+    except (ET.ParseError, OSError) as exc:
+        raise ValueError(f"cannot parse production URDF for supported reset: {exc}") from exc
+
+    joint_by_child: dict[
+        str,
+        tuple[str, tuple[float, float, float], tuple[float, float, float]],
+    ] = {}
+    for joint in robot.findall("joint"):
+        parent = joint.find("parent")
+        child = joint.find("child")
+        if parent is None or child is None:
+            raise ValueError("production URDF joint lacks parent or child")
+        origin = joint.find("origin")
+        xyz_text = "0 0 0" if origin is None else origin.attrib.get("xyz", "0 0 0")
+        rpy_text = "0 0 0" if origin is None else origin.attrib.get("rpy", "0 0 0")
+        try:
+            xyz = tuple(float(value) for value in xyz_text.split())
+            rpy = tuple(float(value) for value in rpy_text.split())
+        except ValueError as exc:
+            raise ValueError("production URDF joint origin is not numeric") from exc
+        if len(xyz) != 3 or len(rpy) != 3 or not all(
+            math.isfinite(value) for value in (*xyz, *rpy)
+        ):
+            raise ValueError("production URDF joint origin must contain finite xyz/rpy triples")
+        joint_by_child[child.attrib["link"]] = (
+            parent.attrib["link"],
+            xyz,  # type: ignore[arg-type]
+            rpy,  # type: ignore[arg-type]
+        )
+
+    identity = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    transforms: dict[str, RigidTransform] = {
+        spec.model.root_link: (identity, (0.0, 0.0, 0.0))
+    }
+
+    def transform(link_name: str) -> RigidTransform:
+        if link_name in transforms:
+            return transforms[link_name]
+        if link_name not in joint_by_child:
+            raise ValueError(f"no URDF chain from root to {link_name!r}")
+        parent_name, origin_xyz, origin_rpy = joint_by_child[link_name]
+        parent_rotation, parent_position = transform(parent_name)
+        rotated_origin = _rotate_vector(parent_rotation, origin_xyz)
+        position = tuple(
+            parent_position[index] + rotated_origin[index] for index in range(3)
+        )
+        rotation = _matrix_multiply(parent_rotation, _rotation_from_rpy(origin_rpy))
+        transforms[link_name] = (rotation, position)  # type: ignore[arg-type]
+        return transforms[link_name]
+
+    relative_lows: dict[str, list[float]] = {}
+    for side in ("left", "right"):
+        rotation, position = transform(f"{side}_ankle_roll_link")
+        lows = []
+        for center in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m:
+            rotated_center = _rotate_vector(rotation, center)
+            lows.append(
+                position[2]
+                + rotated_center[2]
+                - ASIMOV_SOLE_GEOMETRY.contact_sphere_radius_m
+            )
+        relative_lows[side] = lows
+
+    all_relative_lows = [value for lows in relative_lows.values() for value in lows]
+    supported_root_z = floor_z_m - max(all_relative_lows)
+    supported_world_lows = {
+        side: [supported_root_z + value for value in lows]
+        for side, lows in relative_lows.items()
+    }
+    all_world_lows = [value for lows in supported_world_lows.values() for value in lows]
+    plane_spread = max(all_world_lows) - min(all_world_lows)
+    if plane_spread > plane_tolerance_m:
+        raise ValueError(
+            "zero-pose bilateral sole geometry exceeds the existing support-plane tolerance"
+        )
+    configured_gap = float(spec.root_position_m[2]) + max(all_relative_lows) - floor_z_m
+    if configured_gap < 0.0:
+        raise ValueError("configured reset already penetrates the zero-pose support plane")
+
+    root_position = (
+        float(spec.root_position_m[0]),
+        float(spec.root_position_m[1]),
+        supported_root_z,
+    )
+    return {
+        "root_position_m": list(root_position),
+        "root_orientation_wxyz": list(spec.root_orientation_wxyz),
+        "joint_pose": "configured all-zero reset joint positions",
+        "floor_z_m": floor_z_m,
+        "source": "production URDF zero-pose ankle chain plus authored sole collision spheres",
+        "configured_root_position_m": list(spec.root_position_m),
+        "configured_zero_pose_floor_gap_m": configured_gap,
+        "sphere_low_z_relative_root_m": relative_lows,
+        "seeded_sphere_low_z_world_m": supported_world_lows,
+        "seeded_plane_spread_m": plane_spread,
+        "maximum_seeded_penetration_m": max(0.0, floor_z_m - min(all_world_lows)),
+        "plane_tolerance_m": plane_tolerance_m,
+    }
 
 
 def _arguments(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1267,6 +1430,11 @@ def run_isaac(
             SimulationManager.get_simulation_time,
             maximum_contact_age_s=2.5 * physics_dt,
         )
+        supported_reset = _supported_zero_pose_reset(
+            spec,
+            floor_z_m=0.0,
+            plane_tolerance_m=adapter.support_plane_tolerance_m,
+        )
         guard = EvidenceIdentityGuard(
             initial_identity,
             lambda: evidence_identity(
@@ -1316,6 +1484,7 @@ def run_isaac(
                     ),
                     "inset_fraction": adapter.inferred_support_inset_fraction,
                 },
+                "locomotion_reset": supported_reset,
             },
             "parameters": {
                 "repeats": args.repeats,
@@ -1326,6 +1495,9 @@ def run_isaac(
             },
             "state_write_policy": {
                 "explicit_reset_per_repeat": True,
+                "explicit_reset_root_position_source": (
+                    "production URDF zero-pose ankle chain and authored sole spheres"
+                ),
                 "post_reset_root_writes": 0,
                 "post_reset_joint_position_writes": 0,
                 "normal_motion_command": "set_dof_position_targets via ArticulationController",
@@ -1354,7 +1526,12 @@ def run_isaac(
             )
             # This is the only state-writing operation in a repeat.  Every
             # later robot command is a drive target and physics advances state.
-            joint_controller.reset()
+            repeat_result["reset_root_position_m"] = list(
+                supported_reset["root_position_m"]
+            )
+            joint_controller.reset(
+                root_position_m=supported_reset["root_position_m"]
+            )
             recording_source = _RecordingFeedbackSource(adapter)
             startup_balance = BalanceFeedbackController()
             startup_target_generator = ConservativeGaitTargetGenerator(spec)
