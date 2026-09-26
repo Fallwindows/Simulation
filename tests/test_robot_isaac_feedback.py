@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from argparse import Namespace
 import copy
+import contextlib
 from dataclasses import dataclass
 import hashlib
 import io
@@ -22,6 +23,7 @@ from robot_spike.production.run_locomotion_smoke import (
     EVIDENCE_FILES,
     EvidenceIdentityGuard,
     EvidenceIdentityMismatchError,
+    _execute_smoke,
     _record_identity_boundary,
     _validate_arguments,
     acceptance_spec_identity,
@@ -366,6 +368,80 @@ class IsaacFeedbackTests(unittest.TestCase):
         persisted = json.loads(status_path.text)
         self.assertEqual(persisted["identity_checks"][0]["phase"], "final_success")
         self.assertEqual(persisted["identity_checks"][0]["status"], "mismatch")
+
+    def test_preflight_identity_failures_are_durable_and_do_not_launch_runtime(self):
+        class MemoryStatusFile:
+            def __init__(self):
+                self.text = ""
+
+            def write_text(self, text, **_kwargs):
+                self.text = text
+
+            def is_file(self):
+                return bool(self.text)
+
+            def read_text(self, **_kwargs):
+                return self.text
+
+        class MemoryOutput:
+            def __init__(self):
+                self.created = False
+                self.status = MemoryStatusFile()
+
+            def resolve(self):
+                return self
+
+            def exists(self):
+                return False
+
+            def mkdir(self, **_kwargs):
+                self.created = True
+
+            def __truediv__(self, name):
+                self.assert_status_name = name
+                return self.status
+
+            def __str__(self):
+                return "memory://smoke-output"
+
+        for error in (
+            "acceptance specification is missing: owner.md",
+            "source identity changed: production_manifest.json",
+        ):
+            with self.subTest(error=error):
+                output = MemoryOutput()
+                launched = {"value": False}
+
+                def identity_reader(*_args, **_kwargs):
+                    raise RuntimeError(error)
+
+                def runtime_runner(*_args, **_kwargs):
+                    launched["value"] = True
+                    raise AssertionError("runtime must not launch after preflight failure")
+
+                args = Namespace(
+                    output=output,
+                    expected_candidate_sha="candidate",
+                    expected_candidate_tree_sha="tree",
+                    acceptance_spec=Path("owner.md"),
+                )
+                with contextlib.redirect_stderr(io.StringIO()):
+                    exit_code = _execute_smoke(
+                        args,
+                        ROOT,
+                        identity_reader=identity_reader,
+                        runtime_runner=runtime_runner,
+                    )
+                self.assertEqual(exit_code, 2)
+                self.assertTrue(output.created)
+                self.assertEqual(
+                    output.assert_status_name, "locomotion_smoke_status.json"
+                )
+                report = json.loads(output.status.text)
+                self.assertEqual(report["phase"], "preflight_identity")
+                self.assertFalse(report["runtime_invoked"])
+                self.assertEqual(report["error"], error)
+                self.assertFalse(launched["value"])
 
 
 if __name__ == "__main__":

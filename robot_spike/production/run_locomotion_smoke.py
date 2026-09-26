@@ -706,34 +706,69 @@ def _repeatability(repeats: list[dict[str, Any]]) -> dict[str, Any]:
     return {"available": True, "reference_repeat_index": 0, "comparisons": comparisons}
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _arguments(argv)
-    _validate_arguments(args)
-    repo = Path(__file__).resolve().parents[2]
+def _execute_smoke(
+    args: argparse.Namespace,
+    repo: Path,
+    *,
+    identity_reader: Callable[..., dict[str, Any]] = evidence_identity,
+    runtime_runner: Callable[..., dict[str, Any]] = run_isaac,
+) -> int:
+    """Run preflight and runtime while durably reporting every identity failure."""
+
     output = args.output.resolve()
     if output.exists():
         raise RuntimeError(f"refusing to overwrite output: {output}")
-    initial_identity = evidence_identity(
-        repo,
-        args.expected_candidate_sha,
-        args.expected_candidate_tree_sha,
-        args.acceptance_spec,
-        require_clean=True,
-    )
     output.mkdir(parents=True)
+    status_path = output / "locomotion_smoke_status.json"
     try:
-        result = run_isaac(args, repo, initial_identity, output)
+        initial_identity = identity_reader(
+            repo,
+            args.expected_candidate_sha,
+            args.expected_candidate_tree_sha,
+            args.acceptance_spec,
+            require_clean=True,
+        )
+    except BaseException as exc:
+        failure = {
+            "schema_version": 1,
+            "status": "error",
+            "phase": "preflight_identity",
+            "runtime_invoked": False,
+            "requested_identity": {
+                "expected_candidate_sha": args.expected_candidate_sha,
+                "expected_candidate_tree_sha": args.expected_candidate_tree_sha,
+                "acceptance_spec_path": str(args.acceptance_spec),
+                "expected_acceptance_spec_sha256": OWNER_SPEC_SHA256,
+            },
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+        try:
+            status_path.write_text(
+                json.dumps(failure, indent=2) + "\n", encoding="utf-8"
+            )
+        except Exception as report_exc:
+            failure["status_report_error"] = (
+                f"{type(report_exc).__name__}: {report_exc}"
+            )
+        print(json.dumps(failure, indent=2), file=sys.stderr, flush=True)
+        return 2
+
+    try:
+        result = runtime_runner(args, repo, initial_identity, output)
     except BaseException as exc:
         partial_result = None
-        partial_path = output / "locomotion_smoke_status.json"
-        if partial_path.is_file():
+        if status_path.is_file():
             try:
-                partial_result = json.loads(partial_path.read_text(encoding="utf-8"))
+                partial_result = json.loads(status_path.read_text(encoding="utf-8"))
             except Exception:
                 partial_result = {"status": "unreadable_partial_status"}
         failure = {
             "schema_version": 1,
             "status": "error",
+            "phase": "runtime",
+            "runtime_invoked": True,
             "initial_evidence_identity": initial_identity,
             "initial_evidence_identity_sha256": _identity_sha256(initial_identity),
             "error_type": type(exc).__name__,
@@ -741,13 +776,20 @@ def main(argv: list[str] | None = None) -> int:
             "traceback": traceback.format_exc(),
             "partial_result": partial_result,
         }
-        (output / "locomotion_smoke_status.json").write_text(
+        status_path.write_text(
             json.dumps(failure, indent=2) + "\n", encoding="utf-8"
         )
         print(json.dumps(failure, indent=2), file=sys.stderr, flush=True)
         return 2
     print(json.dumps(result, indent=2), flush=True)
     return 0 if result["status"] == "pass" else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _arguments(argv)
+    _validate_arguments(args)
+    repo = Path(__file__).resolve().parents[2]
+    return _execute_smoke(args, repo)
 
 
 if __name__ == "__main__":

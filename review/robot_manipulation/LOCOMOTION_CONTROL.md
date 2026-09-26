@@ -185,6 +185,11 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   candidate/input, and installed-API identity vector is re-read at the start
   and end of every repeat and immediately before final success. Every check is
   persisted; missing or changed input aborts with a nonzero result.
+- `RST-004-F03`: addressed in the follow-up revision. The harness creates the
+  requested exclusive output directory before identity preflight and catches
+  every missing, changed, or unavailable identity input. It writes a
+  `preflight_identity` error report with `runtime_invoked: false` and returns
+  nonzero without calling the Isaac runtime boundary.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -217,8 +222,9 @@ margin, invalid/stale/missing sensor failure, malformed data failure, and static
 confirmation that the future smoke harness contains no direct root/joint state
 setter call. Invalid, nonfinite, or nonpositive run arguments are also checked
 through the CPU-safe preflight boundary. Regression cases mutate or remove the
-acceptance spec, manifest hash, and installed-API hash and verify that repeat
-and final checks fail closed after persisting the mismatch.
+acceptance spec, manifest hash, and installed-API hash and verify that preflight,
+repeat, and final checks fail closed after persisting the mismatch. Launcher
+sentinels confirm preflight failures do not call the runtime boundary.
 
 ## Future one-job evidence harness
 
@@ -228,11 +234,13 @@ entry point. Importing it does not import Isaac. Before constructing
 tree SHAs. It opens and hashes the actual owner acceptance spec, the production
 manifest, runtime configuration, production and approved-source URDFs, every
 relevant source/test/report input, and every local Isaac API source file on
-which the adapter depends. The preserved initial vector is re-read and compared
-at both boundaries of every repeat and before final success. Checks, including
-failures, are written to the durable status report; a missing or changed byte
-prevents a passing result. A run uses a fixed physics rate, verifies metre stage
-units, performs one explicit
+which the adapter depends. The exclusive output directory is created before
+this identity read; a preflight error is durably recorded there and returns
+nonzero before the Isaac runtime boundary is called. The preserved initial
+vector is re-read and compared at both boundaries of every repeat and before
+final success. Checks, including failures, are written to the durable status
+report; a missing or changed byte prevents a passing result. A run uses a fixed
+physics rate, verifies metre stage units, performs one explicit
 deterministic reset per repeat, and uses only drive position targets after each
 reset. It writes every controller step to one JSONL measured sample stream per
 repeat plus an incrementally durable status report containing root motion,
