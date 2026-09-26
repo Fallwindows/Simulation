@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -55,6 +56,7 @@ EVIDENCE_FILES = (
 )
 ISAAC_API_SOURCE_FILES = (
     "VERSION",
+    "python.bat",
     "exts/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py",
     "exts/isaacsim.core.experimental.prims/isaacsim/core/experimental/prims/impl/articulation.py",
     "exts/isaacsim.core.experimental.prims/isaacsim/core/experimental/prims/impl/rigid_prim.py",
@@ -315,6 +317,8 @@ def _sample(step: int, command, feedback, adapter) -> dict[str, Any]:
         "contact_force_n": dict(adapter.last_contact_forces_n),
         "contact_time_s": dict(adapter.last_contact_times_s),
         "contact_point_count": dict(adapter.last_contact_point_counts),
+        "contact_diagnostics": adapter.diagnostics()["contacts"],
+        "support_diagnostics": adapter.diagnostics()["support"],
         "com_position_world_m": list(feedback.com_position_world_m),
         "support_center_world_m": list(feedback.support_center_world_m),
         "support_margin_m": feedback.support_margin_m,
@@ -327,6 +331,55 @@ def _sample(step: int, command, feedback, adapter) -> dict[str, Any]:
         "joint_velocity_rad_s": dict(feedback.joint_velocity_rad_s),
         "commanded_joint_targets_rad": dict(command.joint_targets_rad),
     }
+
+
+def _persist_feedback_failure(
+    *,
+    adapter: Isaac61LocomotionFeedbackAdapter,
+    repeat_result: dict[str, Any],
+    result: dict[str, Any],
+    status_path: Path,
+    phase: str,
+    error: FeedbackUnavailableError,
+) -> None:
+    """Persist sensor and support evidence before a feedback error unwinds."""
+
+    repeat_result["feedback_failure"] = {
+        "phase": phase,
+        "error_type": type(error).__name__,
+        "error": str(error),
+        "diagnostics": adapter.diagnostics(),
+    }
+    status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+
+
+def _persist_pre_shutdown_runtime_error(
+    *,
+    initial_identity: dict[str, Any],
+    status_path: Path,
+    error: BaseException,
+    partial_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Write terminal error state before SimulationApp shutdown can intervene."""
+
+    report = partial_result if partial_result is not None else {
+        "schema_version": 1,
+        "initial_evidence_identity": initial_identity,
+        "initial_evidence_identity_sha256": _identity_sha256(initial_identity),
+        "repeats": [],
+    }
+    report.update(
+        {
+            "status": "error",
+            "phase": "runtime",
+            "shutdown_returned": False,
+            "error_type": type(error).__name__,
+            "error": str(error),
+            "traceback": traceback.format_exc(),
+        }
+    )
+    status_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return report
 
 
 def _repeat_metrics(
@@ -458,18 +511,20 @@ def run_isaac(
     # the explicit heavy-job action; importing the harness is CPU-safe.
     from isaacsim import SimulationApp
 
-    simulation_app = SimulationApp(
-        {
-            "headless": bool(args.headless),
-            "renderer": "RaytracedLighting",
-            # Isaac Sim 6.1 defaults this to True, and close() then terminates
-            # through os._exit().  Graceful shutdown must return so runtime
-            # exceptions and exit status reach _execute_smoke's durable report.
-            "fast_shutdown": False,
-        }
-    )
+    simulation_app = None
     timeline = None
+    status_path = output / "locomotion_smoke_status.json"
     try:
+        simulation_app = SimulationApp(
+            {
+                "headless": bool(args.headless),
+                "renderer": "RaytracedLighting",
+                # Isaac Sim 6.1 defaults this to True, and close() then terminates
+                # through os._exit().  Graceful shutdown must return so runtime
+                # exceptions and exit status reach _execute_smoke's durable report.
+                "fast_shutdown": False,
+            }
+        )
         import omni.timeline
         import omni.usd
         from isaacsim.core.experimental.prims import Articulation, RigidPrim
@@ -585,7 +640,18 @@ def run_isaac(
                 "sole_geometry": {
                     "reference_m": list(ASIMOV_SOLE_GEOMETRY.reference_m),
                     "support_vertices_m": [list(vertex) for vertex in ASIMOV_SOLE_GEOMETRY.support_vertices_m],
+                    "contact_sphere_radius_m": ASIMOV_SOLE_GEOMETRY.contact_sphere_radius_m,
                     "source": "production URDF ankle-roll collision spheres",
+                },
+                "support_inference": {
+                    "enabled_only_when_raw_hull_is_insufficient": True,
+                    "requires_positive_contact_force": True,
+                    "plane_tolerance_m": adapter.support_plane_tolerance_m,
+                    "raw_point_sphere_xy_tolerance_m": (
+                        ASIMOV_SOLE_GEOMETRY.contact_sphere_radius_m
+                        + adapter.support_plane_tolerance_m
+                    ),
+                    "inset_fraction": adapter.inferred_support_inset_fraction,
                 },
             },
             "parameters": {
@@ -603,7 +669,6 @@ def run_isaac(
             },
             "repeats": [],
         }
-        status_path = output / "locomotion_smoke_status.json"
         status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
 
         settle_steps = max(1, math.ceil(args.settle_s / physics_dt))
@@ -632,7 +697,18 @@ def run_isaac(
             SimulationManager.step(steps=settle_steps)
 
             recording_source = _RecordingFeedbackSource(adapter)
-            initial = recording_source.read_feedback()
+            try:
+                initial = recording_source.read_feedback()
+            except FeedbackUnavailableError as exc:
+                _persist_feedback_failure(
+                    adapter=adapter,
+                    repeat_result=repeat_result,
+                    result=result,
+                    status_path=status_path,
+                    phase="initial_post_settle_feedback",
+                    error=exc,
+                )
+                raise
             target = PlanarPose(
                 initial.root_pose.x_m + args.forward_m,
                 initial.root_pose.y_m,
@@ -644,7 +720,18 @@ def run_isaac(
             command = None
             with sample_path.open("x", encoding="utf-8") as sample_stream:
                 for step in range(timeout_steps):
-                    command = controller.update()
+                    try:
+                        command = controller.update()
+                    except FeedbackUnavailableError as exc:
+                        _persist_feedback_failure(
+                            adapter=adapter,
+                            repeat_result=repeat_result,
+                            result=result,
+                            status_path=status_path,
+                            phase=f"controller_feedback_step_{step}",
+                            error=exc,
+                        )
+                        raise
                     feedback = recording_source.last
                     if feedback is None:
                         raise FeedbackUnavailableError("controller update produced no feedback sample")
@@ -689,13 +776,22 @@ def run_isaac(
         result["status"] = "pass" if all_repeats_passed else "fail"
         status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         return result
+    except BaseException as exc:
+        _persist_pre_shutdown_runtime_error(
+            initial_identity=initial_identity,
+            status_path=status_path,
+            error=exc,
+            partial_result=locals().get("result"),
+        )
+        raise
     finally:
         if timeline is not None:
             try:
                 timeline.stop()
             except Exception:
                 pass
-        simulation_app.close()
+        if simulation_app is not None:
+            simulation_app.close()
 
 
 def _repeatability(repeats: list[dict[str, Any]]) -> dict[str, Any]:
@@ -808,5 +904,18 @@ def main(argv: list[str] | None = None) -> int:
     return _execute_smoke(args, repo)
 
 
+def _terminate_process(
+    exit_code: int, *, hard_exit: Callable[[int], object] = os._exit
+) -> None:
+    """Flush reports, then set kit.exe's status for the python.bat launcher."""
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    hard_exit(int(exit_code))
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _terminate_process(main())

@@ -13,6 +13,7 @@ from pathlib import Path
 import unittest
 
 from robot_spike.production.isaac_feedback import (
+    ASIMOV_SOLE_GEOMETRY,
     FeedbackUnavailableError,
     Isaac61LocomotionFeedbackAdapter,
     convex_hull_xy,
@@ -21,10 +22,14 @@ from robot_spike.production.isaac_feedback import (
 from robot_spike.production.locomotion import LEG_JOINTS
 from robot_spike.production.run_locomotion_smoke import (
     EVIDENCE_FILES,
+    ISAAC_API_SOURCE_FILES,
     EvidenceIdentityGuard,
     EvidenceIdentityMismatchError,
     _execute_smoke,
+    _persist_feedback_failure,
+    _persist_pre_shutdown_runtime_error,
     _record_identity_boundary,
+    _terminate_process,
     _validate_arguments,
     acceptance_spec_identity,
 )
@@ -141,6 +146,7 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertAlmostEqual(feedback.com_position_world_m[2], 0.4868)
         self.assertGreater(feedback.support_margin_m, 0.0)
         self.assertEqual(adapter.last_contact_forces_n, {"left": 150.0, "right": 150.0})
+        self.assertEqual(adapter.diagnostics()["contacts"]["left"]["age_s"], 0.0)
 
     def test_single_contact_uses_only_that_sole_polygon(self):
         feedback = self.adapter(right=Reading(in_contact=False, value=0.0)).read_feedback()
@@ -148,6 +154,87 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertFalse(feedback.right_foot.in_contact)
         self.assertAlmostEqual(feedback.support_center_world_m[1], 2.10, places=7)
         self.assertLess(feedback.support_margin_m, 0.0)
+
+    def test_reduced_raw_contacts_use_only_gated_inset_urdf_support(self):
+        adapter = Isaac61LocomotionFeedbackAdapter(
+            FakeArticulation(),
+            FakeLinks(),
+            FakeSensor(Reading(), [(0.955, 2.080, 0.0)]),
+            FakeSensor(Reading(), [(1.122, 1.928, 0.0)]),
+            lambda: 1.0,
+            maximum_contact_age_s=0.01,
+        )
+
+        feedback = adapter.read_feedback()
+        diagnostics = adapter.diagnostics()
+
+        self.assertTrue(feedback.left_foot.in_contact)
+        self.assertTrue(feedback.right_foot.in_contact)
+        self.assertEqual(
+            diagnostics["support"]["source"], "contact_conditioned_urdf_inset"
+        )
+        self.assertEqual(diagnostics["support"]["raw_point_count"], 2)
+        self.assertEqual(
+            diagnostics["contacts"]["left"]["raw_points_world_m"],
+            [[0.955, 2.08, 0.0]],
+        )
+        inferred = diagnostics["support"]["support_points_world_m"]
+        self.assertEqual(len(inferred), 8)
+        inferred_left_width = max(point[0] for point in inferred[:4]) - min(
+            point[0] for point in inferred[:4]
+        )
+        authored_width = (
+            max(point[0] for point in ASIMOV_SOLE_GEOMETRY.support_vertices_m)
+            - min(point[0] for point in ASIMOV_SOLE_GEOMETRY.support_vertices_m)
+        )
+        self.assertAlmostEqual(inferred_left_width, 0.5 * authored_width)
+
+    def test_reduced_contacts_fail_closed_with_complete_geometry_diagnostics(self):
+        adapter = Isaac61LocomotionFeedbackAdapter(
+            FakeArticulation(),
+            FakeLinks(),
+            FakeSensor(Reading(), [(9.0, 9.0, 0.0)]),
+            FakeSensor(Reading(in_contact=False, value=0.0), []),
+            lambda: 1.0,
+            maximum_contact_age_s=0.01,
+        )
+
+        with self.assertRaisesRegex(
+            FeedbackUnavailableError, "raw contact is outside its sole spheres"
+        ):
+            adapter.read_feedback()
+        diagnostics = adapter.diagnostics()
+        self.assertEqual(
+            diagnostics["contacts"]["left"]["raw_points_world_m"],
+            [[9.0, 9.0, 0.0]],
+        )
+        self.assertIn("three distinct finite points", diagnostics["support"]["raw_hull_error"])
+        gate = diagnostics["support"]["contact_conditioned_feet"]["left"]
+        self.assertGreater(gate["maximum_raw_point_to_sphere_xy_distance_m"], 1.0)
+        self.assertEqual(gate["error"], "raw point does not match an authored contact sphere")
+
+    def test_reduced_contacts_do_not_infer_support_from_a_non_coplanar_sole(self):
+        links = FakeLinks()
+        links.get_world_poses = lambda: (
+            Array([[1.0, 2.0, 0.60], [1.0, 2.10, 0.036], [1.0, 1.90, 0.034]]),
+            Array([[1.0, 0.0, 0.0, 0.0]] * 3),
+        )
+        adapter = Isaac61LocomotionFeedbackAdapter(
+            FakeArticulation(),
+            links,
+            FakeSensor(Reading(), [(0.955, 2.080, 0.0)]),
+            FakeSensor(Reading(in_contact=False, value=0.0), []),
+            lambda: 1.0,
+            maximum_contact_age_s=0.01,
+        )
+
+        with self.assertRaisesRegex(FeedbackUnavailableError, "sole is not coplanar"):
+            adapter.read_feedback()
+        gate = adapter.diagnostics()["support"]["contact_conditioned_feet"]["left"]
+        self.assertAlmostEqual(gate["maximum_sphere_bottom_plane_error_m"], 0.002)
+        self.assertEqual(
+            gate["error"], "authored sphere bottoms are not on the measured contact plane"
+        )
 
     def test_missing_stale_or_absent_contact_fails_closed(self):
         with self.assertRaisesRegex(FeedbackUnavailableError, "left contact sensor reading is invalid"):
@@ -277,6 +364,7 @@ class IsaacFeedbackTests(unittest.TestCase):
             EVIDENCE_FILES,
         )
         self.assertIn("robot_spike/asimov_orcahand_right.urdf", EVIDENCE_FILES)
+        self.assertIn("python.bat", ISAAC_API_SOURCE_FILES)
 
         class MemoryPath:
             def __init__(self, data: bytes):
@@ -555,6 +643,94 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(failure["phase"], "runtime")
         self.assertTrue(failure["runtime_invoked"])
         self.assertEqual(failure["error"], "shutdown returned runtime failure")
+
+    def test_feedback_failure_diagnostics_are_persisted_before_unwind(self):
+        class FakeAdapter:
+            def diagnostics(self):
+                return {
+                    "contacts": {
+                        "left": {
+                            "is_valid": True,
+                            "in_contact": True,
+                            "force_n": 12.0,
+                            "reading_time_s": 1.0,
+                            "raw_point_count": 1,
+                            "raw_points_world_m": [[0.1, 0.2, 0.0]],
+                        }
+                    },
+                    "support": {
+                        "raw_point_count": 1,
+                        "support_points_world_m": [],
+                    },
+                }
+
+        class CapturingStatusPath:
+            text = ""
+
+            def write_text(self, text, **_kwargs):
+                self.text = text
+
+        repeat = {"repeat_index": 0, "status": "running"}
+        result = {"status": "running", "repeats": [repeat]}
+        status = CapturingStatusPath()
+        error = FeedbackUnavailableError("support unavailable")
+
+        _persist_feedback_failure(
+            adapter=FakeAdapter(),  # type: ignore[arg-type]
+            repeat_result=repeat,
+            result=result,
+            status_path=status,  # type: ignore[arg-type]
+            phase="initial_post_settle_feedback",
+            error=error,
+        )
+
+        persisted = json.loads(status.text)
+        failure = persisted["repeats"][0]["feedback_failure"]
+        self.assertEqual(failure["phase"], "initial_post_settle_feedback")
+        self.assertEqual(failure["error"], "support unavailable")
+        self.assertEqual(
+            failure["diagnostics"]["contacts"]["left"]["raw_point_count"], 1
+        )
+        self.assertEqual(
+            failure["diagnostics"]["contacts"]["left"]["raw_points_world_m"],
+            [[0.1, 0.2, 0.0]],
+        )
+
+    def test_terminal_exit_sets_child_status_after_reporting(self):
+        observed = []
+
+        for exit_code in (0, 1, 2):
+            _terminate_process(exit_code, hard_exit=observed.append)
+
+        self.assertEqual(observed, [0, 1, 2])
+
+    def test_runtime_error_is_terminal_before_shutdown(self):
+        class CapturingStatusPath:
+            text = ""
+
+            def write_text(self, text, **_kwargs):
+                self.text = text
+
+        status = CapturingStatusPath()
+        partial = {"schema_version": 1, "status": "running", "repeats": []}
+        try:
+            raise FeedbackUnavailableError("support polygon unavailable")
+        except FeedbackUnavailableError as error:
+            report = _persist_pre_shutdown_runtime_error(
+                initial_identity={"source": {"candidate_sha": "candidate"}},
+                status_path=status,  # type: ignore[arg-type]
+                error=error,
+                partial_result=partial,
+            )
+
+        persisted = json.loads(status.text)
+        self.assertIs(report, partial)
+        self.assertEqual(persisted["status"], "error")
+        self.assertEqual(persisted["phase"], "runtime")
+        self.assertFalse(persisted["shutdown_returned"])
+        self.assertEqual(persisted["error_type"], "FeedbackUnavailableError")
+        self.assertEqual(persisted["error"], "support polygon unavailable")
+        self.assertIn("FeedbackUnavailableError", persisted["traceback"])
 
 
 if __name__ == "__main__":

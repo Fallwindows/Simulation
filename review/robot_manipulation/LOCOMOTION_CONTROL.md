@@ -107,8 +107,9 @@ integration boundary. It contains no Isaac imports and accepts injected Isaac
 objects so normalization and geometry remain CPU-testable. Required readings
 fail closed: malformed tensor shapes, nonfinite values, invalid or stale contact
 sensor readings, missing raw contact points, a nonpositive total link mass, or
-a degenerate support polygon raise `FeedbackUnavailableError`. The adapter does
-not substitute reset values or nominal contact for an unavailable measurement.
+a degenerate support polygon that cannot pass the contact-conditioned geometry
+gates raises `FeedbackUnavailableError`. The adapter does not substitute reset
+values or nominal contact for an unavailable measurement.
 
 The adapter reads one free-root articulation and reports:
 
@@ -121,14 +122,22 @@ The adapter reads one free-root articulation and reports:
 - valid bilateral contact readings and raw world contact positions;
 - whole-robot COM from measured link transforms, per-link local COM offsets,
   and per-link masses;
-- a convex hull of the currently measured raw contact positions, its area
-  centroid, and the COM projection's signed inward half-space margin.
+- a convex hull of the currently measured raw contact positions, or a strictly
+  inset contact-conditioned support polygon described below, plus its area
+  centroid and the COM projection's signed inward half-space margin.
 
 Using the whole nominal sole footprint merely because a sensor reports contact
-would overstate support at an edge. The adapter therefore requires at least
-three non-collinear current raw contact positions. A physically real one- or
-two-point support state is reported as unavailable to this controller rather
-than assigned a fabricated polygon.
+would overstate support at an edge. The adapter uses the measured raw hull when
+it has at least three non-collinear points. PhysX contact reduction can supply
+fewer points than the four authored collision spheres on a rigid flat foot. In
+that case a contacting foot contributes only a 50%-scale inset of its URDF
+four-sphere footprint, and only when its sensor has positive force, every raw
+point is within 5.5 mm in XY of an authored sphere bottom, the raw points share
+one plane within 0.5 mm, and all four sphere bottoms transformed by the measured
+ankle pose lie on that measured plane within 0.5 mm. These conditions establish
+a flat, ground-matched collision footprint for this flat-floor harness while
+the inset avoids claiming the full authored boundary. A failed condition remains
+unavailable rather than silently relaxing the support polygon.
 
 ## Installed Isaac Sim 6.1 API evidence
 
@@ -145,8 +154,8 @@ Local source inspection used the installed
 | Contact report | `C:\isaacsim\exts\isaacsim.sensors.experimental.physics\isaacsim\sensors\experimental\physics\impl\contact_sensor.py`, `get_sensor_reading()` lines 157–185 returns explicit validity, contact state, force, and time; `get_raw_data()` lines 187–200 returns body IDs, position, normal, impulse, time, and dt. `contact.py` lines 169–199 verifies a rigid-body ancestor and applies `PhysxContactReportAPI`. NVIDIA's generated Isaac Sim 6.1 `ContactRawData` API identifies x/y/z as world coordinates: `https://docs.isaacsim.omniverse.nvidia.com/6.1.0/py/api/structisaacsim_1_1sensors_1_1experimental_1_1physics_1_1_contact_raw_data.html`. |
 | Link masses and COM | Experimental articulation `get_link_masses()` lines 3830–3890 returns `(N,L)` and `get_link_coms()` lines 3892–3937 returns `(N,L,3/4)`. The underlying installed `omni.physics.tensors` `api.py` lines 2309–2328 explicitly says the principal-axis/COM pose is relative to and expressed in each rigid-body prim frame; the adapter composes it with the link world pose before mass weighting. |
 | Simulation time/step | `C:\isaacsim\exts\isaacsim.core.simulation_manager\isaacsim\core\simulation_manager\impl\simulation_manager.py`, `get_simulation_time()` lines 895–911 and `step()` lines 968–1021. The harness fixes and verifies physics dt before play. |
-| Application shutdown | `C:\isaacsim\exts\isaacsim.simulation_app\isaacsim\simulation_app\simulation_app.py`, SHA-256 `e5db812e752cc415f969c464dfe7248bb4524eaa240ba556386d3a8007f36ce5`: `DEFAULT_LAUNCHER_CONFIG` sets `fast_shutdown` true at lines 92–116, while `close()` at lines 886–1005 documents and uses an `os._exit()` fast path. The harness explicitly sets `fast_shutdown` false so `close()` returns to its caller. This source file is included in the installed-API identity vector. |
-| Support margin | Isaac supplies contact points, link state, mass, and COM rather than a ready biped support margin. The adapter's dependency-free convex-hull and signed half-space calculation is covered analytically on CPU; it fails on fewer than three non-collinear measured points. |
+| Application shutdown and launcher exit | `C:\isaacsim\exts\isaacsim.simulation_app\isaacsim\simulation_app\simulation_app.py`, SHA-256 `e5db812e752cc415f969c464dfe7248bb4524eaa240ba556386d3a8007f36ce5`: `DEFAULT_LAUNCHER_CONFIG` sets `fast_shutdown` true at lines 92–116, while `close()` at lines 886–1005 documents and uses an `os._exit()` fast path. The harness sets `fast_shutdown` false so `close()` returns, then explicitly exits with the durable result. Installed `C:\isaacsim\python.bat`, SHA-256 `ead7a729c2c9d37a04f11c40e754e1f814127986e14d32953fcefc09d95d9871`, maps a nonzero Kit child result to launcher result 1. Both files are included in the installed-API identity vector. |
+| Support margin | Isaac supplies contact points, link state, mass, and COM rather than a ready biped support margin. The adapter's dependency-free convex-hull and signed half-space calculation is covered analytically on CPU. Reduced raw contact sets use the explicitly gated inset URDF derivation above; otherwise they fail closed. |
 
 The safety policy also checks measured root clearance above the highest
 contacting foot against a configurable `[0.45, 0.80] m` envelope. A collapsed
@@ -198,6 +207,23 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   created. The harness now selects graceful shutdown explicitly. After the
   runner returns, `_execute_smoke` rewrites the returned terminal result; a
   propagated runtime exception writes an error report and returns 2.
+- `RST-004-F05`: the graceful-shutdown retry on integration commit
+  `a89a2b9d6cab022e220b2d32c6f91089396ff2c3` reached the first post-settle
+  read and durably reported an insufficient support polygon. That receipt did
+  not contain raw coordinates, so it proves fewer than three distinct finite
+  combined XY points but does not prove the exact per-foot counts. The revised
+  adapter records validity, contact state, force, sensor time/age, raw count and
+  world coordinates for each foot, plus every support gate and selected support
+  point. The repeat status is rewritten before a feedback exception unwinds.
+- `RST-004-F06`: the same retry produced a durable runtime error but
+  `C:\isaacsim\python.bat` still returned 0. The installed launcher returns 0
+  when its `kit.exe` child returns 0 and maps every nonzero child result to 1.
+  After graceful Isaac shutdown and durable reporting, the script now flushes
+  its streams and calls `os._exit` with the computed 0/1/2 result. Thus a runtime
+  error reaches the launcher as nonzero, while the durable report retains the
+  more specific result and traceback. A CPU-only probe through the installed
+  `python.bat` using a child `os._exit(2)` returned launcher exit code 1; it did
+  not import or start Isaac.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -253,16 +279,22 @@ final success. Checks, including failures, are written to the durable status
 report; a missing or changed byte prevents a passing result. A run uses a fixed
 physics rate, verifies metre stage units, and launches `SimulationApp` with
 `fast_shutdown: false`. Successful or exceptional shutdown therefore returns
-to the reporting boundary; success is durably rewritten after `close()` and a
-runtime exception becomes a durable nonzero error. The run performs one explicit
+to the reporting boundary. Pass/fail state is written before shutdown and
+rewritten after `close()`; a runtime exception is likewise written as a terminal
+error with `shutdown_returned: false` before close, then wrapped in the final
+durable error after close. The run performs one explicit
 deterministic reset per repeat, and uses only drive position targets after each
 reset. It writes every controller step to one JSONL measured sample stream per
 repeat plus an incrementally durable status report containing root motion,
 target error, clearance, tilt, velocity, contact forces/transitions/raw-point
 counts, contacting-sole slip, joint state, one-step-lag target error, COM,
 signed support margin, terminal state, fault reason, and repeat deltas. Missing
-sensing produces an error report and nonzero exit; a timeout or controller
-fault produces a failed result and nonzero exit.
+sensing also persists per-foot contact values, times, raw coordinates, support
+gates, and candidate support points before producing a nonzero exit. A timeout
+or controller fault produces a failed result and nonzero exit. After the status
+write and graceful `SimulationApp.close()`, an explicit process exit conveys
+that result to `python.bat`; its public exit is 0 for pass and 1 for either
+failed or errored runs.
 
 The later serialized invocation must name the exact independently reviewed
 snapshot, for example:
@@ -275,9 +307,10 @@ C:\isaacsim\python.bat robot_spike\production\run_locomotion_smoke.py `
   --repeats 2
 ```
 
-No output from such a run exists for this candidate. The script itself is not
-evidence that import, sensing, contact, walking, docking, or reset repeatability
-works.
+Two predecessor integration attempts exist, both failed before gait commands.
+Neither is passing evidence for this candidate. The script itself is not
+evidence that sensing, inferred support, walking, docking, or reset
+repeatability works.
 
 ## Scheduled Isaac validation requirements
 
@@ -298,10 +331,12 @@ checks the exact integrated candidate. That validation must at minimum:
 8. repeat reset and the short-path run to check reproducibility.
 
 The source-level API names and return shapes are now resolved for the installed
-6.1 build. Physical behavior remains unresolved: imported link-path ordering in
-an actual tensor view, contact-sensor startup and time freshness, the number and
-location of reported foot contact points, correctness of the selected sole
-reference under load, mass/COM fidelity of the imported model, drive authority,
-friction/slip, self-collision policy, fall recovery, gait stability, docking,
-and repeatability all require the scheduled Isaac run. No CPU test can promote
-those limits to a physical pass.
+6.1 build. The failed `a89a2b9` run verified the imported link order and reached
+valid enough contact data to attempt support geometry, but its old receipt did
+not preserve exact per-foot values. Physical behavior remains unresolved: the
+actual per-foot raw contact counts and coordinates, whether the strict inset
+support gates pass under settling and swing, correctness of the selected sole
+reference under load, mass/COM fidelity, drive authority, friction/slip,
+self-collision policy, fall recovery, gait stability, docking, and repeatability
+all require the next serialized Isaac run. No CPU test can promote those limits
+to a physical pass.

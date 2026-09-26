@@ -8,6 +8,7 @@ experimental APIs documented in ``review/robot_manipulation/LOCOMOTION_CONTROL.m
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import math
 from typing import Callable, Protocol, Sequence
@@ -68,6 +69,7 @@ class SoleGeometry:
 
     reference_m: tuple[float, float, float]
     support_vertices_m: tuple[tuple[float, float, float], ...]
+    contact_sphere_radius_m: float
 
     def __post_init__(self) -> None:
         _finite_vector(self.reference_m, 3, "sole reference")
@@ -75,6 +77,8 @@ class SoleGeometry:
             raise ValueError("sole geometry requires at least three support vertices")
         for vertex in self.support_vertices_m:
             _finite_vector(vertex, 3, "sole support vertex")
+        if not math.isfinite(self.contact_sphere_radius_m) or self.contact_sphere_radius_m <= 0.0:
+            raise ValueError("contact sphere radius must be finite and positive")
 
 
 def _plain(value):
@@ -112,6 +116,7 @@ ASIMOV_SOLE_GEOMETRY = SoleGeometry(
         (0.122, -0.028, -0.034),
         (0.122, 0.028, -0.034),
     ),
+    contact_sphere_radius_m=0.005,
 )
 
 
@@ -250,6 +255,8 @@ class Isaac61LocomotionFeedbackAdapter:
         right_foot_link: str = "right_ankle_roll_link",
         sole_geometry: SoleGeometry = ASIMOV_SOLE_GEOMETRY,
         maximum_contact_age_s: float | None = None,
+        support_plane_tolerance_m: float = 0.0005,
+        inferred_support_inset_fraction: float = 0.5,
     ) -> None:
         self.articulation = articulation
         self.link_poses = link_poses
@@ -258,10 +265,18 @@ class Isaac61LocomotionFeedbackAdapter:
         self.timestamp_source = timestamp_source
         self.sole_geometry = sole_geometry
         self.maximum_contact_age_s = maximum_contact_age_s
+        self.support_plane_tolerance_m = float(support_plane_tolerance_m)
+        self.inferred_support_inset_fraction = float(inferred_support_inset_fraction)
         if maximum_contact_age_s is not None and (
             not math.isfinite(maximum_contact_age_s) or maximum_contact_age_s < 0.0
         ):
             raise ValueError("maximum contact age must be finite and nonnegative")
+        if not math.isfinite(self.support_plane_tolerance_m) or self.support_plane_tolerance_m <= 0.0:
+            raise ValueError("support plane tolerance must be finite and positive")
+        if not math.isfinite(self.inferred_support_inset_fraction) or not (
+            0.0 < self.inferred_support_inset_fraction < 1.0
+        ):
+            raise ValueError("inferred support inset fraction must be between zero and one")
 
         self._dof_names = tuple(str(name) for name in articulation.dof_names)
         self._link_names = tuple(str(name) for name in articulation.link_names)
@@ -280,14 +295,38 @@ class Isaac61LocomotionFeedbackAdapter:
         self.last_contact_forces_n: dict[str, float] = {}
         self.last_contact_times_s: dict[str, float] = {}
         self.last_contact_point_counts: dict[str, int] = {}
+        self.last_contact_diagnostics: dict[str, dict[str, object]] = {}
+        self.last_support_diagnostics: dict[str, object] = {}
 
     @property
     def link_names(self) -> tuple[str, ...]:
         return self._link_names
 
+    def diagnostics(self) -> dict[str, object]:
+        """Return a JSON-safe snapshot of the most recent contact/support read."""
+
+        return copy.deepcopy(
+            {
+                "contacts": self.last_contact_diagnostics,
+                "support": self.last_support_diagnostics,
+            }
+        )
+
     def _contact(
         self, sensor: IsaacContactSensorBackend, side: str, timestamp_s: float
     ) -> tuple[bool, tuple[tuple[float, float, float], ...]]:
+        diagnostic: dict[str, object] = {
+            "side": side,
+            "sample_time_s": timestamp_s,
+            "is_valid": None,
+            "in_contact": None,
+            "force_n": None,
+            "reading_time_s": None,
+            "age_s": None,
+            "raw_point_count": None,
+            "raw_points_world_m": [],
+        }
+        self.last_contact_diagnostics[side] = diagnostic
         try:
             reading = sensor.get_sensor_reading()
             if not isinstance(reading.is_valid, bool) or not isinstance(reading.in_contact, bool):
@@ -297,14 +336,32 @@ class Isaac61LocomotionFeedbackAdapter:
             force_n = float(reading.value)
             reading_time_s = float(reading.time)
         except Exception as exc:
+            diagnostic["error"] = f"contact read failed: {exc}"
             raise FeedbackUnavailableError(f"{side} contact read failed: {exc}") from exc
+        diagnostic.update(
+            {
+                "is_valid": valid,
+                "in_contact": in_contact,
+                "force_n": force_n if math.isfinite(force_n) else None,
+                "reading_time_s": reading_time_s if math.isfinite(reading_time_s) else None,
+                "age_s": (
+                    abs(timestamp_s - reading_time_s)
+                    if math.isfinite(reading_time_s)
+                    else None
+                ),
+            }
+        )
         if not valid:
+            diagnostic["error"] = "contact sensor reading is invalid"
             raise FeedbackUnavailableError(f"{side} contact sensor reading is invalid")
         if not math.isfinite(force_n) or force_n < 0.0:
+            diagnostic["error"] = "contact force is invalid"
             raise FeedbackUnavailableError(f"{side} contact force is invalid")
         if not math.isfinite(reading_time_s) or reading_time_s < 0.0:
+            diagnostic["error"] = "contact timestamp is invalid"
             raise FeedbackUnavailableError(f"{side} contact timestamp is invalid")
         if self.maximum_contact_age_s is not None and abs(timestamp_s - reading_time_s) > self.maximum_contact_age_s:
+            diagnostic["error"] = "contact reading is stale"
             raise FeedbackUnavailableError(
                 f"{side} contact reading is stale by {abs(timestamp_s - reading_time_s):.9f}s"
             )
@@ -313,18 +370,29 @@ class Isaac61LocomotionFeedbackAdapter:
         try:
             raw_contacts = sensor.get_raw_data()
         except Exception as exc:
+            diagnostic["error"] = f"raw contact read failed: {exc}"
             raise FeedbackUnavailableError(f"{side} raw contact read failed: {exc}") from exc
         if not isinstance(raw_contacts, (list, tuple)):
+            diagnostic["error"] = "raw contacts are not a sequence"
             raise FeedbackUnavailableError(f"{side} raw contacts are not a sequence")
-        points = tuple(self._raw_contact_position(contact, side) for contact in raw_contacts)
+        try:
+            points = tuple(self._raw_contact_position(contact, side) for contact in raw_contacts)
+        except FeedbackUnavailableError as exc:
+            diagnostic["error"] = str(exc)
+            raise
         self.last_contact_point_counts[side] = len(points)
+        diagnostic["raw_point_count"] = len(points)
+        diagnostic["raw_points_world_m"] = [list(point) for point in points]
         if in_contact and not points:
+            diagnostic["error"] = "contact reported without measured points"
             raise FeedbackUnavailableError(
                 f"{side} reports contact without any measured contact points"
             )
         return in_contact, points if in_contact else ()
 
     def read_feedback(self) -> LocomotionFeedback:
+        self.last_contact_diagnostics = {}
+        self.last_support_diagnostics = {}
         timestamp_s = float(self.timestamp_source())
         if not math.isfinite(timestamp_s) or timestamp_s < 0.0:
             raise FeedbackUnavailableError("simulation timestamp is invalid")
@@ -387,16 +455,53 @@ class Isaac61LocomotionFeedbackAdapter:
         right_contact, right_points = self._contact(
             self.right_contact_sensor, "right", timestamp_s
         )
-        support_points: list[tuple[float, float, float]] = []
+        raw_support_points: list[tuple[float, float, float]] = []
         if left_contact:
-            support_points.extend(left_points)
+            raw_support_points.extend(left_points)
         if right_contact:
-            support_points.extend(right_points)
-        if not support_points:
+            raw_support_points.extend(right_points)
+        self.last_support_diagnostics = {
+            "raw_point_count": len(raw_support_points),
+            "raw_points_world_m": [list(point) for point in raw_support_points],
+            "raw_distinct_xy_count": len({(point[0], point[1]) for point in raw_support_points}),
+            "source": None,
+            "support_points_world_m": [],
+        }
+        if not raw_support_points:
+            self.last_support_diagnostics["error"] = "neither foot reports contact"
             raise FeedbackUnavailableError("neither foot reports contact; support polygon unavailable")
-        support_center_xy, support_margin = support_polygon_center_and_margin(
-            support_points, center_of_mass[:2]
-        )
+        try:
+            support_center_xy, support_margin = support_polygon_center_and_margin(
+                raw_support_points, center_of_mass[:2]
+            )
+            support_points = raw_support_points
+            self.last_support_diagnostics["source"] = "measured_raw_contact_hull"
+        except FeedbackUnavailableError as raw_error:
+            self.last_support_diagnostics["raw_hull_error"] = str(raw_error)
+            try:
+                support_points = self._contact_conditioned_support_points(
+                    left_contact=left_contact,
+                    left_points=left_points,
+                    right_contact=right_contact,
+                    right_points=right_points,
+                    link_positions=link_positions,
+                    link_orientations=link_orientations,
+                )
+                support_center_xy, support_margin = support_polygon_center_and_margin(
+                    support_points, center_of_mass[:2]
+                )
+                self.last_support_diagnostics["source"] = "contact_conditioned_urdf_inset"
+            except FeedbackUnavailableError as fallback_error:
+                self.last_support_diagnostics["error"] = str(fallback_error)
+                raise FeedbackUnavailableError(
+                    f"measured support geometry is insufficient ({raw_error}); "
+                    f"contact-conditioned URDF support is unavailable ({fallback_error})"
+                ) from fallback_error
+        self.last_support_diagnostics["support_points_world_m"] = [
+            list(point) for point in support_points
+        ]
+        self.last_support_diagnostics["support_center_world_xy_m"] = list(support_center_xy)
+        self.last_support_diagnostics["support_margin_m"] = support_margin
         support_center = (
             support_center_xy[0],
             support_center_xy[1],
@@ -418,6 +523,108 @@ class Isaac61LocomotionFeedbackAdapter:
             support_center_world_m=support_center,
             support_margin_m=support_margin,
         )
+
+    def _contact_conditioned_support_points(
+        self,
+        *,
+        left_contact: bool,
+        left_points: Sequence[Sequence[float]],
+        right_contact: bool,
+        right_points: Sequence[Sequence[float]],
+        link_positions: Sequence[Sequence[float]],
+        link_orientations: Sequence[Sequence[float]],
+    ) -> list[tuple[float, float, float]]:
+        """Infer a strict subset of a flat contacting sole's URDF footprint.
+
+        This is used only when PhysX contact reduction yields too few raw points
+        for a polygon.  A foot qualifies only when its positive-force contact
+        has a raw point near an authored collision sphere and all four measured
+        sphere bottoms lie on the raw contact plane within 0.5 mm.
+        """
+
+        feet = (
+            ("left", left_contact, left_points, self._left_link_index),
+            ("right", right_contact, right_points, self._right_link_index),
+        )
+        inferred: list[tuple[float, float, float]] = []
+        foot_diagnostics: dict[str, object] = {}
+        for side, in_contact, raw_points, link_index in feet:
+            if not in_contact:
+                continue
+            force_n = self.last_contact_forces_n.get(side, 0.0)
+            vertices = tuple(
+                _transform_point(
+                    link_positions[link_index], link_orientations[link_index], vertex
+                )
+                for vertex in self.sole_geometry.support_vertices_m
+            )
+            contact_plane_z = sum(point[2] for point in raw_points) / len(raw_points)
+            raw_z_spread = max(point[2] for point in raw_points) - min(
+                point[2] for point in raw_points
+            )
+            maximum_plane_error = max(
+                abs(vertex[2] - contact_plane_z) for vertex in vertices
+            )
+            maximum_nearest_sphere_xy_distance = max(
+                min(
+                    math.hypot(point[0] - vertex[0], point[1] - vertex[1])
+                    for vertex in vertices
+                )
+                for point in raw_points
+            )
+            gate = {
+                "force_n": force_n,
+                "raw_points_world_m": [list(point) for point in raw_points],
+                "nominal_sphere_bottoms_world_m": [list(vertex) for vertex in vertices],
+                "contact_plane_z_m": contact_plane_z,
+                "raw_z_spread_m": raw_z_spread,
+                "maximum_sphere_bottom_plane_error_m": maximum_plane_error,
+                "maximum_raw_point_to_sphere_xy_distance_m": maximum_nearest_sphere_xy_distance,
+                "plane_tolerance_m": self.support_plane_tolerance_m,
+                "contact_sphere_radius_m": self.sole_geometry.contact_sphere_radius_m,
+                "inset_fraction": self.inferred_support_inset_fraction,
+            }
+            foot_diagnostics[side] = gate
+            if force_n <= 0.0:
+                gate["error"] = "contact force is not positive"
+                self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
+                raise FeedbackUnavailableError(f"{side} contact force is not positive")
+            if raw_z_spread > self.support_plane_tolerance_m:
+                gate["error"] = "raw points do not share one contact plane"
+                self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
+                raise FeedbackUnavailableError(f"{side} raw contact plane is not flat")
+            if maximum_plane_error > self.support_plane_tolerance_m:
+                gate["error"] = "authored sphere bottoms are not on the measured contact plane"
+                self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
+                raise FeedbackUnavailableError(f"{side} sole is not coplanar with contact")
+            if maximum_nearest_sphere_xy_distance > (
+                self.sole_geometry.contact_sphere_radius_m + self.support_plane_tolerance_m
+            ):
+                gate["error"] = "raw point does not match an authored contact sphere"
+                self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
+                raise FeedbackUnavailableError(f"{side} raw contact is outside its sole spheres")
+
+            center_xy, _margin = support_polygon_center_and_margin(vertices, vertices[0][:2])
+            inset_vertices = [
+                (
+                    center_xy[0]
+                    + self.inferred_support_inset_fraction * (vertex[0] - center_xy[0]),
+                    center_xy[1]
+                    + self.inferred_support_inset_fraction * (vertex[1] - center_xy[1]),
+                    contact_plane_z,
+                )
+                for vertex in vertices
+            ]
+            gate["inferred_support_points_world_m"] = [
+                list(point) for point in inset_vertices
+            ]
+            gate["status"] = "accepted"
+            inferred.extend(inset_vertices)
+
+        self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
+        if not inferred:
+            raise FeedbackUnavailableError("no contacting foot passed support inference")
+        return inferred
 
     def _read_link_masses(self) -> tuple[float, ...]:
         raw = _plain(self.articulation.get_link_masses())
