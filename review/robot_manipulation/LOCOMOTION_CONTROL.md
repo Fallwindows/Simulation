@@ -350,6 +350,27 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-ff0ed92\locomotion_smoke_status.json`;
   the Kit log is
   `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_064457.log`.
+- `RST-004-F13`: exact reviewed candidate
+  `058fdebdc9e35c606aa1025850323b3745049f3e` completed all 36 ramp and 36
+  dwell samples, then faulted on the fourth controller sample before swing.
+  The last accepted startup sample already had margin -0.012447 m, linear
+  speed 0.115 m/s, and angular speed 0.268 rad/s. In the next 25 ms the root
+  moved from X=-0.05289 m to -0.05610 m and margin crossed the unchanged gate
+  at -0.015720972 m; both feet stayed loaded on the measured eight-point hull.
+  The first gait commands were still double-support targets close to the last
+  startup target, so this was an unsafe moving handoff rather than a swing
+  discontinuity. The saturated sagittal correction is now capped at 0.090 rad,
+  equal to each nominal crouch hip/ankle pitch magnitude. Its 35/65 split is
+  therefore limited to 0.0315/0.0585 rad per joint; URDF limits and the existing
+  0.30 rad measured target-error gate remain authoritative. Verified dwell now
+  requires a complete 0.30 s consecutive handoff window under the existing
+  docking tolerances of 0.035 m/s linear and 0.10 rad/s angular speed. It may
+  use only the unused portion of the original two-second startup budget;
+  unsettled samples reset the consecutive counter, while any existing hard
+  gate still aborts immediately before gait. The receipt and sample stream are
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-058fdebd-run1\locomotion_smoke_status.json`
+  and sibling `repeat_00_samples.jsonl`; the Kit log is
+  `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_064457.log`.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -431,7 +452,8 @@ bilateral contact, advancing timestamps, adequate support margin, target
   tracking, and root/sole safety has accumulated. It then interpolates from the
 measured stable joint state toward the existing balance-corrected symmetric
 crouch over the existing 0.30 s double-support duration and verifies another
-0.30 s dwell while refreshing that target from each measured sample. Each increment uses
+0.30 s consecutive settled dwell while refreshing that target from each measured sample.
+The dwell is bounded by the original startup duration. Each increment uses
 the existing control gates: 12 degree root/sole tilt envelope, 0.35 m/s root
 linear speed, 1.0 rad/s root angular component, 0.30 rad joint target error,
 `[-0.015 m]` minimum support margin, and `[0.45, 0.80] m` root clearance. Sole

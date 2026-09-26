@@ -541,6 +541,12 @@ def _staged_double_support_startup(
             "minimum_root_clearance_m": config.minimum_root_clearance_m,
             "maximum_root_clearance_m": config.maximum_root_clearance_m,
             "minimum_support_margin_m": config.minimum_support_margin_m,
+            "handoff_linear_speed_tolerance_mps": (
+                config.dock_linear_speed_tolerance_mps
+            ),
+            "handoff_angular_speed_tolerance_rps": (
+                config.dock_angular_speed_tolerance_rps
+            ),
             "maximum_sole_tilt_rad": config.maximum_root_tilt_rad,
             "sole_flatness_source": "measured ankle quaternion rotates authored sole +Z normal",
         },
@@ -754,7 +760,12 @@ def _staged_double_support_startup(
         if failures:
             abort("target_ramp", "; ".join(failures))
 
-    for step_index in range(1, dwell_steps + 1):
+    maximum_dwell_steps = (
+        step_budget["total"] - int(report["stability_achieved_step"]) - ramp_steps
+    )
+    report["step_budget"]["maximum_verified_dwell"] = maximum_dwell_steps
+    consecutive_settled_samples = 0
+    for step_index in range(1, maximum_dwell_steps + 1):
         targets, balance_metrics = balanced_targets("verified_dwell", latest)
         joint_controller.command_joint_positions(targets)
         step_physics()
@@ -777,13 +788,41 @@ def _staged_double_support_startup(
         failures, metrics = _startup_feedback_failures(
             latest, diagnostics, targets, config
         )
+        linear_speed = math.sqrt(
+            sum(value * value for value in latest.root_linear_velocity_body_mps)
+        )
+        angular_speed = math.sqrt(
+            sum(value * value for value in latest.root_angular_velocity_body_rps)
+        )
+        metrics["handoff_root_linear_speed_mps"] = linear_speed
+        metrics["handoff_root_angular_speed_rps"] = angular_speed
+        settling_failures: list[str] = []
+        if linear_speed > config.dock_linear_speed_tolerance_mps:
+            settling_failures.append("root linear speed has not settled for gait handoff")
+        if angular_speed > config.dock_angular_speed_tolerance_rps:
+            settling_failures.append("root angular speed has not settled for gait handoff")
+        if failures or settling_failures:
+            consecutive_settled_samples = 0
+        else:
+            consecutive_settled_samples += 1
+        status = (
+            "rejected"
+            if failures
+            else (
+                "stable"
+                if consecutive_settled_samples >= dwell_steps
+                else ("settling" if settling_failures else "stabilizing")
+            )
+        )
         report["events"].append(
             {
                 "stage": "verified_dwell",
                 "step": step_index,
-                "status": "accepted" if not failures else "rejected",
+                "status": status,
                 "timestamp_s": latest.timestamp_s,
                 "metrics": metrics,
+                "settling_failures": settling_failures,
+                "consecutive_settled_samples": consecutive_settled_samples,
                 "balance_observation": balance_metrics,
                 "commanded_joint_targets_rad": targets,
                 "diagnostics": diagnostics if failures else None,
@@ -792,6 +831,13 @@ def _staged_double_support_startup(
         publish()
         if failures:
             abort("verified_dwell", "; ".join(failures))
+        if consecutive_settled_samples >= dwell_steps:
+            break
+    else:
+        abort(
+            "verified_dwell",
+            "bounded window ended without consecutive settled gait-handoff samples",
+        )
 
     report["status"] = "pass"
     report["final_timestamp_s"] = latest.timestamp_s

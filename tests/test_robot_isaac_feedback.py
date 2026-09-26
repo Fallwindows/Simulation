@@ -187,6 +187,8 @@ def startup_feedback(
     right_contact: bool = True,
     root_pitch: float = 0.0,
     support_margin: float = 0.03,
+    root_linear: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    root_angular: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> LocomotionFeedback:
     positions = joints if joints is not None else {name: 0.0 for name in LEG_JOINTS}
     return LocomotionFeedback(
@@ -194,8 +196,8 @@ def startup_feedback(
         root_pose=PlanarPose(0.0, 0.0, 0.0),
         root_height_m=0.635,
         root_tilt_roll_pitch_rad=(0.0, root_pitch),
-        root_linear_velocity_body_mps=(0.0, 0.0, 0.0),
-        root_angular_velocity_body_rps=(0.0, 0.0, 0.0),
+        root_linear_velocity_body_mps=root_linear,
+        root_angular_velocity_body_rps=root_angular,
         left_foot=FootFeedback(FootPose((0.0, 0.0675, 0.0), 0.0), left_contact),
         right_foot=FootFeedback(FootPose((0.0, -0.0675, 0.0), 0.0), right_contact),
         joint_position_rad=positions,
@@ -303,6 +305,19 @@ class StartupFeedbackSource:
                 timestamp=1.0 + 0.1 * self.read_count,
                 joints=self.controller.commands[-1],
                 support_margin=margin,
+            )
+        if self.mode in {"transient_handoff_drift", "persistent_handoff_drift"}:
+            dwell_command = len(self.controller.commands) - 3
+            drifting = self.mode == "persistent_handoff_drift" or dwell_command <= 2
+            return startup_feedback(
+                timestamp=1.0 + 0.1 * self.read_count,
+                joints=(
+                    self.controller.commands[-1]
+                    if self.controller.commands
+                    else {name: 0.02 for name in LEG_JOINTS}
+                ),
+                root_linear=(0.10, 0.0, 0.0) if drifting else (0.0, 0.0, 0.0),
+                root_angular=(0.0, 0.20, 0.0) if drifting else (0.0, 0.0, 0.0),
             )
         joints = (
             self.controller.commands[-1]
@@ -1153,6 +1168,64 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertAlmostEqual(event["metrics"]["support_margin_m"], -0.016)
         self.assertIn("commanded_joint_targets_rad", event)
 
+    def test_gait_handoff_waits_for_consecutive_settled_samples(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "transient_handoff_drift"
+
+        _final, report = _staged_double_support_startup(
+            feedback_source=source,  # type: ignore[arg-type]
+            joint_controller=controller,  # type: ignore[arg-type]
+            step_physics=lambda: None,
+            reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+            crouch_targets={name: 0.18 for name in LEG_JOINTS},
+            balanced_crouch_targets=test_balanced_crouch,
+            physics_dt=0.1,
+            maximum_duration_s=2.0,
+        )
+
+        dwell = [
+            event for event in report["events"] if event["stage"] == "verified_dwell"
+        ]
+        self.assertEqual([event["status"] for event in dwell], [
+            "settling",
+            "settling",
+            "stabilizing",
+            "stabilizing",
+            "stable",
+        ])
+        self.assertEqual(dwell[-1]["consecutive_settled_samples"], 3)
+        self.assertEqual(len(controller.commands), 8)
+
+    def test_persistent_handoff_drift_times_out_before_gait(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "persistent_handoff_drift"
+
+        with self.assertRaisesRegex(
+            StartupValidationError, "without consecutive settled gait-handoff"
+        ) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "verified_dwell")
+        dwell = [
+            event
+            for event in raised.exception.report["events"]
+            if event["stage"] == "verified_dwell"
+        ]
+        self.assertEqual(len(dwell), 14)
+        self.assertTrue(all(event["status"] == "settling" for event in dwell))
+        self.assertEqual(len(controller.commands), 17)
+
     def test_recorded_ramp_and_dwell_margin_progression_fails_closed(self):
         controller = StartupController()
         source = StartupFeedbackSource(controller)
@@ -1186,7 +1259,9 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(len(ramp), 36)
         self.assertEqual(len(dwell), 22)
         self.assertTrue(all(event["status"] == "accepted" for event in ramp))
-        self.assertTrue(all(event["status"] == "accepted" for event in dwell[:-1]))
+        self.assertTrue(
+            all(event["status"] in {"stabilizing", "stable"} for event in dwell[:-1])
+        )
         self.assertEqual(dwell[-1]["status"], "rejected")
         self.assertAlmostEqual(ramp[0]["metrics"]["support_margin_m"], 0.030)
         self.assertAlmostEqual(ramp[-1]["metrics"]["support_margin_m"], 0.010)
@@ -1228,7 +1303,9 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(len(ramp), 36)
         self.assertEqual(len(dwell), 33)
         self.assertTrue(all(event["status"] == "accepted" for event in ramp))
-        self.assertTrue(all(event["status"] == "accepted" for event in dwell[:-1]))
+        self.assertTrue(
+            all(event["status"] in {"stabilizing", "stable"} for event in dwell[:-1])
+        )
         self.assertEqual(dwell[-1]["status"], "rejected")
         self.assertAlmostEqual(ramp[-1]["metrics"]["support_margin_m"], 0.015590235551829793)
         self.assertAlmostEqual(

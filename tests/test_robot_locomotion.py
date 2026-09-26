@@ -479,7 +479,9 @@ class RobotLocomotionTests(unittest.TestCase):
         correction = BalanceFeedbackController(self.config).evaluate(feedback)
         self.assertAlmostEqual(
             correction.sagittal_rad,
-            self.config.maximum_balance_correction_rad,
+            -0.22 * -0.15350127538066533
+            - 0.035 * -0.43750293447273125
+            - 0.10 * -0.18182469615475158,
         )
 
         targets = ConservativeGaitTargetGenerator(self.spec, self.config).targets(
@@ -563,6 +565,85 @@ class RobotLocomotionTests(unittest.TestCase):
         self.assertAlmostEqual(self.config.joint_velocity_damping_s, 12.0 / 120.0)
         with self.assertRaisesRegex(LocomotionError, "damping_s exceeds"):
             GaitConfig(joint_velocity_damping_s=0.100001)
+
+    def test_recorded_four_sample_gait_entry_faults_before_an_unsafe_command(self):
+        samples = (
+            (1.0083333333333333, -0.012447231704476968, -0.1368725281654402, -0.11511895446627755),
+            (1.0166666666666666, -0.013520068603459839, -0.13926368958153684, -0.11100228088550362),
+            (1.025, -0.014607066144083188, -0.14159495202303835, -0.11935871247510957),
+            (1.0333333333333334, -0.01572097183364656, -0.1440476230974464, -0.11544244588840302),
+        )
+
+        def measured(sample):
+            timestamp, margin, pitch, forward_speed = sample
+            return self.feedback(
+                timestamp,
+                root_pose=PlanarPose(-0.052893269807100296, 0.0, 0.0),
+                support_margin_m=margin,
+                tilt=(0.0, pitch),
+                linear=(forward_speed, 0.0, 0.0),
+                angular=(0.0, -0.30, 0.0),
+            )
+
+        source = MutableFeedbackSource(measured(samples[0]))
+        commands = RecordingJointController(self.spec)
+        controller = BipedLocomotionController(
+            self.spec, commands, source, config=self.config
+        )
+        controller.start_route([PlanarPose(0.007106730192899704, 0.0, 0.0)])
+
+        issued = []
+        for sample in samples[:-1]:
+            source.feedback = measured(sample)
+            issued.append(controller.update())
+        source.feedback = measured(samples[-1])
+        fault = controller.update()
+
+        self.assertTrue(
+            all(command.phase is GaitPhase.DOUBLE_SUPPORT for command in issued)
+        )
+        self.assertTrue(all(command.state is LocomotionState.ACTIVE for command in issued))
+        self.assertTrue(all(command.planned_step_count == 2 for command in issued))
+        self.assertEqual(len(commands.commands), 3)
+        self.assertEqual(fault.state, LocomotionState.FAULT)
+        self.assertEqual(fault.joint_targets_rad, {})
+        self.assertEqual(fault.failure_reason, "COM projection left support margin")
+        self.assertEqual(len(commands.commands), 3)
+
+    def test_balance_correction_cap_matches_nominal_crouch_components(self):
+        crouch = symmetric_crouch_targets(self.spec)
+        self.assertAlmostEqual(
+            self.config.maximum_balance_correction_rad,
+            abs(crouch["left_hip_pitch_joint"]),
+        )
+        self.assertAlmostEqual(
+            self.config.maximum_balance_correction_rad,
+            abs(crouch["left_ankle_pitch_joint"]),
+        )
+        correction = BalanceCorrection(
+            self.config.maximum_balance_correction_rad, 0.0
+        )
+        targets = ConservativeGaitTargetGenerator(self.spec, self.config).targets(
+            self.feedback(0.0), GaitPhase.DOUBLE_SUPPORT, 0.0, correction
+        )
+        self.assertAlmostEqual(
+            targets["left_hip_pitch_joint"],
+            crouch["left_hip_pitch_joint"] - 0.35 * correction.sagittal_rad,
+        )
+        self.assertAlmostEqual(
+            targets["left_ankle_pitch_joint"],
+            crouch["left_ankle_pitch_joint"] - 0.65 * correction.sagittal_rad,
+        )
+        self.assertLessEqual(
+            max(
+                abs(targets[name] - self.feedback(0.0).joint_position_rad[name])
+                for name in LEG_JOINTS
+            ),
+            self.config.maximum_target_error_rad,
+        )
+        self.assertEqual(self.spec.validate_targets(targets), targets)
+        with self.assertRaisesRegex(LocomotionError, "correction_rad exceeds"):
+            GaitConfig(maximum_balance_correction_rad=0.090001)
 
     def test_collapsed_or_invalid_root_height_fails_before_gait_command(self):
         balance = BalanceFeedbackController(self.config)

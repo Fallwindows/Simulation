@@ -187,7 +187,10 @@ class GaitConfig:
     # matching, velocity-aware damping term through the position target while
     # the measured target-error gate continues to bound every command.
     joint_velocity_damping_s: float = 0.100
-    maximum_balance_correction_rad: float = 0.045
+    # Bound the planted-foot pelvis correction to the nominal 0.09 rad
+    # hip/ankle crouch component.  The previous half-sized bound saturated
+    # throughout the measured backward drift without arresting it.
+    maximum_balance_correction_rad: float = 0.090
     maximum_root_tilt_rad: float = math.radians(12.0)
     maximum_root_angular_speed_rps: float = 1.0
     maximum_root_linear_speed_mps: float = 0.35
@@ -261,6 +264,10 @@ class GaitConfig:
             raise LocomotionError("root clearance envelope must have increasing bounds")
         if self.joint_velocity_damping_s > 0.100:
             raise LocomotionError("joint_velocity_damping_s exceeds the 0.100 s safety cap")
+        if self.maximum_balance_correction_rad > 0.090:
+            raise LocomotionError(
+                "maximum_balance_correction_rad exceeds the 0.090 rad safety cap"
+            )
         if self.maximum_plan_steps < 1:
             raise LocomotionError("maximum_plan_steps must be positive")
 
