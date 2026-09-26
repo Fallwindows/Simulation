@@ -35,31 +35,37 @@ drive targets in runtime DOF order.
   invalid-scale, malformed-tree, nonfinite-limit, invalid-target, reordered-DOF,
   motion-command, and deterministic-reset cases.
 
-## Unverified runtime gates
+## R1 runtime result (2026-09-26)
 
-The initial GPU-process ambiguity was resolved by the orchestrator: PID 1872 is
-`dwm`, and the full `nvidia-smi` table showed desktop C+G contexts with no Isaac
-or compute-only job. No RST-001 GPU reservation has been assigned yet; the
-orchestrator will schedule GPU runs after implementation. Per the GPU lease
-rule, no Isaac/GPU process was started for this candidate.
+A serialized headless Isaac Sim 6.1 run tested integrated code candidate
+`1fe5ac5c42466b3ea581b73585e919e0a8e32117` / tree
+`88c52e464ab2542ba5e3eb854b00064719f659c7`, with the `Physics=physx` variant,
+a ground plane, and 200 Hz physics. The imported stage was 1.0 m/unit and
+reported the exact expected 40 DOFs, 48 collision prims, and 61 rigid bodies.
+A 0.20 rad right shoulder pitch target produced 0.176431 rad measured motion.
+Both ankle-roll supports contacted the ground (143.888 N left, 160.528 N
+right). Repeating reset after motion produced zero measured position/orientation
+error after the same 10 simulation steps.
 
-The following remain explicitly unverified:
+The neutral all-zero free-base configuration is not dynamically stable. After
+240 steps (1.2 s), the root drifted 0.168067 m, tilted 18.8275 degrees, and had
+0.4671 m/s linear and 0.7210 rad/s angular speed. Therefore R1 is partially
+runtime validated (import, DOF mapping, drive response, foot contact, and reset),
+but not a dynamic stability pass. The code-level candidate and prior approvals
+remain unchanged; evidence and harness are in
+`robot_spike/evidence/isaac_r1_runtime_smoke.json` and
+`robot_spike/evidence/isaac_r1_runtime_smoke.py`.
 
-- production URDF import with `fix_base=false` in Isaac Sim 6.1;
-- free-base settling, foot contact, passive balance, and reset repeatability;
-- actual drive response for the 40 mapped DOFs;
-- collision behavior and a safe self-collision filter set;
-- gait/base motion (R2), arm reach (R3), physical grasp (R4), stationary
-  pick-and-place (R5), route (R6), carrying drive (R7), and the continuous full
-  restocking run (R8).
+## Open runtime gates
 
-R1 therefore remains a code milestone, not a runtime acceptance pass. The next
-runtime check must import this exact reviewed candidate in an idle reserved GPU
-slot, settle from reset, command representative leg/arm/wrist/finger joints,
-repeat reset, and record measured root/joint/velocity/contact state.
-
+- Neutral-pose passive balance remains unverified/failed; closed-loop balance
+  and gait are required for R2.
+- Collision behavior and a safe self-collision filter set remain open.
+- R3 arm reach, R4 physical grasp, R5 stationary pick-and-place, R6 route,
+  R7 carrying drive, and the continuous full restocking run (R8) remain open.
 ## Routing observation
 
 The task was configured for GPT-5.6 Sol with high reasoning effort. The worker
 runtime did not expose an independently observable model or effort identity, so
 observed model and observed effort are recorded as `unknown`.
+
