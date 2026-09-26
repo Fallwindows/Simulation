@@ -65,18 +65,18 @@ class IsaacContactSensorBackend(Protocol):
 
 @dataclass(frozen=True)
 class SoleGeometry:
-    """Sole reference and support vertices in the ankle-roll link frame."""
+    """Sole reference and spherical collisions in the ankle-roll link frame."""
 
     reference_m: tuple[float, float, float]
-    support_vertices_m: tuple[tuple[float, float, float], ...]
+    collision_sphere_centers_m: tuple[tuple[float, float, float], ...]
     contact_sphere_radius_m: float
 
     def __post_init__(self) -> None:
         _finite_vector(self.reference_m, 3, "sole reference")
-        if len(self.support_vertices_m) < 3:
-            raise ValueError("sole geometry requires at least three support vertices")
-        for vertex in self.support_vertices_m:
-            _finite_vector(vertex, 3, "sole support vertex")
+        if len(self.collision_sphere_centers_m) < 3:
+            raise ValueError("sole geometry requires at least three collision spheres")
+        for center in self.collision_sphere_centers_m:
+            _finite_vector(center, 3, "sole collision sphere center")
         if not math.isfinite(self.contact_sphere_radius_m) or self.contact_sphere_radius_m <= 0.0:
             raise ValueError("contact sphere radius must be finite and positive")
 
@@ -107,14 +107,16 @@ def _matrix(value, rows: int, columns: int, label: str) -> tuple[tuple[float, ..
 
 
 # The production URDF has four radius-5 mm contact spheres on each ankle-roll
-# link.  These are the sphere bottom points and their centered sole reference.
+# link.  Store their authored centers.  A sphere's world-lowest point is its
+# transformed center minus the radius along world Z; transforming a local
+# "bottom" is wrong whenever the ankle link is tilted.
 ASIMOV_SOLE_GEOMETRY = SoleGeometry(
     reference_m=(0.0385, 0.0, -0.034),
-    support_vertices_m=(
-        (-0.045, -0.020, -0.034),
-        (-0.045, 0.020, -0.034),
-        (0.122, -0.028, -0.034),
-        (0.122, 0.028, -0.034),
+    collision_sphere_centers_m=(
+        (-0.045, -0.020, -0.029),
+        (-0.045, 0.020, -0.029),
+        (0.122, -0.028, -0.029),
+        (0.122, 0.028, -0.029),
     ),
     contact_sphere_radius_m=0.005,
 )
@@ -534,12 +536,14 @@ class Isaac61LocomotionFeedbackAdapter:
         link_positions: Sequence[Sequence[float]],
         link_orientations: Sequence[Sequence[float]],
     ) -> list[tuple[float, float, float]]:
-        """Infer a strict subset of a flat contacting sole's URDF footprint.
+        """Infer support only from URDF spheres that reach the contact plane.
 
         This is used only when PhysX contact reduction yields too few raw points
-        for a polygon.  A foot qualifies only when its positive-force contact
-        has a raw point near an authored collision sphere and all four measured
-        sphere bottoms lie on the raw contact plane within 0.5 mm.
+        for a polygon.  Raw points must map in XY to an authored sphere.  Each
+        candidate sphere uses its transformed center minus radius along world Z
+        and must reach the raw contact plane within 0.5 mm.  Three or more
+        candidates on one foot are inset before use; one or two remain explicit
+        points and cannot form a single-foot polygon.
         """
 
         feet = (
@@ -552,33 +556,73 @@ class Isaac61LocomotionFeedbackAdapter:
             if not in_contact:
                 continue
             force_n = self.last_contact_forces_n.get(side, 0.0)
-            vertices = tuple(
+            sphere_centers = tuple(
                 _transform_point(
-                    link_positions[link_index], link_orientations[link_index], vertex
+                    link_positions[link_index], link_orientations[link_index], center
                 )
-                for vertex in self.sole_geometry.support_vertices_m
+                for center in self.sole_geometry.collision_sphere_centers_m
+            )
+            sphere_support_points = tuple(
+                (center[0], center[1], center[2] - self.sole_geometry.contact_sphere_radius_m)
+                for center in sphere_centers
             )
             contact_plane_z = sum(point[2] for point in raw_points) / len(raw_points)
             raw_z_spread = max(point[2] for point in raw_points) - min(
                 point[2] for point in raw_points
             )
-            maximum_plane_error = max(
-                abs(vertex[2] - contact_plane_z) for vertex in vertices
+            sphere_plane_errors = tuple(
+                abs(point[2] - contact_plane_z) for point in sphere_support_points
             )
-            maximum_nearest_sphere_xy_distance = max(
-                min(
-                    math.hypot(point[0] - vertex[0], point[1] - vertex[1])
-                    for vertex in vertices
+            eligible_indices = tuple(
+                index
+                for index, error in enumerate(sphere_plane_errors)
+                if error <= self.support_plane_tolerance_m
+            )
+            raw_matches = []
+            maximum_nearest_sphere_xy_distance = 0.0
+            for point in raw_points:
+                xy_distances = tuple(
+                    math.hypot(point[0] - center[0], point[1] - center[1])
+                    for center in sphere_centers
                 )
-                for point in raw_points
-            )
+                nearest_index = min(range(len(xy_distances)), key=xy_distances.__getitem__)
+                nearest_distance = xy_distances[nearest_index]
+                maximum_nearest_sphere_xy_distance = max(
+                    maximum_nearest_sphere_xy_distance, nearest_distance
+                )
+                raw_matches.append(
+                    {
+                        "raw_point_world_m": list(point),
+                        "sphere_index": nearest_index,
+                        "sphere_xy_distance_m": nearest_distance,
+                        "sphere_surface_distance_error_m": abs(
+                            math.sqrt(
+                                sum(
+                                    (point[axis] - sphere_centers[nearest_index][axis]) ** 2
+                                    for axis in range(3)
+                                )
+                            )
+                            - self.sole_geometry.contact_sphere_radius_m
+                        ),
+                        "sphere_support_plane_error_m": sphere_plane_errors[nearest_index],
+                        "sphere_is_inference_candidate": nearest_index in eligible_indices,
+                    }
+                )
             gate = {
                 "force_n": force_n,
                 "raw_points_world_m": [list(point) for point in raw_points],
-                "nominal_sphere_bottoms_world_m": [list(vertex) for vertex in vertices],
+                "authored_sphere_centers_link_m": [
+                    list(center) for center in self.sole_geometry.collision_sphere_centers_m
+                ],
+                "sphere_centers_world_m": [list(center) for center in sphere_centers],
+                "sphere_world_lowest_points_m": [
+                    list(point) for point in sphere_support_points
+                ],
+                "sphere_support_plane_errors_m": list(sphere_plane_errors),
+                "eligible_sphere_indices": list(eligible_indices),
+                "raw_point_sphere_matches": raw_matches,
                 "contact_plane_z_m": contact_plane_z,
                 "raw_z_spread_m": raw_z_spread,
-                "maximum_sphere_bottom_plane_error_m": maximum_plane_error,
                 "maximum_raw_point_to_sphere_xy_distance_m": maximum_nearest_sphere_xy_distance,
                 "plane_tolerance_m": self.support_plane_tolerance_m,
                 "contact_sphere_radius_m": self.sole_geometry.contact_sphere_radius_m,
@@ -593,10 +637,6 @@ class Isaac61LocomotionFeedbackAdapter:
                 gate["error"] = "raw points do not share one contact plane"
                 self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
                 raise FeedbackUnavailableError(f"{side} raw contact plane is not flat")
-            if maximum_plane_error > self.support_plane_tolerance_m:
-                gate["error"] = "authored sphere bottoms are not on the measured contact plane"
-                self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
-                raise FeedbackUnavailableError(f"{side} sole is not coplanar with contact")
             if maximum_nearest_sphere_xy_distance > (
                 self.sole_geometry.contact_sphere_radius_m + self.support_plane_tolerance_m
             ):
@@ -604,26 +644,46 @@ class Isaac61LocomotionFeedbackAdapter:
                 self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
                 raise FeedbackUnavailableError(f"{side} raw contact is outside its sole spheres")
 
-            center_xy, _margin = support_polygon_center_and_margin(vertices, vertices[0][:2])
-            inset_vertices = [
+            candidate_points = [
                 (
-                    center_xy[0]
-                    + self.inferred_support_inset_fraction * (vertex[0] - center_xy[0]),
-                    center_xy[1]
-                    + self.inferred_support_inset_fraction * (vertex[1] - center_xy[1]),
+                    sphere_support_points[index][0],
+                    sphere_support_points[index][1],
                     contact_plane_z,
                 )
-                for vertex in vertices
+                for index in eligible_indices
             ]
-            gate["inferred_support_points_world_m"] = [
-                list(point) for point in inset_vertices
-            ]
+            if len(candidate_points) >= 3:
+                center_xy, _margin = support_polygon_center_and_margin(
+                    candidate_points, candidate_points[0][:2]
+                )
+                candidate_points = [
+                    (
+                        center_xy[0]
+                        + self.inferred_support_inset_fraction * (point[0] - center_xy[0]),
+                        center_xy[1]
+                        + self.inferred_support_inset_fraction * (point[1] - center_xy[1]),
+                        contact_plane_z,
+                    )
+                    for point in candidate_points
+                ]
+                gate["inference_mode"] = "inset_polygon"
+            else:
+                gate["inference_mode"] = "explicit_points_insufficient_alone"
+            gate["inferred_support_points_world_m"] = [list(point) for point in candidate_points]
             gate["status"] = "accepted"
-            inferred.extend(inset_vertices)
+            inferred.extend(candidate_points)
 
         self.last_support_diagnostics["contact_conditioned_feet"] = foot_diagnostics
+        self.last_support_diagnostics["contact_conditioned_candidate_points_world_m"] = [
+            list(point) for point in inferred
+        ]
+        self.last_support_diagnostics["support_points_world_m"] = [
+            list(point) for point in inferred
+        ]
         if not inferred:
-            raise FeedbackUnavailableError("no contacting foot passed support inference")
+            raise FeedbackUnavailableError(
+                "no authored collision sphere reaches the measured contact plane"
+            )
         return inferred
 
     def _read_link_masses(self) -> tuple[float, ...]:

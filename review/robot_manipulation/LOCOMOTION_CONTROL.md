@@ -131,13 +131,23 @@ would overstate support at an edge. The adapter uses the measured raw hull when
 it has at least three non-collinear points. PhysX contact reduction can supply
 fewer points than the four authored collision spheres on a rigid flat foot. In
 that case a contacting foot contributes only a 50%-scale inset of its URDF
-four-sphere footprint, and only when its sensor has positive force, every raw
-point is within 5.5 mm in XY of an authored sphere bottom, the raw points share
-one plane within 0.5 mm, and all four sphere bottoms transformed by the measured
-ankle pose lie on that measured plane within 0.5 mm. These conditions establish
-a flat, ground-matched collision footprint for this flat-floor harness while
-the inset avoids claiming the full authored boundary. A failed condition remains
-unavailable rather than silently relaxing the support polygon.
+four-sphere footprint only when at least three sphere support points qualify.
+The adapter transforms the authored sphere centers, then derives each sphere's
+world-lowest point by subtracting its radius along world Z. Transforming a
+link-local bottom offset would rotate the bottom direction with a tilted foot
+and is physically wrong for a sphere. The sensor must have positive force, raw
+points must share one plane within 0.5 mm, and every raw point must map within
+5.5 mm in XY to an authored sphere center. Only sphere world-lowest points within
+0.5 mm of that measured plane become candidates. Three or more candidates on
+one foot are inset by 50%; one or two remain explicit points and cannot make a
+single-foot polygon. A failed condition remains unavailable rather than silently
+relaxing the support polygon.
+
+Installed `ContactSensor.get_raw_data()` identifies the parent bodies but does
+not identify the individual collision shape. The production ankle-roll links
+have exactly these four collision spheres and no other collision geometry, so
+the fallback records and checks the raw-point-to-sphere spatial match rather
+than claiming a shape ID that Isaac did not report.
 
 ## Installed Isaac Sim 6.1 API evidence
 
@@ -224,6 +234,17 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   more specific result and traceback. A CPU-only probe through the installed
   `python.bat` using a child `os._exit(2)` returned launcher exit code 1; it did
   not import or start Isaac.
+- `RST-004-F07`: exact candidate `58f12985cc208922a119e0d4ec49733f2b4ef367`
+  reached the first post-settle read under elevated execution and supplied the
+  previously missing evidence. Only the left foot reported contact: 39.5973 N
+  and two raw world points on Z=0; the right reported no contact. The diagnostic
+  code had transformed link-local sphere-bottom offsets. Because the measured
+  foot was strongly pitched, two such points appeared about 0.17 m above the
+  floor and the lower pair were shifted in XY. The revision stores the actual
+  URDF sphere centers and derives world-lowest points along world Z, filters
+  candidates by the measured plane, and records raw-to-sphere matches. It will
+  still reject this observed one-foot/two-point state instead of turning it into
+  a support polygon.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -252,9 +273,13 @@ accuracy, or recovery from a physical disturbance.
 `tests/test_robot_isaac_feedback.py` adds focused CPU coverage for Isaac tensor
 shape normalization, quaternion/frame conversion, sole placement, DOF binding,
 mass-weighted world COM, current-contact support polygons, signed support
-margin, invalid/stale/missing sensor failure, malformed data failure, and static
-confirmation that the future smoke harness contains no direct root/joint state
-setter call. Invalid, nonfinite, or nonpositive run arguments are also checked
+margin, invalid/stale/missing sensor failure, and malformed data failure. A
+pitched-foot regression proves sphere centers are transformed before radius is
+subtracted along world Z, high spheres are excluded, raw points are spatially
+matched to authored collisions, and a one-foot/two-point state remains
+unavailable. Static inspection confirms that the future smoke harness contains
+no direct root/joint state setter call. Invalid, nonfinite, or nonpositive run
+arguments are also checked
 through the CPU-safe preflight boundary. Regression cases mutate or remove the
 acceptance spec, manifest hash, and installed-API hash and verify that preflight,
 repeat, and final checks fail closed after persisting the mismatch. Launcher
@@ -331,12 +356,13 @@ checks the exact integrated candidate. That validation must at minimum:
 8. repeat reset and the short-path run to check reproducibility.
 
 The source-level API names and return shapes are now resolved for the installed
-6.1 build. The failed `a89a2b9` run verified the imported link order and reached
-valid enough contact data to attempt support geometry, but its old receipt did
-not preserve exact per-foot values. Physical behavior remains unresolved: the
-actual per-foot raw contact counts and coordinates, whether the strict inset
-support gates pass under settling and swing, correctness of the selected sole
-reference under load, mass/COM fidelity, drive authority, friction/slip,
-self-collision policy, fall recovery, gait stability, docking, and repeatability
-all require the next serialized Isaac run. No CPU test can promote those limits
-to a physical pass.
+6.1 build. The failed `58f1298` run verified the imported link order and recorded
+the exact initial contact state. It found only two left-foot raw points with the
+right foot airborne after settle, so the robot did not have polygonal support
+for gait. Physical behavior remains unresolved: whether a corrected reset/settle
+state produces bilateral support, whether the strict sphere-plane inference is
+ever needed in a flat supported pose, correctness of the selected sole reference
+under load, mass/COM fidelity, drive authority, friction/slip, self-collision
+policy, fall recovery, gait stability, docking, and repeatability all require a
+later serialized Isaac run. No CPU test can promote those limits to a physical
+pass.

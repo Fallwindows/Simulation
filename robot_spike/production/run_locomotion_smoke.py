@@ -639,13 +639,17 @@ def run_isaac(
                 },
                 "sole_geometry": {
                     "reference_m": list(ASIMOV_SOLE_GEOMETRY.reference_m),
-                    "support_vertices_m": [list(vertex) for vertex in ASIMOV_SOLE_GEOMETRY.support_vertices_m],
+                    "collision_sphere_centers_m": [
+                        list(center)
+                        for center in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m
+                    ],
                     "contact_sphere_radius_m": ASIMOV_SOLE_GEOMETRY.contact_sphere_radius_m,
                     "source": "production URDF ankle-roll collision spheres",
                 },
                 "support_inference": {
                     "enabled_only_when_raw_hull_is_insufficient": True,
                     "requires_positive_contact_force": True,
+                    "sphere_support_direction_world": [0.0, 0.0, -1.0],
                     "plane_tolerance_m": adapter.support_plane_tolerance_m,
                     "raw_point_sphere_xy_tolerance_m": (
                         ASIMOV_SOLE_GEOMETRY.contact_sphere_radius_m

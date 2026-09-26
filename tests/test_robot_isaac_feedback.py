@@ -184,8 +184,8 @@ class IsaacFeedbackTests(unittest.TestCase):
             point[0] for point in inferred[:4]
         )
         authored_width = (
-            max(point[0] for point in ASIMOV_SOLE_GEOMETRY.support_vertices_m)
-            - min(point[0] for point in ASIMOV_SOLE_GEOMETRY.support_vertices_m)
+            max(point[0] for point in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m)
+            - min(point[0] for point in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m)
         )
         self.assertAlmostEqual(inferred_left_width, 0.5 * authored_width)
 
@@ -228,12 +228,53 @@ class IsaacFeedbackTests(unittest.TestCase):
             maximum_contact_age_s=0.01,
         )
 
-        with self.assertRaisesRegex(FeedbackUnavailableError, "sole is not coplanar"):
+        with self.assertRaisesRegex(
+            FeedbackUnavailableError,
+            "no authored collision sphere reaches the measured contact plane",
+        ):
             adapter.read_feedback()
         gate = adapter.diagnostics()["support"]["contact_conditioned_feet"]["left"]
-        self.assertAlmostEqual(gate["maximum_sphere_bottom_plane_error_m"], 0.002)
+        self.assertEqual(gate["eligible_sphere_indices"], [])
+        self.assertEqual(gate["inferred_support_points_world_m"], [])
+
+    def test_tipped_sole_filters_high_spheres_and_stays_fail_closed(self):
+        half = math.sqrt(0.5)
+        links = FakeLinks()
+        links.get_world_poses = lambda: (
+            Array([[1.0, 2.0, 0.60], [0.0, 0.0, 0.05], [1.0, 1.90, 0.034]]),
+            Array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [half, 0.0, -half, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                ]
+            ),
+        )
+        adapter = Isaac61LocomotionFeedbackAdapter(
+            FakeArticulation(),
+            links,
+            FakeSensor(Reading(), [(0.029, -0.020, 0.0), (0.029, 0.020, 0.0)]),
+            FakeSensor(Reading(in_contact=False, value=0.0), []),
+            lambda: 1.0,
+            maximum_contact_age_s=0.01,
+        )
+
+        with self.assertRaisesRegex(
+            FeedbackUnavailableError, "support polygon requires three distinct finite points"
+        ):
+            adapter.read_feedback()
+        support = adapter.diagnostics()["support"]
+        gate = support["contact_conditioned_feet"]["left"]
+        self.assertEqual(gate["eligible_sphere_indices"], [0, 1])
+        self.assertEqual(gate["inference_mode"], "explicit_points_insufficient_alone")
+        self.assertEqual(len(gate["inferred_support_points_world_m"]), 2)
+        self.assertEqual(len(support["support_points_world_m"]), 2)
+        self.assertAlmostEqual(gate["sphere_centers_world_m"][0][0], 0.029)
+        self.assertAlmostEqual(gate["sphere_world_lowest_points_m"][0][2], 0.0)
+        self.assertAlmostEqual(gate["sphere_world_lowest_points_m"][2][2], 0.167)
         self.assertEqual(
-            gate["error"], "authored sphere bottoms are not on the measured contact plane"
+            [match["sphere_index"] for match in gate["raw_point_sphere_matches"]],
+            [0, 1],
         )
 
     def test_missing_stale_or_absent_contact_fails_closed(self):
