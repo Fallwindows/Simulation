@@ -67,6 +67,151 @@
       }
     ]
   },
+  "fixed_input_verification": {
+    "status": "passed",
+    "rule": "All 12 declared raw inputs must match pinned SHA-256 values before any output write. Current and R7 RGB indices must be byte-identical and contain exactly 613 schema-exact, contiguous rgb8 camera_optical_frame 1920x1080 rows with finite, strictly increasing timestamps on the 30-fps 0.1..20.5 s schedule within 3e-9 s. Each pinned capture manifest must bind the expected identity, RGB/config files, dimensions, FOV, count, rate, and timestamp range. The pinned SLAM and perception receipts must be complete and exactly linked to Current capture.",
+    "artifact_count": 12,
+    "expected_artifact_sha256": {
+      "raw_comparison_video": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+      "raw_six_sample_sheet": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+      "current_capture_manifest": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "current_rgb_video": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+      "current_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "current_effective_config": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+      "r7_capture_manifest": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+      "r7_rgb_video": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+      "r7_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+      "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295"
+    },
+    "artifact_sha256": {
+      "raw_comparison_video": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+      "raw_six_sample_sheet": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+      "current_capture_manifest": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "current_rgb_video": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+      "current_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "current_effective_config": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+      "r7_capture_manifest": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+      "r7_rgb_video": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+      "r7_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+      "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295"
+    },
+    "rgb_index": {
+      "current_and_r7_bytes_identical": true,
+      "sha256": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "schema_keys": [
+        "encoding",
+        "frame_id",
+        "frame_index",
+        "height",
+        "stamp_s",
+        "width"
+      ],
+      "frame_id": "camera_optical_frame",
+      "frame_count": 613,
+      "frame_indices_contiguous": true,
+      "timestamps_finite_and_strictly_increasing": true,
+      "fps": 30.0,
+      "first_stamp_s": 0.1,
+      "last_stamp_s": 20.5,
+      "timestamp_tolerance_s": 3e-09,
+      "maximum_schedule_error_s": 2.333337079107878e-09
+    },
+    "capture_binding": {
+      "current": {
+        "identity": {
+          "capture_id": "20260925-183307101",
+          "status": "complete",
+          "git_sha": "48de461b42d5e0945b21432cef9f5523cc5b0874",
+          "git_tree": "74fc8d8457799a49b0e2ddaccef139e86aac99c1",
+          "capture_sha256": "a89471e34fb490727c182601c631d4a2ba95bb37499cbdddf03a1829829579b0"
+        },
+        "rgb": {
+          "video": "rgb_camera.mp4",
+          "timestamp_index": "rgb_frames.jsonl",
+          "frame_count": 613,
+          "first_stamp_s": 0.1,
+          "last_stamp_s": 20.5,
+          "width_px": 1920,
+          "height_px": 1080,
+          "fps": 30.0
+        },
+        "declared_file_sha256": {
+          "effective_config.json": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+          "rgb_camera.mp4": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+          "rgb_frames.jsonl": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915"
+        },
+        "effective_camera": {
+          "width_px": 1920,
+          "height_px": 1080,
+          "fps": 30.0,
+          "horizontal_fov_deg": 75.0
+        }
+      },
+      "r7": {
+        "identity": {
+          "capture_id": "20260925-041644489",
+          "status": "complete",
+          "git_sha": "3dc5107e8fedee3835259282e1655749ec7438c0",
+          "git_tree": "048f7d9d50d6339864ac0bc9e4b2d3a4fbb7ccb4",
+          "capture_sha256": "5429fb8cfbbae8bc5bca6c2c688515eb49e3b81c5f8eae2bad1de836730e86d9"
+        },
+        "rgb": {
+          "video": "rgb_camera.mp4",
+          "timestamp_index": "rgb_frames.jsonl",
+          "frame_count": 613,
+          "first_stamp_s": 0.1,
+          "last_stamp_s": 20.5,
+          "width_px": 1920,
+          "height_px": 1080,
+          "fps": 30.0
+        },
+        "declared_file_sha256": {
+          "effective_config.json": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+          "rgb_camera.mp4": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+          "rgb_frames.jsonl": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915"
+        },
+        "effective_camera": {
+          "width_px": 1920,
+          "height_px": 1080,
+          "fps": 30.0,
+          "horizontal_fov_deg": 90.0
+        }
+      }
+    },
+    "pipeline_receipt_binding": {
+      "slam": {
+        "status": "complete",
+        "experiment": "offline_slam",
+        "capture_id": "20260925-183307101",
+        "capture_sha256": "a89471e34fb490727c182601c631d4a2ba95bb37499cbdddf03a1829829579b0",
+        "git_sha": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+        "ground_truth_subscribed": false,
+        "publish_map_service_acknowledged": true
+      },
+      "perception": {
+        "status": "complete",
+        "capture_id": "20260925-183307101",
+        "capture_manifest_sha256": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+        "capture_sha256": "a89471e34fb490727c182601c631d4a2ba95bb37499cbdddf03a1829829579b0",
+        "git_sha": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+        "frame_count": 613,
+        "frames": "../capture/rgb_frames.jsonl",
+        "ground_truth_consumed": false,
+        "capture_input": {
+          "capture_id": "20260925-183307101",
+          "capture_sha256": "a89471e34fb490727c182601c631d4a2ba95bb37499cbdddf03a1829829579b0",
+          "manifest": {
+            "path": "../capture/capture_manifest.json",
+            "sha256": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b"
+          }
+        }
+      }
+    }
+  },
   "panel_source_verification": {
     "status": "passed",
     "rule": "Every one of 613 synchronized decoded frames is compared at 1920x1080 RGB24; the comparison left half must match Current and the right half must match R7 with per-frame PSNR >= 38.0 dB. The three artifact hashes and exact per-frame SSE receipt digest must match their pinned values. Missing, extra, truncated, substituted, or lower-PSNR frames fail the rebuild.",
@@ -214,13 +359,13 @@
     },
     "README.md": {
       "path": "README.md",
-      "sha256": "e72a8b7a81d27891ae0cd5b8508c06ff03339906fb046c34e34b9444789e0c1c",
-      "size_bytes": 4873
+      "sha256": "c1956f517aad98f537539cb714a88ae0169c27a53bbea89c91d16c944a4d8161",
+      "size_bytes": 5471
     },
     "build_evidence.py": {
       "path": "build_evidence.py",
-      "sha256": "6acb10084eff897d3cc1a27a4760a7a5535045de5f32fbbd4e83d385ebaf2527",
-      "size_bytes": 32002
+      "sha256": "c1b1b74e3b32e0b0f3e0257490309f3c92f864d023330ba150f9ca9281971015",
+      "size_bytes": 47519
     }
   },
   "current_pipeline_checkpoint": {

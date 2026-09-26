@@ -33,6 +33,15 @@ is `b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec`. The packe
 inputs, both exact capture manifests, both RGB videos and timestamp indices, and all
 packet outputs.
 
+Before any packet output is written, all 12 declared raw inputs must match their
+pinned SHA-256 values. Both RGB frame indices must be byte-identical and must contain
+exactly 613 contiguous rows with finite, strictly increasing timestamps on the
+30 fps 0.1 through 20.5 second schedule. The pinned capture manifests must also bind
+the expected capture identity, source commit/tree/seal, RGB/config files, dimensions,
+FOV, frame count, rate, and timestamp range. The pinned SLAM and perception receipts
+must remain complete and linked to the exact Current capture. Any mismatch aborts
+the rebuild.
+
 Before labeling, the builder decodes all 613 frames of the raw comparison and both
 hash-bound RGB sources as RGB24. Every left panel frame must match Current and every
 right panel frame must match R7 at least 38.0 dB PSNR; the three artifact hashes and

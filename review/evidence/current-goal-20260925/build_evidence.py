@@ -42,12 +42,25 @@ R7_LABEL = "R7 | capture 20260925-041644489 | source 3dc5107"
 FRAME_WIDTH = 1920
 FRAME_HEIGHT = 1080
 EXPECTED_FRAME_COUNT = 613
+EXPECTED_FIRST_STAMP_S = 0.1
+EXPECTED_LAST_STAMP_S = 20.5
+EXPECTED_FPS = 30.0
+TIMESTAMP_TOLERANCE_S = 3e-9
 MIN_PANEL_PSNR_DB = 38.0
 EXPECTED_PANEL_SSE_RECEIPT_SHA256 = "4726e227de7b57197871f0536566cb4e6650d827ff526d74a2b8b1c9df5a1efe"
-EXPECTED_VERIFICATION_ARTIFACT_SHA256 = {
-    "comparison": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
-    "current": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
-    "r7": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+EXPECTED_FIXED_INPUT_SHA256 = {
+    "raw_comparison_video": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+    "raw_six_sample_sheet": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+    "current_capture_manifest": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+    "current_rgb_video": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+    "current_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+    "current_effective_config": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+    "r7_capture_manifest": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+    "r7_rgb_video": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+    "r7_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+    "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+    "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+    "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295",
 }
 
 
@@ -55,7 +68,12 @@ def validate_runtime() -> None:
     required = {
         "raw comparison video": RAW_VIDEO,
         "raw six-sample sheet": RAW_SHEET,
+        "current capture manifest": CURRENT_CAPTURE / "capture_manifest.json",
+        "current RGB video": CURRENT_CAPTURE / "rgb_camera.mp4",
         "current RGB index": CURRENT_INDEX,
+        "current effective config": CURRENT_CAPTURE / "effective_config.json",
+        "current SLAM manifest": CURRENT_SLAM,
+        "current perception manifest": CURRENT_PERCEPTION,
         "R7 capture manifest": R7_CAPTURE / "capture_manifest.json",
         "R7 RGB video": R7_CAPTURE / "rgb_camera.mp4",
         "R7 RGB index": R7_CAPTURE / "rgb_frames.jsonl",
@@ -102,6 +120,305 @@ def load_timestamps() -> list[float]:
     return [json.loads(line)["stamp_s"] for line in CURRENT_INDEX.read_text(encoding="utf-8").splitlines()]
 
 
+def fixed_input_paths() -> dict[str, Path]:
+    return {
+        "raw_comparison_video": RAW_VIDEO,
+        "raw_six_sample_sheet": RAW_SHEET,
+        "current_capture_manifest": CURRENT_CAPTURE / "capture_manifest.json",
+        "current_rgb_video": CURRENT_CAPTURE / "rgb_camera.mp4",
+        "current_rgb_index": CURRENT_INDEX,
+        "current_effective_config": CURRENT_CAPTURE / "effective_config.json",
+        "r7_capture_manifest": R7_CAPTURE / "capture_manifest.json",
+        "r7_rgb_video": R7_CAPTURE / "rgb_camera.mp4",
+        "r7_rgb_index": R7_CAPTURE / "rgb_frames.jsonl",
+        "r7_effective_config": R7_CAPTURE / "effective_config.json",
+        "current_slam_manifest": CURRENT_SLAM,
+        "current_perception_manifest": CURRENT_PERCEPTION,
+    }
+
+
+def verify_fixed_inputs() -> tuple[list[float], dict[str, object]]:
+    """Fail closed unless every fixed input and capture/index binding is exact."""
+    paths = fixed_input_paths()
+    actual_sha256 = {name: sha256(path) for name, path in paths.items()}
+    if actual_sha256 != EXPECTED_FIXED_INPUT_SHA256:
+        mismatches = {
+            name: {
+                "expected": EXPECTED_FIXED_INPUT_SHA256.get(name),
+                "actual": actual_sha256.get(name),
+            }
+            for name in sorted(set(EXPECTED_FIXED_INPUT_SHA256) | set(actual_sha256))
+            if EXPECTED_FIXED_INPUT_SHA256.get(name) != actual_sha256.get(name)
+        }
+        raise RuntimeError(f"fixed RGB evidence input hash mismatch: {mismatches}")
+
+    current_index_bytes = paths["current_rgb_index"].read_bytes()
+    r7_index_bytes = paths["r7_rgb_index"].read_bytes()
+    if current_index_bytes != r7_index_bytes:
+        raise RuntimeError("Current and R7 rgb_frames.jsonl bytes differ")
+    try:
+        index_rows = [
+            json.loads(line)
+            for line in current_index_bytes.decode("utf-8").splitlines()
+        ]
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"invalid RGB frame index: {error}") from error
+    if len(index_rows) != EXPECTED_FRAME_COUNT:
+        raise RuntimeError(
+            f"unexpected RGB frame-index row count: {len(index_rows)} != {EXPECTED_FRAME_COUNT}"
+        )
+
+    timestamps: list[float] = []
+    max_schedule_error_s = 0.0
+    previous_stamp = -math.inf
+    expected_index_keys = {
+        "encoding", "frame_id", "frame_index", "height", "stamp_s", "width"
+    }
+    for expected_index, row in enumerate(index_rows):
+        if set(row) != expected_index_keys:
+            raise RuntimeError(
+                f"unexpected RGB frame-index schema at row {expected_index}: "
+                f"{sorted(row)}"
+            )
+        if row.get("frame_index") != expected_index:
+            raise RuntimeError(
+                f"non-contiguous RGB frame index at row {expected_index}: "
+                f"{row.get('frame_index')!r}"
+            )
+        try:
+            stamp = float(row["stamp_s"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"invalid RGB timestamp at row {expected_index}") from error
+        if not math.isfinite(stamp) or stamp <= previous_stamp:
+            raise RuntimeError(
+                f"RGB timestamps must be finite and strictly increasing; row "
+                f"{expected_index} has {stamp!r} after {previous_stamp!r}"
+            )
+        expected_stamp = EXPECTED_FIRST_STAMP_S + expected_index / EXPECTED_FPS
+        schedule_error_s = abs(stamp - expected_stamp)
+        if schedule_error_s > TIMESTAMP_TOLERANCE_S:
+            raise RuntimeError(
+                f"RGB timestamp at row {expected_index} is off the 30-fps schedule: "
+                f"{stamp:.9f} vs {expected_stamp:.9f}"
+            )
+        if (
+            row.get("width") != FRAME_WIDTH
+            or row.get("height") != FRAME_HEIGHT
+            or row.get("encoding") != "rgb8"
+            or row.get("frame_id") != "camera_optical_frame"
+        ):
+            raise RuntimeError(f"unexpected RGB frame metadata at row {expected_index}: {row}")
+        timestamps.append(stamp)
+        previous_stamp = stamp
+        max_schedule_error_s = max(max_schedule_error_s, schedule_error_s)
+
+    if (
+        abs(timestamps[0] - EXPECTED_FIRST_STAMP_S) > TIMESTAMP_TOLERANCE_S
+        or abs(timestamps[-1] - EXPECTED_LAST_STAMP_S) > TIMESTAMP_TOLERANCE_S
+    ):
+        raise RuntimeError(
+            f"unexpected RGB timestamp range: {timestamps[0]}..{timestamps[-1]}"
+        )
+
+    expected_captures = {
+        "current": {
+            "capture_id": "20260925-183307101",
+            "status": "complete",
+            "git_sha": "48de461b42d5e0945b21432cef9f5523cc5b0874",
+            "git_tree": "74fc8d8457799a49b0e2ddaccef139e86aac99c1",
+            "capture_sha256": "a89471e34fb490727c182601c631d4a2ba95bb37499cbdddf03a1829829579b0",
+        },
+        "r7": {
+            "capture_id": "20260925-041644489",
+            "status": "complete",
+            "git_sha": "3dc5107e8fedee3835259282e1655749ec7438c0",
+            "git_tree": "048f7d9d50d6339864ac0bc9e4b2d3a4fbb7ccb4",
+            "capture_sha256": "5429fb8cfbbae8bc5bca6c2c688515eb49e3b81c5f8eae2bad1de836730e86d9",
+        },
+    }
+    capture_paths = {
+        "current": paths["current_capture_manifest"],
+        "r7": paths["r7_capture_manifest"],
+    }
+    expected_fov_degrees = {"current": 75.0, "r7": 90.0}
+    capture_receipt: dict[str, dict[str, object]] = {}
+    for name, path in capture_paths.items():
+        try:
+            capture = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"invalid {name} capture manifest: {error}") from error
+        identity = {key: capture.get(key) for key in expected_captures[name]}
+        if identity != expected_captures[name]:
+            raise RuntimeError(
+                f"{name} capture identity mismatch: expected={expected_captures[name]}, "
+                f"actual={identity}"
+            )
+        rgb = capture.get("rgb", {})
+        expected_rgb = {
+            "video": "rgb_camera.mp4",
+            "timestamp_index": "rgb_frames.jsonl",
+            "frame_count": EXPECTED_FRAME_COUNT,
+            "first_stamp_s": EXPECTED_FIRST_STAMP_S,
+            "last_stamp_s": EXPECTED_LAST_STAMP_S,
+            "width_px": FRAME_WIDTH,
+            "height_px": FRAME_HEIGHT,
+            "fps": EXPECTED_FPS,
+        }
+        actual_rgb = {key: rgb.get(key) for key in expected_rgb}
+        if actual_rgb != expected_rgb:
+            raise RuntimeError(
+                f"{name} capture RGB binding mismatch: expected={expected_rgb}, "
+                f"actual={actual_rgb}"
+            )
+        expected_file_sha256 = {
+            "rgb_camera.mp4": actual_sha256[f"{name}_rgb_video"],
+            "rgb_frames.jsonl": actual_sha256[f"{name}_rgb_index"],
+            "effective_config.json": actual_sha256[f"{name}_effective_config"],
+        }
+        declared_files = {
+            item.get("path"): item.get("sha256")
+            for item in capture.get("files", [])
+            if item.get("path") in expected_file_sha256
+        }
+        if declared_files != expected_file_sha256:
+            raise RuntimeError(
+                f"{name} capture file binding mismatch: expected={expected_file_sha256}, "
+                f"actual={declared_files}"
+            )
+        effective_config_path = paths[f"{name}_effective_config"]
+        try:
+            effective_config = json.loads(effective_config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"invalid {name} effective config: {error}") from error
+        camera = effective_config.get("camera", {})
+        expected_camera = {
+            "width_px": FRAME_WIDTH,
+            "height_px": FRAME_HEIGHT,
+            "fps": EXPECTED_FPS,
+            "horizontal_fov_deg": expected_fov_degrees[name],
+        }
+        actual_camera = {key: camera.get(key) for key in expected_camera}
+        if actual_camera != expected_camera:
+            raise RuntimeError(
+                f"{name} effective camera binding mismatch: expected={expected_camera}, "
+                f"actual={actual_camera}"
+            )
+        if name == "current":
+            expected_source_bindings = {
+                "git_commit": expected_captures[name]["git_sha"],
+                "git_tree": expected_captures[name]["git_tree"],
+            }
+            source_bindings = effective_config.get("source_bindings", {})
+            actual_source_bindings = {
+                key: source_bindings.get(key) for key in expected_source_bindings
+            }
+            if actual_source_bindings != expected_source_bindings:
+                raise RuntimeError(
+                    "current effective-config source binding mismatch: "
+                    f"expected={expected_source_bindings}, actual={actual_source_bindings}"
+                )
+        capture_receipt[name] = {
+            "identity": identity,
+            "rgb": actual_rgb,
+            "declared_file_sha256": declared_files,
+            "effective_camera": actual_camera,
+        }
+
+    current_capture = expected_captures["current"]
+    try:
+        slam = json.loads(paths["current_slam_manifest"].read_text(encoding="utf-8"))
+        perception = json.loads(
+            paths["current_perception_manifest"].read_text(encoding="utf-8")
+        )
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"invalid SLAM/perception receipt: {error}") from error
+    expected_slam = {
+        "status": "complete",
+        "experiment": "offline_slam",
+        "capture_id": current_capture["capture_id"],
+        "capture_sha256": current_capture["capture_sha256"],
+        "git_sha": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+        "ground_truth_subscribed": False,
+        "publish_map_service_acknowledged": True,
+    }
+    actual_slam = {key: slam.get(key) for key in expected_slam}
+    if actual_slam != expected_slam:
+        raise RuntimeError(
+            f"SLAM receipt identity/linkage mismatch: expected={expected_slam}, "
+            f"actual={actual_slam}"
+        )
+    expected_perception = {
+        "status": "complete",
+        "capture_id": current_capture["capture_id"],
+        "capture_manifest_sha256": actual_sha256["current_capture_manifest"],
+        "capture_sha256": current_capture["capture_sha256"],
+        "git_sha": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+        "frame_count": EXPECTED_FRAME_COUNT,
+        "frames": "../capture/rgb_frames.jsonl",
+        "ground_truth_consumed": False,
+    }
+    actual_perception = {key: perception.get(key) for key in expected_perception}
+    if actual_perception != expected_perception:
+        raise RuntimeError(
+            f"perception receipt identity/linkage mismatch: expected={expected_perception}, "
+            f"actual={actual_perception}"
+        )
+    expected_perception_capture_input = {
+        "capture_id": current_capture["capture_id"],
+        "capture_sha256": current_capture["capture_sha256"],
+        "manifest": {
+            "path": "../capture/capture_manifest.json",
+            "sha256": actual_sha256["current_capture_manifest"],
+        },
+    }
+    actual_perception_capture_input = perception.get("inputs", {}).get("capture")
+    if actual_perception_capture_input != expected_perception_capture_input:
+        raise RuntimeError(
+            "perception nested capture linkage mismatch: "
+            f"expected={expected_perception_capture_input}, "
+            f"actual={actual_perception_capture_input}"
+        )
+
+    return timestamps, {
+        "status": "passed",
+        "rule": (
+            "All 12 declared raw inputs must match pinned SHA-256 values before any "
+            "output write. Current and R7 RGB indices must be byte-identical and contain "
+            "exactly 613 schema-exact, contiguous rgb8 camera_optical_frame 1920x1080 "
+            "rows with finite, strictly increasing "
+            "timestamps on the 30-fps 0.1..20.5 s schedule within 3e-9 s. Each pinned "
+            "capture manifest must bind the expected identity, RGB/config files, "
+            "dimensions, FOV, count, rate, and timestamp range. The pinned SLAM and "
+            "perception receipts must be complete and exactly linked to Current capture."
+        ),
+        "artifact_count": len(actual_sha256),
+        "expected_artifact_sha256": EXPECTED_FIXED_INPUT_SHA256,
+        "artifact_sha256": actual_sha256,
+        "rgb_index": {
+            "current_and_r7_bytes_identical": True,
+            "sha256": actual_sha256["current_rgb_index"],
+            "schema_keys": sorted(expected_index_keys),
+            "frame_id": "camera_optical_frame",
+            "frame_count": len(index_rows),
+            "frame_indices_contiguous": True,
+            "timestamps_finite_and_strictly_increasing": True,
+            "fps": EXPECTED_FPS,
+            "first_stamp_s": timestamps[0],
+            "last_stamp_s": timestamps[-1],
+            "timestamp_tolerance_s": TIMESTAMP_TOLERANCE_S,
+            "maximum_schedule_error_s": max_schedule_error_s,
+        },
+        "capture_binding": capture_receipt,
+        "pipeline_receipt_binding": {
+            "slam": actual_slam,
+            "perception": {
+                **actual_perception,
+                "capture_input": actual_perception_capture_input,
+            },
+        },
+    }
+
+
 def _read_exact(stream: object, byte_count: int) -> bytes:
     payload = bytearray()
     while len(payload) < byte_count:
@@ -119,11 +436,16 @@ def verify_raw_comparison_sources() -> dict[str, object]:
         "current": CURRENT_CAPTURE / "rgb_camera.mp4",
         "r7": R7_CAPTURE / "rgb_camera.mp4",
     }
+    expected_artifact_sha256 = {
+        "comparison": EXPECTED_FIXED_INPUT_SHA256["raw_comparison_video"],
+        "current": EXPECTED_FIXED_INPUT_SHA256["current_rgb_video"],
+        "r7": EXPECTED_FIXED_INPUT_SHA256["r7_rgb_video"],
+    }
     actual_artifact_sha256 = {name: sha256(path) for name, path in sources.items()}
-    if actual_artifact_sha256 != EXPECTED_VERIFICATION_ARTIFACT_SHA256:
+    if actual_artifact_sha256 != expected_artifact_sha256:
         raise RuntimeError(
             "panel-source verification artifact hash mismatch: "
-            f"expected={EXPECTED_VERIFICATION_ARTIFACT_SHA256}, "
+            f"expected={expected_artifact_sha256}, "
             f"actual={actual_artifact_sha256}"
         )
     commands = {
@@ -388,11 +710,7 @@ def build_video(timestamps: list[float]) -> None:
 
 def main() -> None:
     validate_runtime()
-    timestamps = load_timestamps()
-    if len(timestamps) != EXPECTED_FRAME_COUNT:
-        raise RuntimeError(
-            f"unexpected RGB timestamp count: {len(timestamps)} != {EXPECTED_FRAME_COUNT}"
-        )
+    timestamps, fixed_input_verification = verify_fixed_inputs()
     source_verification = verify_raw_comparison_sources()
     samples = build_sheet(timestamps)
     build_video(timestamps)
@@ -462,6 +780,15 @@ The unlabelled inputs remain unchanged under
 is `{raw_inputs['raw_six_sample_sheet']['sha256']}`. The packet manifest binds these
 inputs, both exact capture manifests, both RGB videos and timestamp indices, and all
 packet outputs.
+
+Before any packet output is written, all 12 declared raw inputs must match their
+pinned SHA-256 values. Both RGB frame indices must be byte-identical and must contain
+exactly 613 contiguous rows with finite, strictly increasing timestamps on the
+30 fps 0.1 through 20.5 second schedule. The pinned capture manifests must also bind
+the expected capture identity, source commit/tree/seal, RGB/config files, dimensions,
+FOV, frame count, rate, and timestamp range. The pinned SLAM and perception receipts
+must remain complete and linked to the exact Current capture. Any mismatch aborts
+the rebuild.
 
 Before labeling, the builder decodes all 613 frames of the raw comparison and both
 hash-bound RGB sources as RGB24. Every left panel frame must match Current and every
@@ -572,6 +899,7 @@ logical path below its checkout and fails with a prerequisite list when it is ab
             "current_and_r7_index_bytes_identical": sha256(CURRENT_INDEX) == sha256(R7_CAPTURE / "rgb_frames.jsonl"),
             "samples": samples,
         },
+        "fixed_input_verification": fixed_input_verification,
         "panel_source_verification": source_verification,
         "inputs": raw_inputs,
         "outputs": outputs,
