@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import hashlib
 import math
@@ -77,6 +78,19 @@ EXPECTED_STABLE_OUTPUT_SHA256 = {
     "current-vs-r7-labeled-6-samples.png": "bc1d0c517a6df0ae039a307919aa5aadd84d1ad38efc424783aa1580705b760a",
     "sample-times.json": "09584844769c1d2b6ffca54d339624c06da7772280654523a7e318c44adb82b7",
 }
+TRANSACTION_NAMESPACE_NAME = ".rgb-evidence-transactions"
+TRANSACTION_NAME_PREFIX = "tx-"
+GARBAGE_TRANSACTION_NAME_PREFIX = "gc-"
+LEGACY_TRANSACTION_NAME_PREFIX = ".rgb-evidence-transaction-"
+PUBLICATION_JOURNAL_NAME = "publication-journal.json"
+PUBLICATION_JOURNAL_SCHEMA = "grocery.rgb_evidence_publication_transaction"
+PUBLICATION_PREPARED_MARKER = "PREPARED"
+PUBLICATION_COMMITTED_MARKER = "COMMITTED"
+PUBLICATION_GC_MARKER = "GC_READY"
+PUBLICATION_LOCK_NAME = "publication.lock"
+PUBLICATION_ORDER = tuple(
+    name for name in GENERATED_OUTPUT_NAMES if name != "manifest.json"
+) + ("manifest.json",)
 
 
 def validate_runtime() -> None:
@@ -131,6 +145,74 @@ def file_record(
     }
 
 
+def capture_builder_source() -> tuple[Path, bytes, dict[str, object]]:
+    builder_path = Path(__file__).absolute()
+    if is_link_or_junction(builder_path):
+        raise RuntimeError(f"builder source must not be a link or junction: {builder_path}")
+    builder_bytes = builder_path.read_bytes()
+    try:
+        git_root = Path(subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=builder_path.parent,
+        ).stdout.strip())
+        relative_path = builder_path.relative_to(git_root).as_posix()
+        tracked_blob = subprocess.run(
+            ["git", "rev-parse", f"HEAD:{relative_path}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=git_root,
+        ).stdout.strip()
+        if (
+            len(tracked_blob) not in {40, 64}
+            or any(character not in "0123456789abcdef" for character in tracked_blob)
+        ):
+            raise RuntimeError(f"invalid tracked builder blob identity: {tracked_blob!r}")
+        tracked_bytes = subprocess.run(
+            ["git", "cat-file", "blob", tracked_blob],
+            check=True,
+            capture_output=True,
+            cwd=git_root,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError, ValueError) as error:
+        raise RuntimeError("cannot resolve executing builder to the tracked HEAD blob") from error
+    if tracked_bytes != builder_bytes:
+        raise RuntimeError(
+            "executing builder bytes differ from the externally tracked HEAD blob"
+        )
+    record = {
+        "path": "build_evidence.py",
+        "sha256": hashlib.sha256(builder_bytes).hexdigest(),
+        "size_bytes": len(builder_bytes),
+        "tracked_head_blob": tracked_blob,
+        "tracked_head_bytes_identical": True,
+    }
+    return builder_path, builder_bytes, record
+
+
+def verify_builder_source(
+    builder_path: Path,
+    captured_bytes: bytes,
+    captured_record: dict[str, object],
+) -> None:
+    current_bytes = builder_path.read_bytes()
+    current_record = {
+        "path": "build_evidence.py",
+        "sha256": hashlib.sha256(current_bytes).hexdigest(),
+        "size_bytes": len(current_bytes),
+        "tracked_head_blob": captured_record["tracked_head_blob"],
+        "tracked_head_bytes_identical": True,
+    }
+    if current_bytes != captured_bytes or current_record != captured_record:
+        raise RuntimeError(
+            f"executing builder source changed during generation: "
+            f"captured={captured_record}, current={current_record}"
+        )
+
+
 def fixed_input_paths() -> dict[str, Path]:
     return {
         "raw_comparison_video": RAW_VIDEO,
@@ -176,7 +258,7 @@ def snapshot_fixed_inputs(
     original_paths: dict[str, Path],
     snapshot_dir: Path,
 ) -> tuple[dict[str, Path], dict[str, object]]:
-    """Copy and hash all fixed inputs into a private, verified snapshot set."""
+    """Copy and hash all fixed inputs into a transaction-local snapshot set."""
     if set(original_paths) != set(EXPECTED_FIXED_INPUT_SHA256):
         raise RuntimeError("cannot snapshot an incomplete fixed-input set")
     snapshot_dir.mkdir(parents=True, exist_ok=False)
@@ -204,7 +286,9 @@ def snapshot_fixed_inputs(
         snapshot_paths[name] = destination
         copied_sha256[name] = copied_hash
         copied_size_bytes[name] = size_bytes
-    snapshot_sha256 = verify_expected_hashes(snapshot_paths, label="private snapshot")
+    snapshot_sha256 = verify_expected_hashes(
+        snapshot_paths, label="transaction snapshot"
+    )
     if os.name != "nt":
         snapshot_dir.chmod(0o700)
     for path in snapshot_paths.values():
@@ -212,13 +296,15 @@ def snapshot_fixed_inputs(
     return snapshot_paths, {
         "status": "passed",
         "rule": (
-            "Each of the 12 fixed inputs is copied once into a private snapshot while "
+            "Each of the 12 fixed inputs is copied once into a transaction-local "
+            "snapshot while "
             "the copied bytes are hashed. Generation reads only those snapshots. The "
             "snapshot files are rehashed against the same pins before use and again "
             "before publication."
         ),
         "copied_while_hashing": True,
-        "private_transaction_scope": True,
+        "git_ignored_same_volume_transaction": True,
+        "directory_acl_policy": "Inherited host ACLs; no restrictive Windows ACL is claimed.",
         "read_only_during_generation": True,
         "artifact_count": len(snapshot_paths),
         "copied_sha256": copied_sha256,
@@ -815,6 +901,7 @@ def build_staged_packet(
     snapshot_paths: dict[str, Path],
     original_paths: dict[str, Path],
     snapshot_verification: dict[str, object],
+    builder_source_record: dict[str, object],
 ) -> dict[str, object]:
     timestamps, fixed_input_verification, parsed_receipts = verify_fixed_inputs(
         snapshot_paths
@@ -894,12 +981,19 @@ is `{raw_inputs['raw_six_sample_sheet']['sha256']}`. The packet manifest binds t
 inputs, both exact capture manifests, both RGB videos and timestamp indices, and all
 packet outputs.
 
-The builder copies all 12 inputs into private, read-only files while hashing the
-copied bytes. All decoding, matching, labels, and metadata use only those verified snapshots. It
+The builder copies all 12 inputs into read-only files in a Git-ignored, same-volume
+transaction namespace while hashing the copied bytes. It inherits host directory
+ACLs and makes no restrictive Windows ACL claim. All decoding, matching, labels,
+and metadata use only those verified snapshots. It
 rehashes both snapshots and original logical inputs before publication, builds the
-five generated files in a private staging directory, verifies stable media hashes and
-all manifest output bindings, then promotes the complete set with rollback backups.
-Failed input, output, or promotion checks leave the previously published packet intact.
+five generated files in transaction-local staging, verifies stable media hashes and
+all manifest output bindings, and rechecks the executing builder against its tracked
+HEAD blob and startup byte snapshot. Publication uses a process-termination-recoverable
+journal and rollback
+backups in the same ignored namespace: it backs up the old manifest first, publishes
+the other four files, and publishes the new manifest last. A restart completes an
+already coherent new packet or restores the complete old packet with its manifest
+last. Malformed residue or unexpected bytes are preserved and fail closed.
 
 Before any packet output is written, all 12 declared raw inputs must match their
 pinned SHA-256 values. Both RGB frame indices must be byte-identical and must contain
@@ -975,7 +1069,7 @@ logical path below its checkout and fails with a prerequisite list when it is ab
             "README.md",
         ]
     }
-    outputs["build_evidence.py"] = file_record(Path(__file__).resolve())
+    outputs["build_evidence.py"] = builder_source_record
     current_capture_receipt = parsed_receipts["current_capture"]
     r7_capture_receipt = parsed_receipts["r7_capture"]
     slam_receipt = parsed_receipts["slam"]
@@ -1020,6 +1114,16 @@ logical path below its checkout and fails with a prerequisite list when it is ab
             "samples": samples,
         },
         "input_snapshot_verification": snapshot_verification,
+        "builder_source_verification": {
+            "status": "passed",
+            "rule": (
+                "Capture the executing builder bytes at startup, require exact equality "
+                "to the externally tracked HEAD blob, bind that immutable record in the "
+                "manifest, and rehash the original builder path immediately before publication."
+            ),
+            "startup_record": builder_source_record,
+            "final_original_path_rehash_required": True,
+        },
         "fixed_input_verification": fixed_input_verification,
         "prepublication_input_verification": prepublication_input_verification,
         "panel_source_verification": source_verification,
@@ -1079,10 +1183,19 @@ logical path below its checkout and fails with a prerequisite list when it is ab
             "sheet_frame_matching": "minimum RGB MSE after FFmpeg area scale to each preserved 1280x360 sheet cell",
             "video_timestamp_labels": "one FFmpeg drawtext overlay per exact rgb_frames.jsonl row, enabled on its frame index",
             "publication_transaction": (
-                "Generate five files in private staging; validate stable output hashes and "
-                "manifest bindings; rehash snapshots and originals; replace the complete "
-                "set with rollback backups on any promotion failure."
+                "Generate five files in a Git-ignored same-volume runs namespace; validate "
+                "stable output hashes and manifest bindings; rehash snapshots, originals, "
+                "and the startup-captured tracked builder; write an allowlisted journal "
+                "and PREPARED marker; back up the old manifest first; publish four data/docs "
+                "files and the new manifest last; then write COMMITTED. Startup recovery either "
+                "accepts a fully new packet or restores the fully old packet with its manifest last."
             ),
+            "windows_durability_scope": (
+                "Recoverable after process termination and restart; no sudden power-loss or "
+                "filesystem-cache durability claim is made on Windows."
+            ),
+            "transaction_namespace": "runs/.rgb-evidence-transactions/tx-<32-lowercase-hex>",
+            "directory_acl_policy": "Inherited host ACLs; no restrictive Windows ACL is claimed.",
         },
         "staged_output_validation": {
             "status": "passed",
@@ -1106,6 +1219,7 @@ logical path below its checkout and fails with a prerequisite list when it is ab
 def validate_staged_packet(
     staging_dir: Path,
     manifest: dict[str, object],
+    builder_source_record: dict[str, object],
 ) -> dict[str, str]:
     staged_names = {path.name for path in staging_dir.iterdir() if path.is_file()}
     if staged_names != set(GENERATED_OUTPUT_NAMES):
@@ -1142,8 +1256,11 @@ def validate_staged_packet(
             f"actual={sorted(outputs)}"
         )
     for name, declared in outputs.items():
-        path = Path(__file__).resolve() if name == "build_evidence.py" else staging_dir / name
-        actual = file_record(path, None if name == "build_evidence.py" else staging_dir)
+        actual = (
+            builder_source_record
+            if name == "build_evidence.py"
+            else file_record(staging_dir / name, staging_dir)
+        )
         if declared != actual:
             raise RuntimeError(
                 f"staged manifest output binding mismatch for {name}: "
@@ -1155,122 +1272,693 @@ def validate_staged_packet(
 def promote_staged_outputs(
     staging_dir: Path,
     destination_dir: Path,
+    transaction_root: Path,
     *,
-    expected_hashes: dict[str, str] | None = None,
+    expected_hashes: dict[str, str],
     replace: Callable[[Path, Path], object] = os.replace,
 ) -> None:
-    """Promote the complete staged set, manifest last, rolling back on any failure."""
+    """Promote manifest last; restart recovery rolls back process interruption."""
     current_staged_hashes = {
         name: sha256(staging_dir / name) for name in GENERATED_OUTPUT_NAMES
     }
-    if expected_hashes is None:
-        expected_hashes = current_staged_hashes
-    elif current_staged_hashes != expected_hashes:
+    if current_staged_hashes != expected_hashes:
         raise RuntimeError(
             f"staged outputs changed after validation: expected={expected_hashes}, "
             f"actual={current_staged_hashes}"
         )
-    rollback_dir = staging_dir / ".rollback"
-    rollback_dir.mkdir(exist_ok=False)
-    states: list[dict[str, object]] = []
+    journal = initialize_publication_journal(
+        transaction_root, staging_dir, destination_dir, expected_hashes
+    )
+    rollback_dir = transaction_root / "rollback"
+    journal["phase"] = "promoting"
+    write_publication_journal(transaction_root, journal)
     try:
-        for name in GENERATED_OUTPUT_NAMES:
+        manifest_entry = journal["entries"]["manifest.json"]
+        manifest_destination = destination_dir / "manifest.json"
+        if manifest_entry["old_exists"]:
+            replace(manifest_destination, rollback_dir / "manifest.json")
+            sync_directory(destination_dir)
+            sync_directory(rollback_dir)
+            manifest_entry["state"] = "old_backed_up"
+            write_publication_journal(transaction_root, journal)
+
+        for name in PUBLICATION_ORDER:
+            entry = journal["entries"][name]
             source = staging_dir / name
             destination = destination_dir / name
             backup = rollback_dir / name
-            state: dict[str, object] = {
-                "name": name,
-                "source": source,
-                "destination": destination,
-                "backup": backup,
-                "backed_up": False,
-                "published": False,
-            }
-            states.append(state)
-            if destination.exists():
+            if name != "manifest.json" and entry["old_exists"]:
                 replace(destination, backup)
-                state["backed_up"] = True
+                sync_directory(destination_dir)
+                sync_directory(rollback_dir)
+                entry["state"] = "old_backed_up"
+                write_publication_journal(transaction_root, journal)
             replace(source, destination)
-            state["published"] = True
-        published_hashes = {
-            name: sha256(destination_dir / name) for name in GENERATED_OUTPUT_NAMES
-        }
-        if published_hashes != expected_hashes:
-            raise RuntimeError(
-                f"published output hash mismatch: expected={expected_hashes}, "
-                f"actual={published_hashes}"
-            )
+            sync_directory(staging_dir)
+            sync_directory(destination_dir)
+            entry["state"] = "new_published"
+            write_publication_journal(transaction_root, journal)
+
+        if not packet_matches_plan(destination_dir, journal, version="new"):
+            raise RuntimeError("published packet does not match the complete new plan")
+        journal["phase"] = "committed"
+        write_publication_journal(transaction_root, journal)
+        write_marker(transaction_root / PUBLICATION_COMMITTED_MARKER, transaction_root.name)
     except BaseException as error:
-        rollback_errors: list[str] = []
-        for state in reversed(states):
-            source = state["source"]
-            destination = state["destination"]
-            backup = state["backup"]
-            try:
-                if state["published"] and destination.exists():
-                    replace(destination, source)
-                if state["backed_up"] and backup.exists():
-                    replace(backup, destination)
-            except BaseException as rollback_error:
-                rollback_errors.append(
-                    f"{state['name']}: {type(rollback_error).__name__}: {rollback_error}"
-                )
-        if rollback_errors:
+        try:
+            outcome = recover_publication_transaction(transaction_root, destination_dir)
+        except BaseException as recovery_error:
             raise RuntimeError(
-                f"publication failed ({error}); rollback also failed: {rollback_errors}"
+                f"publication failed and recovery was preserved for inspection: "
+                f"publication={error}; recovery={recovery_error}"
+            ) from error
+        if outcome != "rolled_back":
+            raise RuntimeError(
+                f"publication failed with unexpected recovery outcome {outcome}: {error}"
             ) from error
         raise RuntimeError(f"publication failed and was rolled back: {error}") from error
 
 
-def remove_private_transaction_tree(transaction_root: Path, packet_parent: Path) -> None:
-    transaction_root = transaction_root.resolve()
-    packet_parent = packet_parent.resolve()
-    if transaction_root.parent != packet_parent or not transaction_root.name.startswith(
-        ".rgb-evidence-transaction-"
-    ):
-        raise RuntimeError(f"refusing to clean unsafe transaction root: {transaction_root}")
-    if not transaction_root.exists():
+def is_transaction_name(name: str, prefix: str) -> bool:
+    suffix = name.removeprefix(prefix)
+    return (
+        name.startswith(prefix)
+        and len(suffix) == 32
+        and all(character in "0123456789abcdef" for character in suffix)
+    )
+
+
+def is_link_or_junction(path: Path) -> bool:
+    try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            return True
+    except FileNotFoundError:
+        return False
+    is_junction = getattr(path, "is_junction", None)
+    return bool(is_junction and is_junction())
+
+
+def require_real_directory(path: Path, *, label: str) -> None:
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError as error:
+        raise RuntimeError(f"missing {label}: {path}") from error
+    if not stat.S_ISDIR(mode) or is_link_or_junction(path):
+        raise RuntimeError(f"{label} must be a real, non-link directory: {path}")
+
+
+def require_regular_file(path: Path, *, label: str) -> None:
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError as error:
+        raise RuntimeError(f"missing {label}: {path}") from error
+    if not stat.S_ISREG(mode) or is_link_or_junction(path):
+        raise RuntimeError(f"{label} must be a real, non-link file: {path}")
+
+
+def sync_directory(path: Path) -> None:
+    """Best-effort directory metadata flush; Windows does not expose this via os.open."""
+    if os.name == "nt":
         return
-    for root, directories, files in os.walk(transaction_root, topdown=False):
-        for name in files:
-            Path(root, name).chmod(stat.S_IREAD | stat.S_IWRITE)
-        for name in directories:
-            Path(root, name).chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
-    transaction_root.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
-    shutil.rmtree(transaction_root, ignore_errors=False)
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def write_atomic_bytes(path: Path, payload: bytes) -> None:
+    temporary_path = path.with_name(f".{path.name}.tmp")
+    if os.path.lexists(temporary_path):
+        require_regular_file(temporary_path, label="atomic-write temporary file")
+        os.unlink(temporary_path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(temporary_path, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        os.close(descriptor)
+    os.replace(temporary_path, path)
+    sync_directory(path.parent)
+
+
+def write_marker(path: Path, transaction_name: str) -> None:
+    write_atomic_bytes(path, (transaction_name + "\n").encode("ascii"))
+
+
+def write_publication_journal(
+    transaction_root: Path, journal: dict[str, object]
+) -> None:
+    journal_path = transaction_root / PUBLICATION_JOURNAL_NAME
+    payload = (json.dumps(journal, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    write_atomic_bytes(journal_path, payload)
+
+
+def output_record_or_absent(path: Path) -> dict[str, object]:
+    if not os.path.lexists(path):
+        return {"exists": False, "sha256": None, "size_bytes": None}
+    require_regular_file(path, label="packet output")
+    return {"exists": True, "sha256": sha256(path), "size_bytes": path.stat().st_size}
+
+
+def initialize_publication_journal(
+    transaction_root: Path,
+    staging_dir: Path,
+    destination_dir: Path,
+    expected_hashes: dict[str, str],
+) -> dict[str, object]:
+    require_real_directory(transaction_root, label="transaction root")
+    require_real_directory(staging_dir, label="transaction staging directory")
+    require_real_directory(destination_dir, label="packet destination directory")
+    if set(expected_hashes) != set(GENERATED_OUTPUT_NAMES):
+        raise RuntimeError("publication plan output set is incomplete")
+    rollback_dir = transaction_root / "rollback"
+    rollback_dir.mkdir(exist_ok=False)
+    entries: dict[str, dict[str, object]] = {}
+    for name in GENERATED_OUTPUT_NAMES:
+        source = staging_dir / name
+        require_regular_file(source, label=f"staged output {name}")
+        old = output_record_or_absent(destination_dir / name)
+        entries[name] = {
+            "name": name,
+            "new_sha256": expected_hashes[name],
+            "new_size_bytes": source.stat().st_size,
+            "old_exists": old["exists"],
+            "old_sha256": old["sha256"],
+            "old_size_bytes": old["size_bytes"],
+            "state": "prepared",
+        }
+    journal: dict[str, object] = {
+        "schema": PUBLICATION_JOURNAL_SCHEMA,
+        "schema_version": 1,
+        "transaction_name": transaction_root.name,
+        "phase": "prepared",
+        "publication_order": list(PUBLICATION_ORDER),
+        "manifest_backup_first": True,
+        "manifest_published_last": True,
+        "entries": entries,
+    }
+    write_publication_journal(transaction_root, journal)
+    write_marker(transaction_root / PUBLICATION_PREPARED_MARKER, transaction_root.name)
+    return journal
+
+
+def validate_publication_journal(
+    transaction_root: Path, journal: object
+) -> dict[str, object]:
+    if not isinstance(journal, dict):
+        raise RuntimeError("publication journal must be an object")
+    required_keys = {
+        "schema", "schema_version", "transaction_name", "phase",
+        "publication_order", "manifest_backup_first", "manifest_published_last",
+        "entries",
+    }
+    if set(journal) != required_keys:
+        raise RuntimeError(f"publication journal keys are invalid: {sorted(journal)}")
+    if (
+        journal["schema"] != PUBLICATION_JOURNAL_SCHEMA
+        or journal["schema_version"] != 1
+        or journal["transaction_name"] != transaction_root.name
+        or journal["publication_order"] != list(PUBLICATION_ORDER)
+        or journal["manifest_backup_first"] is not True
+        or journal["manifest_published_last"] is not True
+        or journal["phase"] not in {"prepared", "promoting", "recovering", "rolled_back", "committed"}
+    ):
+        raise RuntimeError("publication journal identity or transaction policy is invalid")
+    entries = journal["entries"]
+    if not isinstance(entries, dict) or set(entries) != set(GENERATED_OUTPUT_NAMES):
+        raise RuntimeError("publication journal entry set is invalid")
+    for name in GENERATED_OUTPUT_NAMES:
+        entry = entries[name]
+        expected_entry_keys = {
+            "name", "new_sha256", "new_size_bytes", "old_exists",
+            "old_sha256", "old_size_bytes", "state",
+        }
+        if not isinstance(entry, dict) or set(entry) != expected_entry_keys:
+            raise RuntimeError(f"publication journal entry schema is invalid for {name}")
+        valid_hash = lambda value: (
+            isinstance(value, str) and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value)
+        )
+        if (
+            entry["name"] != name
+            or not valid_hash(entry["new_sha256"])
+            or not isinstance(entry["new_size_bytes"], int)
+            or entry["new_size_bytes"] < 0
+            or not isinstance(entry["old_exists"], bool)
+            or entry["state"] not in {"prepared", "old_backed_up", "new_published", "rolled_back"}
+        ):
+            raise RuntimeError(f"publication journal entry values are invalid for {name}")
+        if entry["old_exists"]:
+            if not valid_hash(entry["old_sha256"]) or not isinstance(entry["old_size_bytes"], int):
+                raise RuntimeError(f"publication old binding is invalid for {name}")
+        elif entry["old_sha256"] is not None or entry["old_size_bytes"] is not None:
+            raise RuntimeError(f"absent old output has a binding for {name}")
+    return journal
+
+
+def load_publication_journal(transaction_root: Path) -> dict[str, object]:
+    journal_path = transaction_root / PUBLICATION_JOURNAL_NAME
+    require_regular_file(journal_path, label="publication journal")
+    try:
+        parsed = json.loads(journal_path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"publication journal is malformed: {error}") from error
+    return validate_publication_journal(transaction_root, parsed)
+
+
+def path_matches_entry(path: Path, entry: dict[str, object], version: str) -> bool:
+    if version == "new":
+        expected_exists = True
+        expected_hash = entry["new_sha256"]
+        expected_size = entry["new_size_bytes"]
+    elif version == "old":
+        expected_exists = entry["old_exists"]
+        expected_hash = entry["old_sha256"]
+        expected_size = entry["old_size_bytes"]
+    else:
+        raise ValueError(version)
+    if not os.path.lexists(path):
+        return expected_exists is False
+    if expected_exists is False:
+        return False
+    require_regular_file(path, label=f"{version} packet output")
+    return path.stat().st_size == expected_size and sha256(path) == expected_hash
+
+
+def packet_matches_plan(
+    destination_dir: Path, journal: dict[str, object], *, version: str
+) -> bool:
+    return all(
+        path_matches_entry(destination_dir / name, journal["entries"][name], version)
+        for name in GENERATED_OUTPUT_NAMES
+    )
+
+
+def validate_transaction_tree(transaction_root: Path) -> None:
+    require_real_directory(transaction_root, label="transaction root")
+    for directory, child_directories, files in os.walk(transaction_root, topdown=True, followlinks=False):
+        directory_path = Path(directory)
+        require_real_directory(directory_path, label="transaction directory")
+        for child_name in child_directories + files:
+            child = directory_path / child_name
+            if is_link_or_junction(child):
+                raise RuntimeError(f"transaction residue contains a link or junction: {child}")
+
+
+def recover_publication_transaction(
+    transaction_root: Path,
+    destination_dir: Path,
+    *,
+    replace: Callable[[Path, Path], object] = os.replace,
+    unlink: Callable[[Path], object] = os.unlink,
+) -> str:
+    """Finish a complete publish or idempotently restore the prior complete packet."""
+    validate_transaction_tree(transaction_root)
+    journal_path = transaction_root / PUBLICATION_JOURNAL_NAME
+    prepared_path = transaction_root / PUBLICATION_PREPARED_MARKER
+    committed_path = transaction_root / PUBLICATION_COMMITTED_MARKER
+    if not journal_path.exists():
+        if prepared_path.exists() or committed_path.exists():
+            raise RuntimeError("transaction marker exists without a complete journal")
+        rollback_dir = transaction_root / "rollback"
+        if rollback_dir.exists() and any(rollback_dir.iterdir()):
+            raise RuntimeError("pre-journal transaction has rollback data; manual inspection required")
+        allowed = {"snapshots", "staging", "rollback", f".{PUBLICATION_JOURNAL_NAME}.tmp"}
+        unexpected = {path.name for path in transaction_root.iterdir()} - allowed
+        if unexpected:
+            raise RuntimeError(f"unrecognized pre-journal transaction residue: {sorted(unexpected)}")
+        return "prepublication"
+
+    journal = load_publication_journal(transaction_root)
+    allowed_children = {
+        "snapshots", "staging", "rollback", PUBLICATION_JOURNAL_NAME,
+        f".{PUBLICATION_JOURNAL_NAME}.tmp", PUBLICATION_PREPARED_MARKER,
+        f".{PUBLICATION_PREPARED_MARKER}.tmp", PUBLICATION_COMMITTED_MARKER,
+        f".{PUBLICATION_COMMITTED_MARKER}.tmp", PUBLICATION_GC_MARKER,
+        f".{PUBLICATION_GC_MARKER}.tmp",
+    }
+    unexpected_children = {
+        path.name for path in transaction_root.iterdir()
+    } - allowed_children
+    if unexpected_children:
+        raise RuntimeError(
+            f"unexpected journaled transaction residue: {sorted(unexpected_children)}"
+        )
+    rollback_dir = transaction_root / "rollback"
+    if not prepared_path.exists():
+        rollback_empty = rollback_dir.is_dir() and not any(rollback_dir.iterdir())
+        if rollback_empty and packet_matches_plan(destination_dir, journal, version="old"):
+            return "prepublication"
+        raise RuntimeError(
+            "journal exists without PREPARED marker and is not provably prepublication"
+        )
+    require_regular_file(prepared_path, label="PREPARED marker")
+    if prepared_path.read_text(encoding="ascii") != transaction_root.name + "\n":
+        raise RuntimeError("PREPARED marker identity mismatch")
+
+    if packet_matches_plan(destination_dir, journal, version="new"):
+        if not committed_path.exists():
+            journal["phase"] = "committed"
+            write_publication_journal(transaction_root, journal)
+            write_marker(committed_path, transaction_root.name)
+        else:
+            require_regular_file(committed_path, label="COMMITTED marker")
+            if committed_path.read_text(encoding="ascii") != transaction_root.name + "\n":
+                raise RuntimeError("COMMITTED marker identity mismatch")
+        return "committed"
+    if committed_path.exists() or journal["phase"] == "committed":
+        raise RuntimeError("committed transaction does not match the complete new packet")
+
+    if packet_matches_plan(destination_dir, journal, version="old"):
+        journal["phase"] = "rolled_back"
+        for entry in journal["entries"].values():
+            entry["state"] = "rolled_back"
+        write_publication_journal(transaction_root, journal)
+        return "rolled_back"
+
+    require_real_directory(rollback_dir, label="transaction rollback directory")
+    journal["phase"] = "recovering"
+    write_publication_journal(transaction_root, journal)
+    rollback_order = tuple(reversed(PUBLICATION_ORDER[:-1])) + ("manifest.json",)
+    for name in rollback_order:
+        entry = journal["entries"][name]
+        destination = destination_dir / name
+        backup = rollback_dir / name
+        destination_is_old = path_matches_entry(destination, entry, "old")
+        destination_is_new = path_matches_entry(destination, entry, "new")
+        if os.path.lexists(destination) and not destination_is_old and not destination_is_new:
+            raise RuntimeError(f"unexpected destination bytes during recovery: {name}")
+        if entry["old_exists"]:
+            if os.path.lexists(backup):
+                if not path_matches_entry(backup, entry, "old"):
+                    raise RuntimeError(f"rollback backup binding mismatch: {name}")
+                if os.path.lexists(destination):
+                    unlink(destination)
+                    sync_directory(destination_dir)
+                replace(backup, destination)
+                sync_directory(rollback_dir)
+                sync_directory(destination_dir)
+            elif not destination_is_old:
+                raise RuntimeError(f"missing old destination and rollback backup: {name}")
+        else:
+            if os.path.lexists(backup):
+                raise RuntimeError(f"unexpected rollback backup for absent old output: {name}")
+            if os.path.lexists(destination):
+                unlink(destination)
+                sync_directory(destination_dir)
+        entry["state"] = "rolled_back"
+        write_publication_journal(transaction_root, journal)
+    if not packet_matches_plan(destination_dir, journal, version="old"):
+        raise RuntimeError("rollback did not restore the complete old packet")
+    journal["phase"] = "rolled_back"
+    write_publication_journal(transaction_root, journal)
+    return "rolled_back"
+
+
+def remove_guarded_transaction_tree(
+    transaction_root: Path,
+    allowed_parent: Path,
+    *,
+    prefix: str,
+    root_file_last: str | None = None,
+) -> None:
+    """Remove one validated transaction tree without following links or junctions."""
+    transaction_root = Path(os.path.abspath(transaction_root))
+    allowed_parent = Path(os.path.abspath(allowed_parent))
+    if (
+        transaction_root.parent != allowed_parent
+        or not is_transaction_name(transaction_root.name, prefix)
+    ):
+        raise RuntimeError(f"refusing to clean unverified transaction root: {transaction_root}")
+    if not os.path.lexists(transaction_root):
+        return
+    validate_transaction_tree(transaction_root)
+
+    def remove_directory_no_follow(directory: Path) -> None:
+        directory = Path(os.path.abspath(directory))
+        if os.path.commonpath((str(transaction_root), str(directory))) != str(
+            transaction_root
+        ):
+            raise RuntimeError(f"transaction cleanup escaped its root: {directory}")
+        require_real_directory(directory, label="transaction directory")
+        with os.scandir(directory) as entries:
+            children = list(entries)
+        if directory == transaction_root and root_file_last is not None:
+            children.sort(key=lambda entry: entry.name == root_file_last)
+        for entry in children:
+            child = directory / entry.name
+            if entry.is_symlink() or getattr(child, "is_junction", lambda: False)():
+                raise RuntimeError(f"refusing cleanup of linked transaction child: {child}")
+            if entry.is_dir(follow_symlinks=False):
+                remove_directory_no_follow(child)
+            else:
+                child.chmod(stat.S_IREAD | stat.S_IWRITE)
+                os.unlink(child)
+        directory.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+        os.rmdir(directory)
+
+    remove_directory_no_follow(transaction_root)
+
+
+def retire_transaction_for_cleanup(transaction_root: Path, namespace: Path) -> None:
+    """Atomically retire a verified-safe transaction, then delete restart-safely."""
+    transaction_root = Path(os.path.abspath(transaction_root))
+    namespace = Path(os.path.abspath(namespace))
+    if (
+        transaction_root.parent != namespace
+        or not is_transaction_name(transaction_root.name, TRANSACTION_NAME_PREFIX)
+    ):
+        raise RuntimeError(f"refusing to retire unsafe transaction root: {transaction_root}")
+    suffix = transaction_root.name.removeprefix(TRANSACTION_NAME_PREFIX)
+    garbage_root = namespace / f"{GARBAGE_TRANSACTION_NAME_PREFIX}{suffix}"
+    if os.path.lexists(garbage_root):
+        raise RuntimeError(f"garbage transaction target already exists: {garbage_root}")
+    write_marker(transaction_root / PUBLICATION_GC_MARKER, transaction_root.name)
+    os.replace(transaction_root, garbage_root)
+    sync_directory(namespace)
+    remove_guarded_garbage_tree(garbage_root, namespace)
+
+
+def remove_guarded_garbage_tree(garbage_root: Path, namespace: Path) -> None:
+    garbage_root = Path(os.path.abspath(garbage_root))
+    namespace = Path(os.path.abspath(namespace))
+    if (
+        garbage_root.parent != namespace
+        or not is_transaction_name(garbage_root.name, GARBAGE_TRANSACTION_NAME_PREFIX)
+    ):
+        raise RuntimeError(f"refusing to clean unsafe garbage root: {garbage_root}")
+    validate_transaction_tree(garbage_root)
+    marker = garbage_root / PUBLICATION_GC_MARKER
+    if not marker.exists():
+        if any(garbage_root.iterdir()):
+            raise RuntimeError(f"nonempty garbage transaction lacks GC_READY: {garbage_root}")
+    else:
+        require_regular_file(marker, label="GC_READY marker")
+        expected_tx_name = (
+            TRANSACTION_NAME_PREFIX
+            + garbage_root.name.removeprefix(GARBAGE_TRANSACTION_NAME_PREFIX)
+            + "\n"
+        )
+        if marker.read_text(encoding="ascii") != expected_tx_name:
+            raise RuntimeError(f"GC_READY marker identity mismatch: {garbage_root}")
+    remove_guarded_transaction_tree(
+        garbage_root,
+        namespace,
+        prefix=GARBAGE_TRANSACTION_NAME_PREFIX,
+        root_file_last=PUBLICATION_GC_MARKER,
+    )
+
+
+def prepare_transaction_namespace(packet_dir: Path, runs_root: Path) -> Path:
+    packet_dir = Path(os.path.abspath(packet_dir))
+    runs_root = Path(os.path.abspath(runs_root))
+    expected_runs_root = Path(os.path.abspath(ROOT / "runs"))
+    if runs_root != expected_runs_root:
+        raise RuntimeError(f"transaction runs root is not the fixed allowed root: {runs_root}")
+    require_real_directory(packet_dir, label="evidence packet directory")
+    require_real_directory(runs_root, label="ignored runs directory")
+    legacy_namespace = packet_dir / TRANSACTION_NAMESPACE_NAME
+    if os.path.lexists(legacy_namespace):
+        raise RuntimeError(
+            f"legacy packet transaction namespace requires manual inspection: {legacy_namespace}"
+        )
+    with os.scandir(packet_dir.parent) as entries:
+        legacy_roots = [
+            entry.path for entry in entries
+            if is_transaction_name(entry.name, LEGACY_TRANSACTION_NAME_PREFIX)
+        ]
+    if legacy_roots:
+        raise RuntimeError(
+            f"legacy pre-journal transaction residue requires manual inspection: {legacy_roots}"
+        )
+    try:
+        subprocess.run(
+            ["git", "check-ignore", "--quiet", "--", str(runs_root / TRANSACTION_NAMESPACE_NAME / "probe")],
+            check=True,
+            cwd=ROOT,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("transaction namespace is not confirmed Git-ignored") from error
+    namespace = runs_root / TRANSACTION_NAMESPACE_NAME
+    if os.path.lexists(namespace):
+        require_real_directory(namespace, label="transaction namespace")
+    else:
+        os.mkdir(namespace)
+        sync_directory(runs_root)
+    if namespace.parent != runs_root:
+        raise RuntimeError(f"transaction namespace escaped runs directory: {namespace}")
+    if os.stat(namespace, follow_symlinks=False).st_dev != os.stat(
+        packet_dir, follow_symlinks=False
+    ).st_dev:
+        raise RuntimeError("transaction namespace is not on the packet filesystem")
+    return namespace
+
+
+@contextlib.contextmanager
+def publication_lock(namespace: Path):
+    """Hold one OS-released exclusive lock across recovery, build, and publication."""
+    require_real_directory(namespace, label="transaction namespace")
+    lock_path = namespace / PUBLICATION_LOCK_NAME
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(lock_path, flags, 0o600)
+    acquired = False
+    try:
+        require_regular_file(lock_path, label="publication lock")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, b"0")
+            os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        if os.name == "nt":
+            import msvcrt
+            try:
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            except OSError as error:
+                raise RuntimeError("another RGB evidence publication holds the lock") from error
+        else:
+            import fcntl
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                raise RuntimeError("another RGB evidence publication holds the lock") from error
+        acquired = True
+        yield
+    finally:
+        try:
+            if acquired:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def recover_stale_transactions(namespace: Path, destination_dir: Path) -> None:
+    require_real_directory(namespace, label="transaction namespace")
+    with os.scandir(namespace) as entries:
+        stale_entries = list(entries)
+    for entry in stale_entries:
+        if entry.name == PUBLICATION_LOCK_NAME:
+            if entry.is_symlink() or entry.is_dir(follow_symlinks=False):
+                raise RuntimeError(f"unsafe publication lock entry: {entry.path}")
+            continue
+        if is_transaction_name(entry.name, GARBAGE_TRANSACTION_NAME_PREFIX):
+            remove_guarded_garbage_tree(namespace / entry.name, namespace)
+            continue
+        if not is_transaction_name(entry.name, TRANSACTION_NAME_PREFIX):
+            raise RuntimeError(
+                f"unexpected entry in transaction namespace; refusing cleanup: {entry.path}"
+            )
+        transaction_root = namespace / entry.name
+        require_real_directory(transaction_root, label="stale transaction root")
+        outcome = recover_publication_transaction(transaction_root, destination_dir)
+        if outcome not in {"prepublication", "rolled_back", "committed"}:
+            raise RuntimeError(f"unsafe stale transaction outcome: {outcome}")
+        retire_transaction_for_cleanup(transaction_root, namespace)
+
+
+def create_transaction_root(namespace: Path) -> Path:
+    namespace = Path(os.path.abspath(namespace))
+    require_real_directory(namespace, label="transaction namespace")
+    transaction_root = namespace / f"{TRANSACTION_NAME_PREFIX}{uuid.uuid4().hex}"
+    if (
+        transaction_root.parent != namespace
+        or not is_transaction_name(transaction_root.name, TRANSACTION_NAME_PREFIX)
+    ):
+        raise RuntimeError(f"unsafe transaction root: {transaction_root}")
+    os.mkdir(transaction_root)
+    require_real_directory(transaction_root, label="new transaction root")
+    if os.name != "nt":
+        transaction_root.chmod(0o700)
+    if os.stat(transaction_root, follow_symlinks=False).st_dev != os.stat(
+        namespace, follow_symlinks=False
+    ).st_dev:
+        raise RuntimeError("transaction root is not on the namespace filesystem")
+    return transaction_root
+
+
+def transaction_is_safe_to_clean(
+    transaction_root: Path, destination_dir: Path
+) -> bool:
+    if not transaction_root.exists():
+        return True
+    try:
+        outcome = recover_publication_transaction(transaction_root, destination_dir)
+    except BaseException:
+        return False
+    return outcome in {"prepublication", "rolled_back", "committed"}
 
 
 def main() -> None:
+    builder_path, builder_bytes, builder_source_record = capture_builder_source()
     validate_runtime()
     original_paths = fixed_input_paths()
-    PACKET.parent.mkdir(parents=True, exist_ok=True)
-    transaction_root = (
-        PACKET.parent / f".rgb-evidence-transaction-{uuid.uuid4().hex}"
-    ).resolve()
-    packet_parent = PACKET.parent.resolve()
-    if transaction_root.parent != packet_parent:
-        raise RuntimeError(f"unsafe transaction root: {transaction_root}")
-    transaction_root.mkdir()
-    try:
-        snapshot_paths, snapshot_verification = snapshot_fixed_inputs(
-            original_paths, transaction_root / "snapshots"
-        )
-        staging_dir = transaction_root / "staging"
-        staging_dir.mkdir()
-        manifest = build_staged_packet(
-            staging_dir,
-            snapshot_paths,
-            original_paths,
-            snapshot_verification,
-        )
-        validated_output_hashes = validate_staged_packet(staging_dir, manifest)
-        verify_expected_hashes(snapshot_paths, label="final prepromotion snapshot")
-        verify_expected_hashes(original_paths, label="final prepromotion original")
-        promote_staged_outputs(
-            staging_dir, PACKET, expected_hashes=validated_output_hashes
-        )
-    finally:
-        remove_private_transaction_tree(transaction_root, packet_parent)
+    namespace = prepare_transaction_namespace(PACKET, ROOT / "runs")
+    with publication_lock(namespace):
+        recover_stale_transactions(namespace, PACKET)
+        transaction_root = create_transaction_root(namespace)
+        try:
+            snapshot_paths, snapshot_verification = snapshot_fixed_inputs(
+                original_paths, transaction_root / "snapshots"
+            )
+            staging_dir = transaction_root / "staging"
+            staging_dir.mkdir()
+            manifest = build_staged_packet(
+                staging_dir,
+                snapshot_paths,
+                original_paths,
+                snapshot_verification,
+                builder_source_record,
+            )
+            validated_output_hashes = validate_staged_packet(
+                staging_dir, manifest, builder_source_record
+            )
+            verify_expected_hashes(snapshot_paths, label="final prepromotion snapshot")
+            verify_expected_hashes(original_paths, label="final prepromotion original")
+            verify_builder_source(builder_path, builder_bytes, builder_source_record)
+            promote_staged_outputs(
+                staging_dir,
+                PACKET,
+                transaction_root,
+                expected_hashes=validated_output_hashes,
+            )
+        finally:
+            if transaction_is_safe_to_clean(transaction_root, PACKET):
+                retire_transaction_for_cleanup(transaction_root, namespace)
 
 
 if __name__ == "__main__":

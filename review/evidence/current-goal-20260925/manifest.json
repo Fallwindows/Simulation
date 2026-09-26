@@ -69,9 +69,10 @@
   },
   "input_snapshot_verification": {
     "status": "passed",
-    "rule": "Each of the 12 fixed inputs is copied once into a private snapshot while the copied bytes are hashed. Generation reads only those snapshots. The snapshot files are rehashed against the same pins before use and again before publication.",
+    "rule": "Each of the 12 fixed inputs is copied once into a transaction-local snapshot while the copied bytes are hashed. Generation reads only those snapshots. The snapshot files are rehashed against the same pins before use and again before publication.",
     "copied_while_hashing": true,
-    "private_transaction_scope": true,
+    "git_ignored_same_volume_transaction": true,
+    "directory_acl_policy": "Inherited host ACLs; no restrictive Windows ACL is claimed.",
     "read_only_during_generation": true,
     "artifact_count": 12,
     "copied_sha256": {
@@ -116,6 +117,18 @@
       "current_slam_manifest": 24941,
       "current_perception_manifest": 11606
     }
+  },
+  "builder_source_verification": {
+    "status": "passed",
+    "rule": "Capture the executing builder bytes at startup, require exact equality to the externally tracked HEAD blob, bind that immutable record in the manifest, and rehash the original builder path immediately before publication.",
+    "startup_record": {
+      "path": "build_evidence.py",
+      "sha256": "8fbcee4b705d5a5f7639b66aec0faecbbed357b4a0fbc3b8de0b63aff47d50c0",
+      "size_bytes": 90947,
+      "tracked_head_blob": "db946f1267831f1bf21701e3383b86c107903d28",
+      "tracked_head_bytes_identical": true
+    },
+    "final_original_path_rehash_required": true
   },
   "fixed_input_verification": {
     "status": "passed",
@@ -440,13 +453,15 @@
     },
     "README.md": {
       "path": "README.md",
-      "sha256": "96473b847f775bf45d71e72351e99e508868a805640298721fecb6372b58996e",
-      "size_bytes": 5991
+      "sha256": "2354da76bcb56253a3c42286915776ceed5850d5a4f0245d917f9465ee53c91e",
+      "size_bytes": 6454
     },
     "build_evidence.py": {
       "path": "build_evidence.py",
-      "sha256": "19f88686e19427dc3b4ab3e92c2ad141862373c1a597cfb36fcc44f866b3cea2",
-      "size_bytes": 60215
+      "sha256": "8fbcee4b705d5a5f7639b66aec0faecbbed357b4a0fbc3b8de0b63aff47d50c0",
+      "size_bytes": 90947,
+      "tracked_head_blob": "db946f1267831f1bf21701e3383b86c107903d28",
+      "tracked_head_bytes_identical": true
     }
   },
   "current_pipeline_checkpoint": {
@@ -502,7 +517,10 @@
     "ffmpeg_version": "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers",
     "sheet_frame_matching": "minimum RGB MSE after FFmpeg area scale to each preserved 1280x360 sheet cell",
     "video_timestamp_labels": "one FFmpeg drawtext overlay per exact rgb_frames.jsonl row, enabled on its frame index",
-    "publication_transaction": "Generate five files in private staging; validate stable output hashes and manifest bindings; rehash snapshots and originals; replace the complete set with rollback backups on any promotion failure."
+    "publication_transaction": "Generate five files in a Git-ignored same-volume runs namespace; validate stable output hashes and manifest bindings; rehash snapshots, originals, and the startup-captured tracked builder; write an allowlisted journal and PREPARED marker; back up the old manifest first; publish four data/docs files and the new manifest last; then write COMMITTED. Startup recovery either accepts a fully new packet or restores the fully old packet with its manifest last.",
+    "windows_durability_scope": "Recoverable after process termination and restart; no sudden power-loss or filesystem-cache durability claim is made on Windows.",
+    "transaction_namespace": "runs/.rgb-evidence-transactions/tx-<32-lowercase-hex>",
+    "directory_acl_policy": "Inherited host ACLs; no restrictive Windows ACL is claimed."
   },
   "staged_output_validation": {
     "status": "passed",
