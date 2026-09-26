@@ -502,6 +502,7 @@ def _staged_double_support_startup(
     physics_dt: float,
     maximum_duration_s: float,
     config: GaitConfig = GaitConfig(),
+    balance_observation: Callable[[], dict[str, Any]] | None = None,
     progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[LocomotionFeedback, dict[str, Any]]:
     """Acquire double support, ramp drive targets, and prove a stable dwell.
@@ -557,7 +558,9 @@ def _staged_double_support_startup(
         publish()
         raise StartupValidationError(phase, reason, report)
 
-    def balanced_targets(phase: str, feedback: LocomotionFeedback) -> dict[str, float]:
+    def balanced_targets(
+        phase: str, feedback: LocomotionFeedback
+    ) -> tuple[dict[str, float], dict[str, Any] | None]:
         try:
             targets = balanced_crouch_targets(feedback)
         except Exception as exc:
@@ -566,7 +569,16 @@ def _staged_double_support_startup(
             abort(phase, "balanced crouch targets do not name every leg joint")
         if not all(math.isfinite(float(value)) for value in targets.values()):
             abort(phase, "balanced crouch targets contain a nonfinite value")
-        return {name: float(targets[name]) for name in LEG_JOINTS}
+        observation = None
+        if balance_observation is not None:
+            try:
+                observation = dict(balance_observation())
+            except Exception as exc:
+                abort(phase, f"balance observation failed: {exc}")
+        return (
+            {name: float(targets[name]) for name in LEG_JOINTS},
+            observation,
+        )
 
     acquired: LocomotionFeedback | None = None
     consecutive_stable_samples = 0
@@ -701,7 +713,7 @@ def _staged_double_support_startup(
     )
     latest = acquired
     for step_index in range(1, ramp_steps + 1):
-        balanced_destination = balanced_targets("target_ramp", latest)
+        balanced_destination, balance_metrics = balanced_targets("target_ramp", latest)
         targets = _interpolate_joint_targets(
             start_targets, balanced_destination, step_index / ramp_steps
         )
@@ -716,6 +728,7 @@ def _staged_double_support_startup(
                     "step": step_index,
                     "status": "rejected",
                     "feedback_error": str(exc),
+                    "balance_observation": balance_metrics,
                     "commanded_joint_targets_rad": targets,
                     "diagnostics": feedback_source.adapter.diagnostics(),
                 }
@@ -732,6 +745,7 @@ def _staged_double_support_startup(
                 "status": "accepted" if not failures else "rejected",
                 "timestamp_s": latest.timestamp_s,
                 "metrics": metrics,
+                "balance_observation": balance_metrics,
                 "commanded_joint_targets_rad": targets,
                 "diagnostics": diagnostics if failures else None,
             }
@@ -741,7 +755,7 @@ def _staged_double_support_startup(
             abort("target_ramp", "; ".join(failures))
 
     for step_index in range(1, dwell_steps + 1):
-        targets = balanced_targets("verified_dwell", latest)
+        targets, balance_metrics = balanced_targets("verified_dwell", latest)
         joint_controller.command_joint_positions(targets)
         step_physics()
         try:
@@ -753,6 +767,7 @@ def _staged_double_support_startup(
                     "step": step_index,
                     "status": "rejected",
                     "feedback_error": str(exc),
+                    "balance_observation": balance_metrics,
                     "commanded_joint_targets_rad": targets,
                     "diagnostics": feedback_source.adapter.diagnostics(),
                 }
@@ -769,6 +784,7 @@ def _staged_double_support_startup(
                 "status": "accepted" if not failures else "rejected",
                 "timestamp_s": latest.timestamp_s,
                 "metrics": metrics,
+                "balance_observation": balance_metrics,
                 "commanded_joint_targets_rad": targets,
                 "diagnostics": diagnostics if failures else None,
             }
@@ -1196,9 +1212,45 @@ def run_isaac(
             recording_source = _RecordingFeedbackSource(adapter)
             startup_balance = BalanceFeedbackController()
             startup_target_generator = ConservativeGaitTargetGenerator(spec)
+            last_startup_balance: dict[str, Any] = {}
 
             def balanced_crouch(feedback: LocomotionFeedback) -> dict[str, float]:
                 correction = startup_balance.evaluate(feedback)
+                dx_world = (
+                    feedback.com_position_world_m[0]
+                    - feedback.support_center_world_m[0]
+                )
+                dy_world = (
+                    feedback.com_position_world_m[1]
+                    - feedback.support_center_world_m[1]
+                )
+                cosine = math.cos(feedback.root_pose.yaw_rad)
+                sine = math.sin(feedback.root_pose.yaw_rad)
+                last_startup_balance.clear()
+                last_startup_balance.update(
+                    {
+                        "feedback_timestamp_s": feedback.timestamp_s,
+                        "root_roll_pitch_rad": list(
+                            feedback.root_tilt_roll_pitch_rad
+                        ),
+                        "root_linear_velocity_body_mps": list(
+                            feedback.root_linear_velocity_body_mps
+                        ),
+                        "root_angular_velocity_body_rps": list(
+                            feedback.root_angular_velocity_body_rps
+                        ),
+                        "com_offset_body_xy_m": [
+                            cosine * dx_world + sine * dy_world,
+                            -sine * dx_world + cosine * dy_world,
+                        ],
+                        "support_margin_m": feedback.support_margin_m,
+                        "bounded_correction_rad": {
+                            "sagittal": correction.sagittal_rad,
+                            "lateral": correction.lateral_rad,
+                        },
+                        "unsafe_reason": correction.unsafe_reason,
+                    }
+                )
                 if correction.unsafe_reason is not None:
                     raise FeedbackUnavailableError(
                         f"balanced crouch input is unsafe: {correction.unsafe_reason}"
@@ -1229,6 +1281,7 @@ def run_isaac(
                     balanced_crouch_targets=balanced_crouch,
                     physics_dt=physics_dt,
                     maximum_duration_s=args.settle_s,
+                    balance_observation=lambda: dict(last_startup_balance),
                     progress=persist_startup,
                 )
                 repeat_result["startup"] = startup_report

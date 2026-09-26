@@ -455,6 +455,58 @@ class RobotLocomotionTests(unittest.TestCase):
         unsafe = balance.evaluate(self.feedback(0.1, support_margin_m=-0.02))
         self.assertIn("support margin", unsafe.unsafe_reason)
 
+    def test_sagittal_correction_opposes_recorded_backward_pitch(self):
+        recorded_left_chain_pitch = (
+            -0.047485753893852234
+            + 0.22577346861362457
+            - 0.024831147864460945
+        )
+        self.assertAlmostEqual(
+            -0.15350127538066533 + recorded_left_chain_pitch,
+            0.0,
+            delta=5e-5,
+        )
+        feedback = self.feedback(
+            0.8916666666666667,
+            tilt=(0.0, -0.15350127538066533),
+            linear=(-0.18182469615475158, 0.0, 0.0),
+            angular=(0.0, -0.43750293447273125, 0.0),
+            support_margin_m=0.01,
+        )
+        correction = BalanceFeedbackController(self.config).evaluate(feedback)
+        self.assertAlmostEqual(
+            correction.sagittal_rad,
+            self.config.maximum_balance_correction_rad,
+        )
+
+        targets = ConservativeGaitTargetGenerator(self.spec, self.config).targets(
+            feedback,
+            GaitPhase.DOUBLE_SUPPORT,
+            0.0,
+            correction,
+        )
+        left_chain_pitch = sum(
+            targets[name]
+            for name in (
+                "left_hip_pitch_joint",
+                "left_knee_joint",
+                "left_ankle_pitch_joint",
+            )
+        )
+        right_chain_pitch = -sum(
+            targets[name]
+            for name in (
+                "right_hip_pitch_joint",
+                "right_knee_joint",
+                "right_ankle_pitch_joint",
+            )
+        )
+        self.assertAlmostEqual(left_chain_pitch, -correction.sagittal_rad)
+        self.assertAlmostEqual(right_chain_pitch, -correction.sagittal_rad)
+        # Flat-foot kinematics make pelvis pitch the negative chain sum, so
+        # the command is positive and opposes the recorded negative pitch.
+        self.assertGreater(-left_chain_pitch, 0.0)
+
     def test_collapsed_or_invalid_root_height_fails_before_gait_command(self):
         balance = BalanceFeedbackController(self.config)
         for height in (-1.0, 1.5):

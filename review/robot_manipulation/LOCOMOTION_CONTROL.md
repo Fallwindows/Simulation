@@ -315,6 +315,23 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-5f18484\locomotion_smoke_status.json`;
   the Kit log is
   `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_061041.log`.
+- `RST-004-F11`: exact approved integration
+  `1794b3b1dd28508cb358780b76139a94a1f702c9` confirmed that the measured
+  balance target was active but mapped in the destabilizing sagittal
+  direction. All 36 ramp samples passed, with margin decreasing from +0.030 m
+  to +0.010 m. Dwell step 22 failed at -0.016013906 m, with measured pitch
+  -0.15350 rad, forward velocity -0.1804 m/s, pitch rate -0.4375 rad/s, and
+  root X=-0.05428 m. The controller's positive sagittal correction had reached
+  the existing +0.045 rad cap. Adding its 35/65 split to hip and ankle made
+  the planted-leg pitch sum positive; flat-foot kinematics therefore commanded
+  negative pelvis pitch, reinforcing the measured error. The generator now
+  subtracts that same bounded sagittal correction. It does not change gains,
+  caps, safety gates, lateral mapping, or state-write policy. Ramp and dwell
+  events also record the exact feedback inputs and bounded correction used for
+  each command. The receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-1794b3b\locomotion_smoke_status.json`;
+  the Kit log is
+  `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_062729.log`.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -331,7 +348,8 @@ not mark any finding accepted or the R2 gate passed.
 - low-speed bounded target-to-step planning and strict side alternation;
 - double-support/liftoff, observed-unload/touchdown, docking settle, stop settle,
   and timeout transitions;
-- measured-state balance input and support-margin safety response;
+- measured-state balance input, fixed-foot restoring-direction mapping, and
+  support-margin safety response;
 - static inspection that direct root/joint state setters appear only in the R1
   reset path and never in locomotion.
 
@@ -349,7 +367,8 @@ subtracted along world Z, high spheres are excluded, raw points are spatially
 matched to authored collisions, and a one-foot/two-point state remains
 unavailable. Failure regressions verify that root, joints, and both ankles'
 world sphere geometry survive a support exception. Staged-startup regressions
-cover target interpolation and timing, an impact sample followed by contact
+cover target interpolation and timing, the exact 36-ramp/22-dwell margin
+failure progression, an impact sample followed by contact
 loss and reacquisition, reset-target hold limits, bounded timeout persistence,
 unsafe root state, ramp contact/tracking failure, and durable causal diagnostics.
 Static inspection confirms

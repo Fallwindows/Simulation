@@ -573,8 +573,12 @@ class ConservativeGaitTargetGenerator:
         for side in FootSide:
             prefix = side.value
             sign = side.pitch_axis_sign
-            targets[f"{prefix}_hip_pitch_joint"] += sign * 0.35 * correction.sagittal_rad
-            targets[f"{prefix}_ankle_pitch_joint"] += sign * 0.65 * correction.sagittal_rad
+            # With a planted flat foot, pelvis pitch is the negative of the
+            # leg-chain pitch sum.  Subtract the controller correction so a
+            # positive correction for measured negative pitch/backward drift
+            # commands a positive pelvis restoring direction.
+            targets[f"{prefix}_hip_pitch_joint"] -= sign * 0.35 * correction.sagittal_rad
+            targets[f"{prefix}_ankle_pitch_joint"] -= sign * 0.65 * correction.sagittal_rad
             targets[f"{prefix}_hip_roll_joint"] += 0.35 * correction.lateral_rad
             targets[f"{prefix}_ankle_roll_joint"] -= 0.65 * correction.lateral_rad
 

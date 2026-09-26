@@ -275,6 +275,18 @@ class StartupFeedbackSource:
                 joints=self.controller.commands[-1],
                 support_margin=-0.016,
             )
+        if self.mode == "recorded_margin_progression" and self.controller.commands:
+            command_count = len(self.controller.commands)
+            if command_count <= 36:
+                margin = 0.030 - 0.020 * (command_count - 1) / 35.0
+            else:
+                dwell_step = command_count - 36
+                margin = 0.010 - 0.026013906163802466 * dwell_step / 22.0
+            return startup_feedback(
+                timestamp=1.0 + 0.1 * self.read_count,
+                joints=self.controller.commands[-1],
+                support_margin=margin,
+            )
         joints = (
             self.controller.commands[-1]
             if self.controller.commands
@@ -1056,6 +1068,9 @@ class IsaacFeedbackTests(unittest.TestCase):
             balanced_crouch_targets=lambda _feedback: dict(crouch),
             physics_dt=0.1,
             maximum_duration_s=2.0,
+            balance_observation=lambda: {
+                "bounded_correction_rad": {"sagittal": 0.045, "lateral": 0.0}
+            },
             progress=lambda value: progress.append(copy.deepcopy(value)),
         )
 
@@ -1076,6 +1091,18 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertAlmostEqual(controller.commands[0][LEG_JOINTS[0]], 0.02 + (0.16 / 3.0))
         self.assertEqual(controller.commands[-1], crouch)
         self.assertEqual(final.joint_position_rad, crouch)
+        commanded_events = [
+            event
+            for event in report["events"]
+            if event["stage"] in {"target_ramp", "verified_dwell"}
+        ]
+        self.assertTrue(
+            all(
+                event["balance_observation"]["bounded_correction_rad"]
+                == {"sagittal": 0.045, "lateral": 0.0}
+                for event in commanded_events
+            )
+        )
         self.assertEqual(progress[-1]["status"], "pass")
         self.assertEqual(
             _interpolate_joint_targets({"joint": 1.0}, {"joint": 3.0}, 0.5),
@@ -1108,6 +1135,48 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(event["status"], "rejected")
         self.assertAlmostEqual(event["metrics"]["support_margin_m"], -0.016)
         self.assertIn("commanded_joint_targets_rad", event)
+
+    def test_recorded_ramp_and_dwell_margin_progression_fails_closed(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "recorded_margin_progression"
+
+        with self.assertRaisesRegex(
+            StartupValidationError, "COM projection left the configured support margin"
+        ) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
+                physics_dt=1.0 / 120.0,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "verified_dwell")
+        ramp = [
+            event
+            for event in raised.exception.report["events"]
+            if event["stage"] == "target_ramp"
+        ]
+        dwell = [
+            event
+            for event in raised.exception.report["events"]
+            if event["stage"] == "verified_dwell"
+        ]
+        self.assertEqual(len(ramp), 36)
+        self.assertEqual(len(dwell), 22)
+        self.assertTrue(all(event["status"] == "accepted" for event in ramp))
+        self.assertTrue(all(event["status"] == "accepted" for event in dwell[:-1]))
+        self.assertEqual(dwell[-1]["status"], "rejected")
+        self.assertAlmostEqual(ramp[0]["metrics"]["support_margin_m"], 0.030)
+        self.assertAlmostEqual(ramp[-1]["metrics"]["support_margin_m"], 0.010)
+        self.assertAlmostEqual(
+            dwell[-1]["metrics"]["support_margin_m"], -0.016013906163802466
+        )
+        self.assertEqual(len(controller.commands), 58)
 
     def test_sole_normal_tilt_rejects_thirty_degrees_and_honors_boundary(self):
         config = GaitConfig()
