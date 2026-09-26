@@ -20,6 +20,7 @@ from robot_spike.production.physical_grasp import (
     OPPOSING_CONTACT_LINKS,
     PRESHAPE_TARGETS,
     PhysicalGraspController,
+    RobotContactBodyMap,
     THUMB_CONTACT_LINKS,
 )
 from robot_spike.production.runtime import ArticulationController
@@ -70,6 +71,13 @@ class RobotPhysicalGraspTests(unittest.TestCase):
         cls.spec = load_production_spec(PRODUCTION_ROOT)
         scenario = load_scenario(ROOT / "config/scenarios/baseline_straight.yaml")
         cls.layout = build_restocking_layout(build_aisle_layout(scenario.environment))
+        cls.robot_contact_paths = {
+            link: f"/World/Robot/contact_bodies/{link}"
+            for link in THUMB_CONTACT_LINKS | OPPOSING_CONTACT_LINKS
+        }
+        cls.robot_contacts = RobotContactBodyMap(
+            "/World/Robot", cls.robot_contact_paths
+        )
 
     def make_controller(self, **limit_overrides):
         runtime_names = tuple(reversed(self.spec.canonical_dof_order))
@@ -88,11 +96,20 @@ class RobotPhysicalGraspTests(unittest.TestCase):
             self.layout,
             feedback=feedback,
             arm_lift=lift,
+            robot_contacts=self.robot_contacts,
             limits=GraspLimits(**values),
         )
         return controller, articulation, feedback, lift
 
-    def contacts(self, *, support=True, thumb=True, opposing=True, wrong_product=False):
+    def contacts(
+        self,
+        *,
+        support=True,
+        thumb=True,
+        opposing=True,
+        wrong_product=False,
+        support_robot_label=None,
+    ):
         product = (
             "/World/Restocking/WrongProduct/Collider"
             if wrong_product
@@ -105,13 +122,14 @@ class RobotPhysicalGraspTests(unittest.TestCase):
                     product,
                     self.layout.pickup_support.fixture.prim_path,
                     3.2,
+                    support_robot_label,
                 )
             )
         if thumb:
             result.append(
                 ContactPair(
                     product,
-                    "/World/Robot/right_thumb_dp/collisions",
+                    self.robot_contact_paths["right_thumb_dp"],
                     1.1,
                     "right_thumb_dp",
                 )
@@ -120,7 +138,7 @@ class RobotPhysicalGraspTests(unittest.TestCase):
             result.append(
                 ContactPair(
                     product,
-                    "/World/Robot/right_index_ip/collisions",
+                    self.robot_contact_paths["right_index_ip"],
                     0.9,
                     "right_index_ip",
                 )
@@ -199,6 +217,12 @@ class RobotPhysicalGraspTests(unittest.TestCase):
             self.assertTrue(links[name].findall("collision"), name)
         for digit in ("thumb", "index", "middle", "ring", "pinky"):
             self.assertFalse(links[f"right_{digit}_fingertip"].findall("collision"))
+        spoofed_map = dict(self.robot_contact_paths)
+        spoofed_map["right_thumb_dp"] = (
+            "/World/Robot/contact_bodies/right_thumb_fingertip"
+        )
+        with self.assertRaisesRegex(ValueError, "exact URDF link name"):
+            RobotContactBodyMap("/World/Robot", spoofed_map)
 
     def test_hand_stages_use_only_name_bound_finger_drive_targets(self):
         controller, articulation, feedback, _lift = self.make_controller()
@@ -276,7 +300,7 @@ class RobotPhysicalGraspTests(unittest.TestCase):
         )
         status = controller.step()
         self.assertEqual(status.phase, GraspPhase.FAILED)
-        self.assertEqual(status.failure, GraspFailure.CONTACT_NOT_VERIFIED)
+        self.assertEqual(status.failure, GraspFailure.INVALID_FEEDBACK)
         self.assertEqual(lift.requests, [])
 
     def test_two_sided_contact_without_source_support_fails_source_gate(self):
@@ -306,6 +330,7 @@ class RobotPhysicalGraspTests(unittest.TestCase):
             self.layout,
             feedback=feedback,
             arm_lift=lift,
+            robot_contacts=self.robot_contacts,
             limits=GraspLimits(contact_confirmation_samples=1),
         )
         self.advance_to_closing(controller, feedback)
@@ -330,7 +355,7 @@ class RobotPhysicalGraspTests(unittest.TestCase):
         self.assertEqual(status.failure, GraspFailure.FEEDBACK_UNAVAILABLE)
         self.assertEqual(len(articulation.calls), 1)
 
-    def test_command_acceptance_and_motion_without_lift_evidence_cannot_succeed(self):
+    def test_mislabeled_exact_support_pair_remains_authoritative(self):
         controller, _articulation, feedback, lift = self.make_controller(
             maximum_observations_per_phase=2,
             contact_confirmation_samples=1,
@@ -341,7 +366,10 @@ class RobotPhysicalGraspTests(unittest.TestCase):
         self.assertEqual(controller.step().phase, GraspPhase.LIFTING)
         self.assertEqual(len(lift.requests), 1)
 
-        still_supported = self.contacts(support=True)
+        still_supported = self.contacts(
+            support=True,
+            support_robot_label="right_thumb_dp",
+        )
         feedback.push(
             self.observation(4.0, CLOSE_TARGETS, contacts=still_supported),
             self.observation(5.0, CLOSE_TARGETS, contacts=still_supported),
@@ -350,6 +378,98 @@ class RobotPhysicalGraspTests(unittest.TestCase):
         status = controller.step()
         self.assertEqual(status.phase, GraspPhase.FAILED)
         self.assertEqual(status.failure, GraspFailure.LIFT_NOT_VERIFIED)
+
+    def test_spoofed_or_inconsistent_robot_body_paths_fail_closed(self):
+        product = self.layout.product.collider_prim_path
+        cases = (
+            (
+                "marker paths claiming collision links",
+                ContactPair(
+                    product,
+                    "/World/Robot/right_thumb_fingertip",
+                    1.1,
+                    "right_thumb_dp",
+                ),
+                ContactPair(
+                    product,
+                    "/World/Robot/right_index_fingertip",
+                    0.9,
+                    "right_index_ip",
+                ),
+            ),
+            (
+                "mapped bodies with inconsistent labels",
+                ContactPair(
+                    product,
+                    self.robot_contact_paths["right_thumb_dp"],
+                    1.1,
+                    "right_index_ip",
+                ),
+                ContactPair(
+                    product,
+                    self.robot_contact_paths["right_index_ip"],
+                    0.9,
+                    "right_thumb_dp",
+                ),
+            ),
+            (
+                "unrelated product contact bodies",
+                ContactPair(product, "/World/Unrelated/BodyA", 1.1),
+                ContactPair(product, "/World/Unrelated/BodyB", 0.9),
+            ),
+        )
+        for label, thumb, opposing in cases:
+            with self.subTest(label=label):
+                controller, _articulation, feedback, lift = self.make_controller(
+                    contact_confirmation_samples=1,
+                )
+                self.advance_to_closing(controller, feedback)
+                spoofed = (
+                    ContactPair(
+                        product,
+                        self.layout.pickup_support.fixture.prim_path,
+                        3.2,
+                    ),
+                    thumb,
+                    opposing,
+                )
+                feedback.push(
+                    self.observation(3.0, CLOSE_TARGETS, contacts=spoofed)
+                )
+                status = controller.step()
+                self.assertEqual(status.phase, GraspPhase.FAILED)
+                self.assertEqual(status.failure, GraspFailure.INVALID_FEEDBACK)
+                self.assertEqual(lift.requests, [])
+
+    def test_lift_deadline_accepts_boundary_and_rejects_late_evidence(self):
+        for timestamp, expected_phase, expected_failure in (
+            (7.0, GraspPhase.COMPLETE, None),
+            (7.000001, GraspPhase.FAILED, GraspFailure.LIFT_NOT_VERIFIED),
+            (1000.0, GraspPhase.FAILED, GraspFailure.LIFT_NOT_VERIFIED),
+        ):
+            with self.subTest(timestamp=timestamp):
+                controller, _articulation, feedback, _lift = self.make_controller(
+                    contact_confirmation_samples=1,
+                    lift_confirmation_samples=1,
+                    maximum_lift_duration_s=4.0,
+                )
+                self.advance_to_closing(controller, feedback)
+                feedback.push(
+                    self.observation(3.0, CLOSE_TARGETS, contacts=self.contacts())
+                )
+                self.assertEqual(controller.step().phase, GraspPhase.LIFTING)
+                feedback.push(
+                    self.observation(
+                        timestamp,
+                        CLOSE_TARGETS,
+                        product_lift=0.06,
+                        palm_lift=0.06,
+                        contacts=self.contacts(support=False),
+                    )
+                )
+                status = controller.step()
+                self.assertEqual(status.phase, expected_phase)
+                self.assertEqual(status.failure, expected_failure)
 
     def test_relative_slip_or_lost_contact_is_a_drop(self):
         for label, contacts, xy_offset in (

@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import math
+from types import MappingProxyType
 from typing import Mapping, Protocol, Sequence
 
 from simulator.environment.restocking_layout import (
@@ -67,6 +68,7 @@ OPPOSING_CONTACT_LINKS = frozenset(
         "right_palm",
     )
 )
+REQUIRED_CONTACT_LINKS = THUMB_CONTACT_LINKS | OPPOSING_CONTACT_LINKS
 
 
 OPEN_TARGETS = {
@@ -160,9 +162,10 @@ class BodyPose:
 class ContactPair:
     """One measured contact involving named USD prims.
 
-    ``robot_link_name`` is required only for a robot/product contact.  The
-    runtime adapter must resolve it from the actual collision-bearing robot
-    link rather than a fixed fingertip marker or a requested joint target.
+    ``robot_link_name`` is optional diagnostic metadata.  For robot/product
+    contact, the controller derives identity from the injected exact body-path
+    map and requires this label to agree when it is present.  A fixed fingertip
+    marker or requested joint target cannot establish contact identity.
     ``normal_force_n`` is a force value; an impulse-based API must divide by
     the measured physics step before constructing this record.
     """
@@ -171,6 +174,47 @@ class ContactPair:
     body1_prim_path: str
     normal_force_n: float
     robot_link_name: str | None = None
+
+
+@dataclass(frozen=True)
+class RobotContactBodyMap:
+    """Exact normalized contact-body paths for collision-bearing hand links.
+
+    The runtime adapter must derive this map from the imported articulation and
+    normalize every reported shape/contact path to the corresponding body path.
+    A link label in :class:`ContactPair` is only a consistency check; the
+    controller derives contact identity from this map.
+    """
+
+    robot_root_prim_path: str
+    link_body_prim_paths: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        normalized_paths = dict(self.link_body_prim_paths)
+        root = self.robot_root_prim_path.rstrip("/")
+        if not root.startswith("/") or root == "/":
+            raise ValueError("robot contact root must be an absolute non-root prim path")
+        if set(normalized_paths) != set(REQUIRED_CONTACT_LINKS):
+            raise ValueError(
+                "robot contact map must contain exactly the required collision-bearing links"
+            )
+        paths = tuple(normalized_paths.values())
+        if len(paths) != len(set(paths)):
+            raise ValueError("robot contact body paths must be unique")
+        for link, path in normalized_paths.items():
+            if (
+                not isinstance(path, str)
+                or not path.startswith(root + "/")
+                or path.endswith("/")
+                or path.rsplit("/", 1)[-1] != link
+            ):
+                raise ValueError(
+                    "every robot contact body path must be below the robot root "
+                    "and end in its exact URDF link name"
+                )
+        object.__setattr__(
+            self, "link_body_prim_paths", MappingProxyType(normalized_paths)
+        )
 
 
 @dataclass(frozen=True)
@@ -325,6 +369,7 @@ class PhysicalGraspController:
         *,
         feedback: PhysicalFeedback | None = None,
         arm_lift: ArmLiftPort | None = None,
+        robot_contacts: RobotContactBodyMap | None = None,
         limits: GraspLimits | None = None,
     ):
         validate_restocking_layout(layout)
@@ -336,6 +381,12 @@ class PhysicalGraspController:
         self.layout = layout
         self.feedback = feedback or UnavailablePhysicalFeedback()
         self.arm_lift = arm_lift or UnavailableArmLiftPort()
+        self.robot_contacts = robot_contacts
+        self._robot_path_to_link = (
+            {path: link for link, path in robot_contacts.link_body_prim_paths.items()}
+            if robot_contacts is not None
+            else {}
+        )
         self.limits = limits or GraspLimits()
         self.phase = GraspPhase.IDLE
         self.failure: GraspFailure | None = None
@@ -347,10 +398,20 @@ class PhysicalGraspController:
         self._grasp_product_pose: BodyPose | None = None
         self._grasp_palm_pose: BodyPose | None = None
         self._grasp_relative_pose: _RelativePose | None = None
+        self._lift_started_at_s: float | None = None
+        self._lift_deadline_s: float | None = None
 
         represented = set(hand_controller.spec.canonical_dof_order)
         if set(HAND_DOF_NAMES) - represented:
             raise ValueError("production articulation does not contain every OrcaHand finger DOF")
+        model_links = set(hand_controller.spec.model.link_names)
+        collisionless_links = set(hand_controller.spec.model.links_without_collision)
+        if not set(REQUIRED_CONTACT_LINKS).issubset(model_links) or set(
+            REQUIRED_CONTACT_LINKS
+        ).intersection(collisionless_links):
+            raise ValueError(
+                "required hand contact links are not collision-bearing production URDF links"
+            )
         for targets in (OPEN_TARGETS, PRESHAPE_TARGETS, CLOSE_TARGETS):
             if set(targets) != set(HAND_DOF_NAMES):
                 raise ValueError("every hand pose must target exactly the represented finger DOFs")
@@ -463,6 +524,8 @@ class PhysicalGraspController:
                 return False
             if not math.isfinite(contact.normal_force_n) or contact.normal_force_n < 0.0:
                 return False
+            if not self._contact_binding_is_valid(contact):
+                return False
         return True
 
     def _joints_reached(
@@ -492,9 +555,28 @@ class PhysicalGraspController:
             return contact.body0_prim_path
         return None
 
+    def _contact_binding_is_valid(self, contact: ContactPair) -> bool:
+        other_path = self._contact_other_path(contact)
+        if other_path is None:
+            return False
+        if other_path == self.layout.pickup_support.fixture.prim_path:
+            # The exact product/support body pair is authoritative even if an
+            # adapter attaches a stale semantic robot label to the record.
+            return True
+        expected_link = self._robot_path_to_link.get(other_path)
+        if expected_link is not None:
+            return contact.robot_link_name in (None, expected_link)
+        return False
+
+    def _robot_contact_link(self, contact: ContactPair) -> str | None:
+        other_path = self._contact_other_path(contact)
+        if other_path is None:
+            return None
+        return self._robot_path_to_link.get(other_path)
+
     def _two_sided_product_contact(self, observation: GraspObservation) -> bool:
         active_links = {
-            contact.robot_link_name
+            self._robot_contact_link(contact)
             for contact in observation.contacts
             if self._contact_has_product(contact)
             and self._contact_other_path(contact)
@@ -509,7 +591,6 @@ class PhysicalGraspController:
         source_path = self.layout.pickup_support.fixture.prim_path
         return any(
             self._contact_other_path(contact) == source_path
-            and contact.robot_link_name is None
             and contact.normal_force_n >= self.limits.minimum_contact_force_n
             for contact in observation.contacts
         )
@@ -552,11 +633,22 @@ class PhysicalGraspController:
             self.phase = GraspPhase.LIFTING
             self._phase_observations = 0
             self._lift_confirmations = 0
+            self._lift_started_at_s = observation.timestamp_s
+            self._lift_deadline_s = (
+                observation.timestamp_s + self.limits.maximum_lift_duration_s
+            )
             return
         if self._phase_timed_out():
             self._fail(GraspFailure.CONTACT_NOT_VERIFIED)
 
     def _step_lifting(self, observation: GraspObservation) -> None:
+        if (
+            self._lift_started_at_s is None
+            or self._lift_deadline_s is None
+            or observation.timestamp_s > self._lift_deadline_s
+        ):
+            self._fail(GraspFailure.LIFT_NOT_VERIFIED)
+            return
         if not self._two_sided_product_contact(observation):
             self._fail(GraspFailure.OBJECT_DROPPED)
             return
@@ -616,6 +708,8 @@ __all__ = [
     "PRESHAPE_TARGETS",
     "PhysicalFeedback",
     "PhysicalGraspController",
+    "REQUIRED_CONTACT_LINKS",
+    "RobotContactBodyMap",
     "THUMB_CONTACT_LINKS",
     "UnavailableArmLiftPort",
     "UnavailablePhysicalFeedback",

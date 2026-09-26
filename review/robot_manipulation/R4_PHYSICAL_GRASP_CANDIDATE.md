@@ -85,6 +85,15 @@ link (`right_thumb_ip` or `right_thumb_dp`) and an opposing collision-bearing
 distal finger (`right_index_ip`, `right_middle_ip`, `right_ring_ip`, or
 `right_pinky_ip`) or `right_palm`.
 
+The runtime must inject an exact `RobotContactBodyMap` from each of those seven
+URDF link names to its normalized imported body prim path.  Every mapped path
+must be unique, below the declared robot root, and end in the same exact URDF
+link name.  The controller derives contact identity from that path map.  An
+optional `ContactPair.robot_link_name` is only a consistency check: marker,
+unmapped robot, unrelated labeled, and path/label mismatch records fail closed.
+An exact product/pickup-support body pair remains authoritative even if its
+optional semantic label is stale.
+
 Before the arm lift request, consecutive observations must establish all of:
 
 1. contact on both opposing sides against the exact product body/collider;
@@ -99,6 +108,11 @@ observations must establish all of:
 2. contact with the pickup support is absent;
 3. measured product and palm height each increased by at least 50 mm;
 4. product pose relative to the palm drifted at most 18 mm and 0.20 rad.
+
+The observation that triggers the accepted lift request defines the lift start
+timestamp and an inclusive four-second deadline.  Evidence at the exact
+deadline can pass; any later observation fails with `lift_not_verified`, even
+if its contact and displacement values would otherwise pass.
 
 The default budgets are 120 observations per phase, three contact confirmation
 samples, and three lift confirmation samples.  Missing, stale, nonfinite, wrong
@@ -120,7 +134,8 @@ candidate.  A later allocated runtime task must prove which installed API
 provides co-timed contact pairs, collision-bearing robot link identity, product
 and palm world poses, and force values.  If the installed API reports impulses,
 the adapter must convert impulse to force using the measured physics step.  It
-must also prove how imported link paths map to the exact URDF link names.
+must also build the exact normalized body-path map from the imported stage; a
+caller-authored semantic link label cannot substitute for that binding.
 
 Until that adapter is implemented and independently reviewed, the default
 feedback source returns no observation and the sequence fails with
@@ -139,9 +154,21 @@ C:\isaacsim\python.bat -m unittest `
   tests.test_robot_production_model.ProductionRobotModelTests.test_complete_asimov_and_orcahand_tree_is_preserved
 ```
 
-Result: `Ran 22 tests ... OK` on the CPU-only source candidate.  The focused
+Result: `Ran 24 tests ... OK` on the CPU-only revision 2 candidate.  The focused
 suite covers exact URDF joints/contact links and limits, finger-only
 drive targets, the normal measurement-gated sequence, wrong/one-sided contact,
 missing feedback, support-retained lift, stale/nonfinite observations, and
-relative slip/contact loss.  Independent Sol/high review of the exact candidate
-is still required.
+relative slip/contact loss.  Revision 2 also covers spoofed marker paths,
+path/label mismatches, a mislabeled exact support pair, the inclusive lift
+deadline boundary, and observations just after and far after the deadline.
+Independent Sol/high review of the exact candidate is still required.
+
+## Revision 2 finding response
+
+- `RST-006-F01`: fixed by deriving robot-link identity only from the validated
+  normalized body-path map, checking any optional label against that result,
+  rejecting marker/unmapped/inconsistent robot records, and treating the exact
+  product/support pair as support evidence regardless of its optional label.
+- `RST-006-F02`: fixed by latching the lift request observation time, computing
+  an inclusive deadline from `maximum_lift_duration_s`, and rejecting every
+  later observation before evaluating its physical success evidence.

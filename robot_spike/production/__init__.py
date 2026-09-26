@@ -32,6 +32,7 @@ from .physical_grasp import (
     LiftRequest,
     PhysicalFeedback,
     PhysicalGraspController,
+    RobotContactBodyMap,
 )
 from .runtime import ArticulationController, IsaacRobotLoader
 
@@ -58,6 +59,7 @@ __all__ = [
     "ProductionRobotSpec",
     "PhysicalFeedback",
     "PhysicalGraspController",
+    "RobotContactBodyMap",
     "RightArmKinematics",
     "KINEMATIC_BASE_FRAME",
     "TOOL_FRAME",
