@@ -721,6 +721,7 @@ def _staged_double_support_startup(
     reset_hold_targets: dict[str, float],
     crouch_targets: dict[str, float],
     balanced_crouch_targets: Callable[[LocomotionFeedback], dict[str, float]],
+    balanced_hold_targets: Callable[[LocomotionFeedback], dict[str, float]] | None = None,
     physics_dt: float,
     maximum_duration_s: float,
     config: GaitConfig = GaitConfig(),
@@ -754,6 +755,11 @@ def _staged_double_support_startup(
             "targets_rad": dict(reset_hold_targets),
             "source": "targets seeded by the sole explicit reset",
             "post_reset_commands_before_stability": 0,
+            "measured_balance_recovery_enabled": balanced_hold_targets is not None,
+            "recovery_trigger": (
+                "measured root speed leaves the existing gait-handoff tolerance "
+                "while fresh bilateral support and every hard gate remain valid"
+            ),
         },
         "gates": {
             "maximum_root_tilt_rad": config.maximum_root_tilt_rad,
@@ -811,6 +817,12 @@ def _staged_double_support_startup(
     acquired: LocomotionFeedback | None = None
     consecutive_stable_samples = 0
     last_feedback_timestamp_s: float | None = None
+    current_hold_targets = dict(reset_hold_targets)
+    balance_recovery_active = False
+    recoverable_settling_failures = {
+        "root linear speed has not settled for gait handoff",
+        "root angular speed has not settled for gait handoff",
+    }
     for step_index in range(1, pre_ramp_steps + 1):
         step_physics()
         try:
@@ -821,7 +833,7 @@ def _staged_double_support_startup(
                 diagnostics, config
             )
             tracking_failures, tracking_metrics = _diagnostic_target_tracking_failures(
-                diagnostics, reset_hold_targets, config
+                diagnostics, current_hold_targets, config
             )
             gate_failures.extend(tracking_failures)
             gate_metrics.update(tracking_metrics)
@@ -852,7 +864,7 @@ def _staged_double_support_startup(
             diagnostics, config
         )
         tracking_failures, tracking_metrics = _diagnostic_target_tracking_failures(
-            diagnostics, reset_hold_targets, config
+            diagnostics, current_hold_targets, config
         )
         gate_failures.extend(tracking_failures)
         gate_metrics.update(tracking_metrics)
@@ -894,6 +906,58 @@ def _staged_double_support_startup(
         stability_failures.extend(settling_failures)
         gate_metrics.update(settling_metrics)
         gate_metrics["support_margin_m"] = feedback.support_margin_m
+
+        commanded_hold_targets: dict[str, float] | None = None
+        hold_balance_observation: dict[str, Any] | None = None
+        speed_recovery_requested = bool(
+            recoverable_settling_failures.intersection(stability_failures)
+        )
+        support_is_safe_for_recovery = (
+            both_contact
+            and contact_fresh
+            and timestamp_fresh
+            and feedback.support_margin_m >= config.minimum_support_margin_m
+            and set(stability_failures).issubset(recoverable_settling_failures)
+        )
+        if (
+            balanced_hold_targets is not None
+            and not gate_failures
+            and support_is_safe_for_recovery
+            and (balance_recovery_active or speed_recovery_requested)
+        ):
+            balance_recovery_active = True
+            try:
+                proposed = balanced_hold_targets(feedback)
+                if set(proposed) != set(LEG_JOINTS):
+                    raise ValueError(
+                        "balanced hold targets do not name every leg joint"
+                    )
+                proposed = {
+                    name: float(proposed[name]) for name in LEG_JOINTS
+                }
+                if not all(math.isfinite(value) for value in proposed.values()):
+                    raise ValueError("balanced hold targets contain a nonfinite value")
+                proposed_failures, proposed_metrics = (
+                    _diagnostic_target_tracking_failures(
+                        diagnostics, proposed, config
+                    )
+                )
+                gate_failures.extend(proposed_failures)
+                gate_metrics.update(proposed_metrics)
+                if balance_observation is not None:
+                    hold_balance_observation = dict(balance_observation())
+                if not gate_failures:
+                    joint_controller.command_joint_positions(proposed)
+                    current_hold_targets = proposed
+                    commanded_hold_targets = dict(proposed)
+                    report["pre_ramp_hold"][
+                        "post_reset_commands_before_stability"
+                    ] += 1
+            except Exception as exc:
+                gate_failures.append(
+                    f"measured balance hold target generation failed: {exc}"
+                )
+
         if gate_failures:
             consecutive_stable_samples = 0
             status = "rejected"
@@ -917,6 +981,9 @@ def _staged_double_support_startup(
                 "gate_failures": gate_failures,
                 "stability_failures": stability_failures,
                 "consecutive_stable_samples": consecutive_stable_samples,
+                "balance_recovery_active": balance_recovery_active,
+                "commanded_balance_hold_targets_rad": commanded_hold_targets,
+                "balance_observation": hold_balance_observation,
                 "diagnostics": diagnostics,
             }
         )
@@ -1535,9 +1602,17 @@ def run_isaac(
             recording_source = _RecordingFeedbackSource(adapter)
             startup_balance = BalanceFeedbackController()
             startup_target_generator = ConservativeGaitTargetGenerator(spec)
+            startup_hold_target_generator = ConservativeGaitTargetGenerator(
+                spec,
+                GaitConfig(neutral_knee_flexion_rad=0.0),
+            )
             last_startup_balance: dict[str, Any] = {}
 
-            def balanced_crouch(feedback: LocomotionFeedback) -> dict[str, float]:
+            def startup_balance_targets(
+                feedback: LocomotionFeedback,
+                target_generator: ConservativeGaitTargetGenerator,
+                target_pose: str,
+            ) -> dict[str, float]:
                 correction = startup_balance.evaluate(feedback)
                 dx_world = (
                     feedback.com_position_world_m[0]
@@ -1579,18 +1654,33 @@ def run_isaac(
                             "sagittal": correction.sagittal_rad,
                             "lateral": correction.lateral_rad,
                         },
+                        "target_pose": target_pose,
                         "unsafe_reason": correction.unsafe_reason,
                     }
                 )
                 if correction.unsafe_reason is not None:
                     raise FeedbackUnavailableError(
-                        f"balanced crouch input is unsafe: {correction.unsafe_reason}"
+                        f"balanced startup input is unsafe: {correction.unsafe_reason}"
                     )
-                return startup_target_generator.targets(
+                return target_generator.targets(
                     feedback,
                     GaitPhase.DOUBLE_SUPPORT,
                     0.0,
                     correction,
+                )
+
+            def balanced_hold(feedback: LocomotionFeedback) -> dict[str, float]:
+                return startup_balance_targets(
+                    feedback,
+                    startup_hold_target_generator,
+                    "all-zero reset pose with measured balance correction",
+                )
+
+            def balanced_crouch(feedback: LocomotionFeedback) -> dict[str, float]:
+                return startup_balance_targets(
+                    feedback,
+                    startup_target_generator,
+                    "symmetric crouch with measured balance correction",
                 )
 
             def persist_startup(startup_report: dict[str, Any]) -> None:
@@ -1610,6 +1700,7 @@ def run_isaac(
                     },
                     crouch_targets=symmetric_crouch_targets(spec),
                     balanced_crouch_targets=balanced_crouch,
+                    balanced_hold_targets=balanced_hold,
                     physics_dt=physics_dt,
                     maximum_duration_s=args.settle_s,
                     balance_observation=lambda: dict(last_startup_balance),

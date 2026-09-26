@@ -22,9 +22,12 @@ from robot_spike.production.isaac_feedback import (
     support_polygon_center_and_margin,
 )
 from robot_spike.production.locomotion import (
+    BalanceFeedbackController,
+    ConservativeGaitTargetGenerator,
     FootFeedback,
     FootPose,
     GaitConfig,
+    GaitPhase,
     LEG_JOINTS,
     LocomotionFeedback,
     PlanarPose,
@@ -314,6 +317,27 @@ class StartupFeedbackSource:
                 timestamp=1.0 + 0.1 * self.read_count,
                 root_linear=(0.10, 0.0, 0.0),
                 root_angular=(0.0, 0.20, 0.0),
+            )
+        if self.mode == "09e_straight_knee_drift":
+            if self.read_count == 1:
+                return startup_feedback(
+                    timestamp=1.0 + self.read_count / 120.0,
+                    right_contact=False,
+                )
+            if self.read_count <= 34:
+                return startup_feedback(
+                    timestamp=1.0 + self.read_count / 120.0,
+                )
+            if not self.controller.commands:
+                return startup_feedback(
+                    timestamp=1.0 + self.read_count / 120.0,
+                    root_pitch=-0.020,
+                    root_linear=(-0.040, 0.0, 0.0),
+                    root_angular=(0.0, -0.110, 0.0),
+                )
+            return startup_feedback(
+                timestamp=1.0 + self.read_count / 120.0,
+                joints=self.controller.commands[-1],
             )
         if self.mode in {
             "transient_target_ramp_drift",
@@ -1327,6 +1351,70 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(report["stability_achieved_step"], 5)
         self.assertEqual(controller.command_read_counts[0], 5)
 
+    def test_measured_balance_hold_recovers_09e_straight_knee_drift(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "09e_straight_knee_drift"
+        spec = load_production_spec(ROOT / "robot_spike" / "production")
+        balance = BalanceFeedbackController()
+        hold_generator = ConservativeGaitTargetGenerator(
+            spec,
+            GaitConfig(neutral_knee_flexion_rad=0.0),
+        )
+
+        def balanced_hold(feedback: LocomotionFeedback) -> dict[str, float]:
+            correction = balance.evaluate(feedback)
+            self.assertIsNone(correction.unsafe_reason)
+            return hold_generator.targets(
+                feedback,
+                GaitPhase.DOUBLE_SUPPORT,
+                0.0,
+                correction,
+            )
+
+        _final, report = _staged_double_support_startup(
+            feedback_source=source,  # type: ignore[arg-type]
+            joint_controller=controller,  # type: ignore[arg-type]
+            step_physics=lambda: None,
+            reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+            crouch_targets={name: 0.18 for name in LEG_JOINTS},
+            balanced_crouch_targets=test_balanced_crouch,
+            balanced_hold_targets=balanced_hold,
+            physics_dt=1.0 / 120.0,
+            maximum_duration_s=1.65,
+        )
+
+        pre_ramp = [
+            event
+            for event in report["events"]
+            if event["stage"] == "pre_ramp_stabilization"
+        ]
+        self.assertEqual(report["contact_acquired_step"], 2)
+        self.assertEqual(pre_ramp[33]["consecutive_stable_samples"], 33)
+        self.assertEqual(pre_ramp[34]["status"], "dwell_reset")
+        self.assertEqual(controller.command_read_counts[0], 35)
+        self.assertTrue(pre_ramp[34]["balance_recovery_active"])
+        first_targets = pre_ramp[34]["commanded_balance_hold_targets_rad"]
+        self.assertIsNotNone(first_targets)
+        self.assertLessEqual(
+            max(abs(value) for value in first_targets.values()),
+            GaitConfig().maximum_target_error_rad,
+        )
+        for name, value in first_targets.items():
+            spec.model.joint_limits[name].check(name, value)
+        self.assertEqual(report["stability_achieved_step"], 71)
+        self.assertEqual(pre_ramp[-1]["status"], "stable")
+        self.assertGreater(
+            report["pre_ramp_hold"]["post_reset_commands_before_stability"],
+            0,
+        )
+        self.assertTrue(
+            all(
+                event["commanded_balance_hold_targets_rad"] is None
+                for event in pre_ramp[:34]
+            )
+        )
+
     def test_target_ramp_holds_each_increment_until_root_settles(self):
         controller = StartupController()
         source = StartupFeedbackSource(controller)
@@ -1696,6 +1784,9 @@ class IsaacFeedbackTests(unittest.TestCase):
                         reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                         crouch_targets={name: 0.18 for name in LEG_JOINTS},
                         balanced_crouch_targets=test_balanced_crouch,
+                        balanced_hold_targets=lambda _feedback: self.fail(
+                            "invalid support must not issue a balance hold target"
+                        ),
                         physics_dt=0.1,
                         maximum_duration_s=2.0,
                     )
@@ -1785,6 +1876,9 @@ class IsaacFeedbackTests(unittest.TestCase):
                 reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
                 balanced_crouch_targets=test_balanced_crouch,
+                balanced_hold_targets=lambda _feedback: self.fail(
+                    "hard-gate failure must abort before balance hold command"
+                ),
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
             )

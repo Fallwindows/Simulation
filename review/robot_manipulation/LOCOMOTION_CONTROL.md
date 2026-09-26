@@ -419,6 +419,35 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-efdf53e\locomotion_smoke_status.json`;
   the Kit log is
   `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_075615.log`.
+- `RST-004-F16`: exact reviewed integration
+  `09e7526ba350d62ed6b64cc41215c2105ff9eb8b` confirmed that the URDF-derived
+  Z=0.630346 m reset removed the prior free-fall impact. Bilateral support was
+  measured at step 2 near 151.5/168.2 N with +0.04014 m margin. The all-zero
+  straight-leg hold then accumulated only 33 of the required 36 stable samples:
+  at step 35 root speed crossed the unchanged 0.035 m/s handoff tolerance while
+  contact and margin remained safe. Because no drive target was allowed before
+  the dwell completed, backward speed, pitch, and COM displacement then grew
+  monotonically until the unchanged 12 degree tilt gate rejected step 126.
+  At rejection root X was -0.094669 m, pitch -0.212893 rad, speed 0.254408 m/s,
+  angular speed 0.554151 rad/s, and support margin -0.0591884 m; both feet
+  remained loaded near 160 N. This is an unstable straight-knee hold rather
+  than an impact or contact-sensing failure.
+
+  The successor keeps the exact supported reset and adds a bounded measured
+  **pre-ramp balance recovery** using position targets only. It remains inactive
+  while the initial dwell is settling normally. It activates only when measured
+  root speed leaves the existing handoff tolerance while fresh bilateral
+  contact, advancing timestamps, the existing support-margin gate, sole/root
+  geometry, target tracking, and every hard gate remain valid. The target uses
+  the reviewed balance controller and gait target generator with zero nominal
+  knee flexion, so it stabilizes around the reset pose and cannot begin the
+  crouch ramp. Its existing sagittal/lateral caps, Kd/Kp-derived target damping,
+  URDF limits, and 0.30 rad measured-target-error gate still apply. Loss of
+  contact/support or any hard-gate failure produces no recovery command and
+  still aborts or exhausts the bounded window. The ramp and gait remain blocked
+  until a new complete 0.30 s stable dwell succeeds. The receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-09e7526\locomotion_smoke_status.json`;
+  no installed Kit-log path was supplied with this handoff.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
