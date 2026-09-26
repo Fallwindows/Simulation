@@ -159,8 +159,18 @@ def startup_diagnostics(
             "ankles": {"left": copy.deepcopy(ankle), "right": copy.deepcopy(ankle)},
         },
         "contacts": {
-            "left": {"is_valid": True, "in_contact": True, "force_n": 100.0},
-            "right": {"is_valid": True, "in_contact": True, "force_n": 100.0},
+            "left": {
+                "is_valid": True,
+                "in_contact": True,
+                "force_n": 100.0,
+                "age_s": 0.0,
+            },
+            "right": {
+                "is_valid": True,
+                "in_contact": True,
+                "force_n": 100.0,
+                "age_s": 0.0,
+            },
         },
         "support": {"source": "measured_raw_contact_hull"},
     }
@@ -195,9 +205,12 @@ def startup_feedback(
 class StartupController:
     def __init__(self):
         self.commands: list[dict[str, float]] = []
+        self.command_read_counts: list[int] = []
+        self.read_count_source = lambda: 0
 
     def command_joint_positions(self, targets):
         self.commands.append(dict(targets))
+        self.command_read_counts.append(self.read_count_source())
 
 
 class StartupAdapter:
@@ -211,6 +224,7 @@ class StartupAdapter:
 class StartupFeedbackSource:
     def __init__(self, controller: StartupController):
         self.controller = controller
+        self.controller.read_count_source = lambda: self.read_count
         self.adapter = StartupAdapter()
         self.read_count = 0
         self.mode = "success"
@@ -231,9 +245,21 @@ class StartupFeedbackSource:
         if self.mode == "unsafe_root":
             self.adapter.current = startup_diagnostics(root_pitch=math.radians(13.0))
             return startup_feedback(root_pitch=math.radians(13.0))
-        if self.mode == "contact_loss" and self.read_count == 2:
+        if self.mode == "transient_contact_loss" and self.read_count == 2:
             return startup_feedback(right_contact=False)
-        if self.mode == "tracking_failure" and self.read_count >= 2:
+        if self.mode == "contact_loss" and self.controller.commands:
+            return startup_feedback(right_contact=False)
+        if self.mode == "hold_tracking_failure" and not self.controller.commands:
+            self.adapter.current = startup_diagnostics()
+            self.adapter.current["kinematics"]["leg_joint_position_rad"] = {
+                name: -1.0 for name in LEG_JOINTS
+            }
+            return startup_feedback(joints={name: -1.0 for name in LEG_JOINTS})
+        if self.mode == "tracking_failure" and self.controller.commands:
+            self.adapter.current = startup_diagnostics()
+            self.adapter.current["kinematics"]["leg_joint_position_rad"] = {
+                name: -1.0 for name in LEG_JOINTS
+            }
             return startup_feedback(joints={name: -1.0 for name in LEG_JOINTS})
         joints = (
             self.controller.commands[-1]
@@ -526,6 +552,7 @@ class IsaacFeedbackTests(unittest.TestCase):
             ("repeats", 0),
             ("forward_m", 0.0),
             ("settle_s", math.inf),
+            ("settle_s", 0.8),
             ("timeout_s", math.nan),
         ):
             invalid = dict(valid)
@@ -946,6 +973,7 @@ class IsaacFeedbackTests(unittest.TestCase):
             feedback_source=source,  # type: ignore[arg-type]
             joint_controller=controller,  # type: ignore[arg-type]
             step_physics=lambda: physics_steps.append(len(physics_steps) + 1),
+            reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
             crouch_targets=crouch,
             physics_dt=0.1,
             maximum_duration_s=2.0,
@@ -954,10 +982,18 @@ class IsaacFeedbackTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["contact_acquired_step"], 1)
+        self.assertEqual(report["stability_achieved_step"], 3)
+        self.assertEqual(
+            report["step_budget"]["required_consecutive_stable_samples"], 3
+        )
         self.assertEqual(report["step_budget"]["target_ramp"], 3)
         self.assertEqual(report["step_budget"]["verified_dwell"], 3)
-        self.assertEqual(len(physics_steps), 7)
+        self.assertEqual(len(physics_steps), 9)
         self.assertEqual(len(controller.commands), 3)
+        self.assertEqual(controller.command_read_counts[0], 3)
+        self.assertEqual(
+            report["pre_ramp_hold"]["post_reset_commands_before_stability"], 0
+        )
         self.assertAlmostEqual(controller.commands[0][LEG_JOINTS[0]], 0.02 + (0.16 / 3.0))
         self.assertEqual(controller.commands[-1], crouch)
         self.assertEqual(final.joint_position_rad, crouch)
@@ -1010,6 +1046,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                 feedback_source=source,  # type: ignore[arg-type]
                 joint_controller=controller,  # type: ignore[arg-type]
                 step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
@@ -1035,16 +1072,19 @@ class IsaacFeedbackTests(unittest.TestCase):
                 feedback_source=source,  # type: ignore[arg-type]
                 joint_controller=controller,  # type: ignore[arg-type]
                 step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
                 progress=lambda value: progress.append(copy.deepcopy(value)),
             )
 
-        acquisition_steps = raised.exception.report["step_budget"]["contact_acquisition"]
-        self.assertEqual(source.read_count, acquisition_steps)
-        self.assertEqual(len(raised.exception.report["events"]), acquisition_steps)
-        self.assertGreaterEqual(len(progress), acquisition_steps)
+        stabilization_steps = raised.exception.report["step_budget"][
+            "pre_ramp_stabilization"
+        ]
+        self.assertEqual(source.read_count, stabilization_steps)
+        self.assertEqual(len(raised.exception.report["events"]), stabilization_steps)
+        self.assertGreaterEqual(len(progress), stabilization_steps)
         self.assertTrue(
             all("kinematics" in event["diagnostics"] for event in progress[-2]["events"])
         )
@@ -1066,6 +1106,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                         feedback_source=source,  # type: ignore[arg-type]
                         joint_controller=controller,  # type: ignore[arg-type]
                         step_physics=lambda: physics_steps.append(1),
+                        reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                         crouch_targets={name: 0.18 for name in LEG_JOINTS},
                         physics_dt=0.1,
                         maximum_duration_s=2.0,
@@ -1080,6 +1121,68 @@ class IsaacFeedbackTests(unittest.TestCase):
                 )
                 self.assertIn("kinematics", event["diagnostics"])
 
+    def test_pre_ramp_dwell_resets_after_transient_contact_loss_then_reacquires(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "transient_contact_loss"
+        final, report = _staged_double_support_startup(
+            feedback_source=source,  # type: ignore[arg-type]
+            joint_controller=controller,  # type: ignore[arg-type]
+            step_physics=lambda: None,
+            reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+            crouch_targets={name: 0.18 for name in LEG_JOINTS},
+            physics_dt=0.1,
+            maximum_duration_s=2.0,
+        )
+
+        pre_ramp = [
+            event
+            for event in report["events"]
+            if event["stage"] == "pre_ramp_stabilization"
+        ]
+        self.assertEqual([event["status"] for event in pre_ramp[:5]], [
+            "stabilizing",
+            "dwell_reset",
+            "stabilizing",
+            "stabilizing",
+            "stable",
+        ])
+        self.assertIn(
+            "both measured feet are not in contact",
+            pre_ramp[1]["stability_failures"],
+        )
+        self.assertEqual(report["stability_achieved_step"], 5)
+        self.assertEqual(controller.command_read_counts[0], 5)
+        self.assertEqual(len(controller.commands), 3)
+        self.assertEqual(final.joint_position_rad, controller.commands[-1])
+
+    def test_pre_ramp_hold_target_limit_aborts_without_a_command(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "hold_tracking_failure"
+        with self.assertRaisesRegex(StartupValidationError, "target tracking") as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "pre_ramp_stabilization")
+        self.assertEqual(controller.commands, [])
+        event = raised.exception.report["events"][-1]
+        self.assertEqual(event["status"], "rejected")
+        self.assertGreater(
+            event["gate_metrics"]["maximum_joint_target_error_rad"], 0.3
+        )
+        self.assertIn(
+            "joint target tracking exceeded configured limit",
+            event["gate_failures"],
+        )
+
     def test_staged_startup_aborts_on_unstable_root_before_any_target(self):
         controller = StartupController()
         source = StartupFeedbackSource(controller)
@@ -1089,12 +1192,13 @@ class IsaacFeedbackTests(unittest.TestCase):
                 feedback_source=source,  # type: ignore[arg-type]
                 joint_controller=controller,  # type: ignore[arg-type]
                 step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
             )
 
-        self.assertEqual(raised.exception.phase, "contact_acquisition")
+        self.assertEqual(raised.exception.phase, "pre_ramp_stabilization")
         self.assertEqual(controller.commands, [])
         self.assertEqual(raised.exception.report["status"], "error")
 
@@ -1107,6 +1211,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                 feedback_source=source,  # type: ignore[arg-type]
                 joint_controller=controller,  # type: ignore[arg-type]
                 step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
                 physics_dt=0.1,
                 maximum_duration_s=2.0,

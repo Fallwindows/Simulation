@@ -93,11 +93,11 @@ def _validate_arguments(args: argparse.Namespace) -> None:
     durations_and_distance = (args.forward_m, args.settle_s, args.timeout_s)
     if not all(math.isfinite(value) and value > 0.0 for value in durations_and_distance):
         raise ValueError("forward-m, settle-s, and timeout-s must be finite and positive")
-    minimum_startup_s = 2.0 * GaitConfig().double_support_duration_s + 1.0 / args.physics_hz
+    minimum_startup_s = 3.0 * GaitConfig().double_support_duration_s + 1.0 / args.physics_hz
     if args.settle_s < minimum_startup_s:
         raise ValueError(
             "settle-s must allow one acquisition step plus the configured "
-            "double-support ramp and dwell"
+            "pre-ramp stabilization, target ramp, and verified dwell"
         )
 
 
@@ -412,6 +412,29 @@ def _diagnostic_startup_failures(
     return failures, metrics
 
 
+def _diagnostic_target_tracking_failures(
+    diagnostics: dict[str, Any],
+    targets: dict[str, float],
+    config: GaitConfig,
+) -> tuple[list[str], dict[str, float]]:
+    """Check measured leg positions against the active reset/drive targets."""
+
+    try:
+        measured = diagnostics["kinematics"]["leg_joint_position_rad"]
+        target_error = max(
+            abs(float(measured[name]) - float(target))
+            for name, target in targets.items()
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return [f"measured target tracking is unavailable: {exc}"], {}
+    if not math.isfinite(target_error):
+        return ["measured target tracking contains a nonfinite value"], {}
+    failures = []
+    if target_error > config.maximum_target_error_rad:
+        failures.append("joint target tracking exceeded configured limit")
+    return failures, {"maximum_joint_target_error_rad": target_error}
+
+
 def _startup_feedback_failures(
     feedback: LocomotionFeedback,
     diagnostics: dict[str, Any],
@@ -428,17 +451,11 @@ def _startup_feedback_failures(
         failures.append("COM projection left the configured support margin")
 
     if targets is not None:
-        try:
-            target_error = max(
-                abs(float(feedback.joint_position_rad[name]) - target)
-                for name, target in targets.items()
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            failures.append(f"measured target tracking is unavailable: {exc}")
-        else:
-            metrics["maximum_joint_target_error_rad"] = target_error
-            if not math.isfinite(target_error) or target_error > config.maximum_target_error_rad:
-                failures.append("joint target tracking exceeded configured limit")
+        tracking_failures, tracking_metrics = _diagnostic_target_tracking_failures(
+            diagnostics, targets, config
+        )
+        failures.extend(tracking_failures)
+        metrics.update(tracking_metrics)
     return failures, metrics
 
 
@@ -447,6 +464,7 @@ def _staged_double_support_startup(
     feedback_source: _RecordingFeedbackSource,
     joint_controller: ArticulationController,
     step_physics: Callable[[], None],
+    reset_hold_targets: dict[str, float],
     crouch_targets: dict[str, float],
     physics_dt: float,
     maximum_duration_s: float,
@@ -466,23 +484,37 @@ def _staged_double_support_startup(
         raise ValueError("startup duration must be finite and positive")
     if set(crouch_targets) != set(LEG_JOINTS):
         raise ValueError("startup crouch targets must name every leg joint exactly once")
+    if set(reset_hold_targets) != set(LEG_JOINTS):
+        raise ValueError("startup reset hold targets must name every leg joint exactly once")
     total_steps = max(1, math.ceil(maximum_duration_s / physics_dt))
     ramp_steps = max(1, math.ceil(config.double_support_duration_s / physics_dt))
     dwell_steps = max(1, math.ceil(config.double_support_duration_s / physics_dt))
-    acquisition_steps = min(
+    stabilization_dwell_steps = max(
+        1, math.ceil(config.double_support_duration_s / physics_dt)
+    )
+    pre_ramp_steps = min(
         max(1, math.ceil(config.double_support_timeout_s / physics_dt)),
         total_steps - ramp_steps - dwell_steps,
     )
-    if acquisition_steps < 1:
-        raise ValueError("startup duration does not leave a contact acquisition step")
+    if pre_ramp_steps <= stabilization_dwell_steps:
+        raise ValueError(
+            "startup duration must leave an acquisition step plus the full "
+            "pre-ramp stabilization dwell"
+        )
     report: dict[str, Any] = {
         "status": "running",
         "physics_dt_s": physics_dt,
         "maximum_duration_s": maximum_duration_s,
         "step_budget": {
-            "contact_acquisition": acquisition_steps,
+            "pre_ramp_stabilization": pre_ramp_steps,
+            "required_consecutive_stable_samples": stabilization_dwell_steps,
             "target_ramp": ramp_steps,
             "verified_dwell": dwell_steps,
+        },
+        "pre_ramp_hold": {
+            "targets_rad": dict(reset_hold_targets),
+            "source": "targets seeded by the sole explicit reset",
+            "post_reset_commands_before_stability": 0,
         },
         "gates": {
             "maximum_root_tilt_rad": config.maximum_root_tilt_rad,
@@ -510,7 +542,9 @@ def _staged_double_support_startup(
         raise StartupValidationError(phase, reason, report)
 
     acquired: LocomotionFeedback | None = None
-    for step_index in range(1, acquisition_steps + 1):
+    consecutive_stable_samples = 0
+    last_feedback_timestamp_s: float | None = None
+    for step_index in range(1, pre_ramp_steps + 1):
         step_physics()
         try:
             feedback = feedback_source.read_feedback()
@@ -519,69 +553,115 @@ def _staged_double_support_startup(
             gate_failures, gate_metrics = _diagnostic_startup_failures(
                 diagnostics, config
             )
+            tracking_failures, tracking_metrics = _diagnostic_target_tracking_failures(
+                diagnostics, reset_hold_targets, config
+            )
+            gate_failures.extend(tracking_failures)
+            gate_metrics.update(tracking_metrics)
+            consecutive_stable_samples = 0
             report["events"].append(
                 {
-                    "stage": "contact_acquisition",
+                    "stage": "pre_ramp_stabilization",
                     "step": step_index,
                     "status": (
                         "rejected"
                         if gate_failures
-                        else "waiting_for_measured_double_support"
+                        else "dwell_reset"
                     ),
                     "feedback_error": str(exc),
                     "gate_metrics": gate_metrics,
                     "gate_failures": gate_failures,
+                    "stability_failures": ["measured bilateral support unavailable"],
+                    "consecutive_stable_samples": consecutive_stable_samples,
                     "diagnostics": diagnostics,
                 }
             )
             publish()
             if gate_failures:
-                abort("contact_acquisition", "; ".join(gate_failures))
+                abort("pre_ramp_stabilization", "; ".join(gate_failures))
             continue
         diagnostics = feedback_source.adapter.diagnostics()
-        if not (feedback.left_foot.in_contact and feedback.right_foot.in_contact):
-            gate_failures, gate_metrics = _diagnostic_startup_failures(
-                diagnostics, config
-            )
-            report["events"].append(
-                {
-                    "stage": "contact_acquisition",
-                    "step": step_index,
-                    "status": (
-                        "rejected"
-                        if gate_failures
-                        else "waiting_for_measured_double_support"
-                    ),
-                    "gate_metrics": gate_metrics,
-                    "gate_failures": gate_failures,
-                    "diagnostics": diagnostics,
-                }
-            )
-            publish()
-            if gate_failures:
-                abort("contact_acquisition", "; ".join(gate_failures))
-            continue
-        failures, metrics = _startup_feedback_failures(
-            feedback, diagnostics, None, config
+        gate_failures, gate_metrics = _diagnostic_startup_failures(
+            diagnostics, config
         )
+        tracking_failures, tracking_metrics = _diagnostic_target_tracking_failures(
+            diagnostics, reset_hold_targets, config
+        )
+        gate_failures.extend(tracking_failures)
+        gate_metrics.update(tracking_metrics)
+        stability_failures: list[str] = []
+        both_contact = feedback.left_foot.in_contact and feedback.right_foot.in_contact
+        if not both_contact:
+            stability_failures.append("both measured feet are not in contact")
+        contact_fresh = True
+        for side in ("left", "right"):
+            try:
+                contact = diagnostics["contacts"][side]
+                age_s = float(contact["age_s"])
+                force_n = float(contact["force_n"])
+                side_fresh = (
+                    contact["is_valid"] is True
+                    and contact["in_contact"] is True
+                    and math.isfinite(age_s)
+                    and age_s <= physics_dt
+                    and math.isfinite(force_n)
+                    and force_n > 0.0
+                )
+            except (KeyError, TypeError, ValueError):
+                side_fresh = False
+            contact_fresh = contact_fresh and side_fresh
+        if not contact_fresh:
+            stability_failures.append("bilateral contact readings are not fresh and positive")
+        timestamp_fresh = (
+            last_feedback_timestamp_s is None
+            or feedback.timestamp_s > last_feedback_timestamp_s
+        )
+        last_feedback_timestamp_s = feedback.timestamp_s
+        if not timestamp_fresh:
+            stability_failures.append("feedback timestamp did not advance")
+        if feedback.support_margin_m < config.minimum_support_margin_m:
+            stability_failures.append("COM projection left the configured support margin")
+        gate_metrics["support_margin_m"] = feedback.support_margin_m
+        if gate_failures:
+            consecutive_stable_samples = 0
+            status = "rejected"
+        elif stability_failures:
+            consecutive_stable_samples = 0
+            status = "dwell_reset"
+        else:
+            consecutive_stable_samples += 1
+            status = (
+                "stable"
+                if consecutive_stable_samples >= stabilization_dwell_steps
+                else "stabilizing"
+            )
         report["events"].append(
             {
-                "stage": "contact_acquisition",
+                "stage": "pre_ramp_stabilization",
                 "step": step_index,
-                "status": "accepted" if not failures else "rejected",
+                "status": status,
                 "timestamp_s": feedback.timestamp_s,
-                "metrics": metrics,
+                "gate_metrics": gate_metrics,
+                "gate_failures": gate_failures,
+                "stability_failures": stability_failures,
+                "consecutive_stable_samples": consecutive_stable_samples,
                 "diagnostics": diagnostics,
             }
         )
         publish()
-        if failures:
-            abort("contact_acquisition", "; ".join(failures))
-        acquired = feedback
-        report["contact_acquired_step"] = step_index
-        break
+        if gate_failures:
+            abort("pre_ramp_stabilization", "; ".join(gate_failures))
+        if both_contact and "contact_acquired_step" not in report:
+            report["contact_acquired_step"] = step_index
+        if consecutive_stable_samples >= stabilization_dwell_steps:
+            acquired = feedback
+            report["stability_achieved_step"] = step_index
+            break
     if acquired is None:
-        abort("contact_acquisition", "bounded window ended without measured bilateral support")
+        abort(
+            "pre_ramp_stabilization",
+            "bounded window ended without consecutive stable bilateral support",
+        )
 
     start_targets = {
         name: float(acquired.joint_position_rad[name]) for name in LEG_JOINTS
@@ -1091,6 +1171,10 @@ def run_isaac(
                     feedback_source=recording_source,
                     joint_controller=joint_controller,
                     step_physics=SimulationManager.step,
+                    reset_hold_targets={
+                        name: float(spec.reset_joint_positions[name])
+                        for name in LEG_JOINTS
+                    },
                     crouch_targets=symmetric_crouch_targets(spec),
                     physics_dt=physics_dt,
                     maximum_duration_s=args.settle_s,

@@ -274,6 +274,23 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   A failed gate is stored with the causal kinematics and aborts immediately.
   CPU regressions cover unavailable support with 30 degree ankle roll and a
   0.20 m root height.
+- `RST-004-F09`: exact approved integration `0aa61bc40ca829f69e02ce5f16d602a72bcee3be`
+  reached bilateral support at 0.100 s with approximately 795 N left and 816 N
+  right, but that single sample was an impact transient: root Z was 0.6303 m
+  and upward speed was about 0.077 m/s. The first crouch-ramp target one frame
+  later coincided with left contact falling to zero while four raw points
+  remained; right contact was 20.44 N and the single-foot support margin was
+  -79.9 mm. The durable receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-0aa61bc\locomotion_smoke_status.json`;
+  the Kit log is
+  `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_054500.log`.
+  The revision uses the existing 1.2 s double-support timeout as one bounded
+  pre-ramp stabilization window. Reset-seeded targets remain active without a
+  post-reset command. A full 0.30 s of consecutive, advancing samples must have
+  fresh positive bilateral contact, acceptable support margin, reset-target
+  tracking, root stability/clearance, and both soles within 12 degrees. Contact
+  or support loss resets the dwell; a hard safety violation aborts; timeout
+  remains fail closed. No crouch target is sent before stability passes.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -308,8 +325,10 @@ subtracted along world Z, high spheres are excluded, raw points are spatially
 matched to authored collisions, and a one-foot/two-point state remains
 unavailable. Failure regressions verify that root, joints, and both ankles'
 world sphere geometry survive a support exception. Staged-startup regressions
-cover target interpolation and timing, contact loss, unsafe root state, target
-tracking failure, and durable causal diagnostics. Static inspection confirms
+cover target interpolation and timing, an impact sample followed by contact
+loss and reacquisition, reset-target hold limits, bounded timeout persistence,
+unsafe root state, ramp contact/tracking failure, and durable causal diagnostics.
+Static inspection confirms
 that the smoke harness contains no post-reset direct root/joint state setter
 call. Invalid, nonfinite, or nonpositive run arguments are also checked
 through the CPU-safe preflight boundary. Regression cases mutate or remove the
@@ -341,18 +360,22 @@ rewritten after `close()`; a runtime exception is likewise written as a terminal
 error with `shutdown_returned: false` before close, then wrapped in the final
 durable error after close. The run performs one explicit
 deterministic reset per repeat, and uses only drive position targets after each
-reset. Instead of sending a crouch target and advancing two seconds without
-sensing, it first advances a bounded contact-acquisition window until measured
-bilateral contact produces valid support geometry. It then interpolates from
-the measured joint state to the symmetric crouch over the existing 0.30 s
+reset. Instead of sending a crouch target after one bilateral sample, it uses
+the existing 1.2 s timeout as a shared pre-ramp stabilization window. The reset
+targets stay active without another command. Contact or support loss resets the
+consecutive counter, and the ramp remains locked until 0.30 s of fresh positive
+bilateral contact, advancing timestamps, adequate support margin, target
+tracking, and root/sole safety has accumulated. It then interpolates from the
+measured stable joint state to the symmetric crouch over the existing 0.30 s
 double-support duration and verifies another 0.30 s dwell. Each increment uses
 the existing control gates: 12 degree root/sole tilt envelope, 0.35 m/s root
 linear speed, 1.0 rad/s root angular component, 0.30 rad joint target error,
 `[-0.015 m]` minimum support margin, and `[0.45, 0.80] m` root clearance. Sole
 flatness applies the same 12 degree gate directly to the measured angle between
 the authored sole normal and world up; it does not add or loosen a physical
-threshold. Any loss of
-contact/support, instability, sole tilt, or tracking aborts before constructing
+threshold. During pre-ramp stabilization, contact/support loss resets the dwell
+within its bound; hard instability, sole tilt, clearance, or tracking failure
+aborts immediately. During ramp/dwell, any failed gate aborts before constructing
 the gait controller. It writes every controller step to one JSONL measured sample stream per
 repeat plus an incrementally durable status report containing root motion,
 target error, clearance, tilt, velocity, contact forces/transitions/raw-point
