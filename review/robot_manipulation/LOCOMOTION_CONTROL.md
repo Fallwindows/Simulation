@@ -360,7 +360,8 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   The first gait commands were still double-support targets close to the last
   startup target, so this was an unsafe moving handoff rather than a swing
   discontinuity. The saturated sagittal correction is now capped at 0.090 rad,
-  equal to each nominal crouch hip/ankle pitch magnitude. Its 35/65 split is
+  equal to each nominal crouch hip/ankle pitch magnitude. The lateral correction
+  retains its separately enforced 0.045 rad cap. The sagittal 35/65 split is
   therefore limited to 0.0315/0.0585 rad per joint; URDF limits and the existing
   0.30 rad measured target-error gate remain authoritative. Verified dwell now
   requires a complete 0.30 s consecutive handoff window under the existing
@@ -371,6 +372,14 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-058fdebd-run1\locomotion_smoke_status.json`
   and sibling `repeat_00_samples.jsonl`; the Kit log is
   `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_064457.log`.
+- `RST-004-R2-F03`: exact review of candidate
+  `8f8c1e16499625401c8f1363250f937f3aab7be6` found that its single balance
+  limit also doubled unvalidated lateral authority. The disposition separates
+  axis limits: sagittal remains bounded at 0.090 rad from the runtime evidence,
+  while lateral remains at the reviewed 0.045 rad bound. An adversarial safe
+  sample with nonzero roll, lateral velocity, and roll rate saturates lateral
+  correction at 0.045 rad; its issued roll targets remain within the unchanged
+  URDF and 0.30 rad measured-target-error gates.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 

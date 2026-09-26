@@ -187,10 +187,13 @@ class GaitConfig:
     # matching, velocity-aware damping term through the position target while
     # the measured target-error gate continues to bound every command.
     joint_velocity_damping_s: float = 0.100
-    # Bound the planted-foot pelvis correction to the nominal 0.09 rad
-    # hip/ankle crouch component.  The previous half-sized bound saturated
-    # throughout the measured backward drift without arresting it.
+    # Bound sagittal planted-foot correction to the nominal 0.09 rad
+    # hip/ankle crouch component.  The previous half-sized sagittal bound
+    # saturated throughout the measured backward drift without arresting it.
     maximum_balance_correction_rad: float = 0.090
+    # Preserve the independently unvalidated lateral authority at its reviewed
+    # 0.045 rad bound; sagittal runtime evidence does not justify increasing it.
+    maximum_lateral_balance_correction_rad: float = 0.045
     maximum_root_tilt_rad: float = math.radians(12.0)
     maximum_root_angular_speed_rps: float = 1.0
     maximum_root_linear_speed_mps: float = 0.35
@@ -229,6 +232,7 @@ class GaitConfig:
             self.maximum_target_error_rad,
             self.joint_velocity_damping_s,
             self.maximum_balance_correction_rad,
+            self.maximum_lateral_balance_correction_rad,
             self.maximum_root_tilt_rad,
             self.maximum_root_angular_speed_rps,
             self.maximum_root_linear_speed_mps,
@@ -267,6 +271,10 @@ class GaitConfig:
         if self.maximum_balance_correction_rad > 0.090:
             raise LocomotionError(
                 "maximum_balance_correction_rad exceeds the 0.090 rad safety cap"
+            )
+        if self.maximum_lateral_balance_correction_rad > 0.045:
+            raise LocomotionError(
+                "maximum_lateral_balance_correction_rad exceeds the 0.045 rad safety cap"
             )
         if self.maximum_plan_steps < 1:
             raise LocomotionError("maximum_plan_steps must be positive")
@@ -466,10 +474,11 @@ class BalanceFeedbackController:
             - 0.10 * linear[1]
             - 0.30 * com_lateral
         )
-        limit = self.config.maximum_balance_correction_rad
+        sagittal_limit = self.config.maximum_balance_correction_rad
+        lateral_limit = self.config.maximum_lateral_balance_correction_rad
         return BalanceCorrection(
-            sagittal_rad=max(-limit, min(limit, sagittal)),
-            lateral_rad=max(-limit, min(limit, lateral)),
+            sagittal_rad=max(-sagittal_limit, min(sagittal_limit, sagittal)),
+            lateral_rad=max(-lateral_limit, min(lateral_limit, lateral)),
             unsafe_reason="; ".join(reasons) if reasons else None,
         )
 
