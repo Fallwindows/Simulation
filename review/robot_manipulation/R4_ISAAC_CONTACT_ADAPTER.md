@@ -179,6 +179,40 @@ split return shape and reject the old combined shape, malformed rows, and
 nonfinite components. No further Isaac, PhysX, or GPU run occurred before
 fresh exact review.
 
+## First measured arm-approach result
+
+Exact reviewed candidate `ec103a233ecbf4565a011ca694b47769f395fb7d`
+(tree `2bc70ae328453665a5188deb53d3084f2e3e6f82`) exited 1 after 361
+measured approach samples. Its receipt is
+`R4-grasp-ec103a2/grasp_smoke_status.json`; the Kit log is
+`kit_20260926_074838.log`. All waypoints had been issued by sample 80, but the
+following 280 samples plateaued. The final R3 position/orientation errors were
+0.352272604 m and 1.103640156 rad against unchanged 0.015 m and 0.08 rad
+tolerances. There were zero confirmations, finger motion never started, and no
+lift was requested.
+
+The trace proves name-bound drive commands worked but the folded pose did not
+physically track. Its final elbow target was -1.558326398 rad while the measured
+joint remained at -0.720163405 rad, an error of 0.838162993 rad. Shoulder roll
+retained 0.298301377 rad error. Yaw and wrist joints tracked much more closely.
+The run's derived `physics.usda` has SHA-256
+`3f301c7b4af5679dcd4052b613e3a630cbf1f5cb95ba391ccd62b8d2d24e2bca`;
+it preserves the production URDF maximum drive forces of 12 Nm at the elbow
+and 25 Nm at shoulder roll. The target therefore concentrated the horizontal
+hold on the weakest loaded arm joint, and extra deadline time did not reduce
+the measured error.
+
+The bounded correction changes only the R3 pregrasp configuration. It uses a
+nearly straight -0.2 rad elbow and shifts the reach to the 30 Nm shoulder pitch
+joint. The R3 solver reaches the resulting tool target from zero with a solved
+elbow magnitude below 0.25 rad. The deterministic reset keeps the base outside
+the pickup board, and the predicted palm remains within the product's vertical
+extent and one half-width from its horizontal center. URDF effort, velocity,
+and joint limits, importer drives, controller tolerances/deadline, dynamic
+product, contact gates, and target-only command path are unchanged. CPU
+regression includes the exact measured ec103 plateau and the new joint/geometry
+bounds. No further Isaac, PhysX, or GPU run occurred before fresh exact review.
+
 ## Source-only validation limits
 
 CPU fakes cover path resolution, impulse conversion, orientation conversion,
