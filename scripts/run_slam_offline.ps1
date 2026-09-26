@@ -6,7 +6,7 @@ param(
   [string]$RosWorkspace = "",
   [string]$IsaacPython = "C:/isaacsim/python.bat",
   [ValidateRange(0.05, 1.0)]
-  [double]$ReplayRate = 0.25,
+  [double]$ReplayRate = 0.1,
   [string]$ExperimentName = "offline_slam"
 )
 $ErrorActionPreference = "Stop"
@@ -516,7 +516,46 @@ try {
   if (-not $observerMeta.replay_complete_signal_observed -or -not $observerMeta.clock_start_covered -or -not $observerMeta.clock_target_reached -or -not $observerMeta.replay_drained -or -not $observerMeta.processed_sensor_span) { throw "Offline SLAM did not confirm replay completion, start/target clock coverage, ROS drain, and mapper input processing." }
   if (-not $observerMeta.publish_map_acknowledged -or -not $observerMeta.final_map_span -or -not $observerMeta.drain_complete) { throw "RTAB-Map did not acknowledge and publish a settled final optimized map/graph across the captured sensor span." }
   if ($null -ne $observerMeta.mapper_database_span -or $observerMeta.database_verification_stage -ne "pending_post_mapper_shutdown") { throw "Observer incorrectly claimed database persistence before mapper shutdown." }
-  if (-not $observerMeta.map_pose_correction_complete -or -not $observerMeta.optimized_pose_graph_complete -or -not $observerMeta.map_graph_matches_final_cloud -or [int]$observerMeta.map_pose_sample_count -le 0 -or $observerMeta.map_pose_frame_id -ne "map" -or $observerMeta.pose_source -ne "rtabmap_optimized_graph" -or [string]::IsNullOrWhiteSpace([string]$observerMeta.graph_pose_version) -or $observerMeta.graph_pose_version -ne $observerMeta.pre_publish_graph_version -or [string]::IsNullOrWhiteSpace([string]$observerMeta.dense_pose_version) -or [string]::IsNullOrWhiteSpace([string]$observerMeta.map_version) -or [double]$observerMeta.final_map_graph_stamp_s -ne [double]$observerMeta.final_cloud_stamp_s -or $observerMeta.final_map_graph_frame_id -ne "map") { throw "RTAB-Map did not provide poses from the same versioned optimized map graph as the final cloud." }
+  $freshCloudIdentity = (
+    $observerMeta.map_cloud_identity_state -eq "fresh_shared_publication" -and
+    $observerMeta.final_cloud_origin -eq "fresh_post_publish" -and
+    [double]$observerMeta.final_map_graph_stamp_s -eq [double]$observerMeta.final_cloud_stamp_s
+  )
+  $cachedCloudIdentity = (
+    $observerMeta.map_cloud_identity_state -eq "cached_exact_graph_reuse" -and
+    $observerMeta.final_cloud_origin -eq "cached_pre_publish" -and
+    $observerMeta.cached_cloud_graph_fingerprint -eq $observerMeta.final_cloud_graph_fingerprint
+  )
+  $mapCloudIdentityValid = (
+    ($freshCloudIdentity -or $cachedCloudIdentity) -and
+    $observerMeta.final_cloud_graph_fingerprint -eq $observerMeta.map_graph_fingerprint
+  )
+  if (
+    -not $observerMeta.map_pose_correction_complete -or
+    -not $observerMeta.optimized_pose_graph_complete -or
+    -not $observerMeta.map_graph_matches_final_cloud -or
+    -not $observerMeta.map_data_matches_map_graph -or
+    -not $observerMeta.source_graph_identity_matches_pre_publish -or
+    [int]$observerMeta.map_graph_message_count -le [int]$observerMeta.map_graph_messages_before_publish -or
+    [int]$observerMeta.map_data_message_count -le [int]$observerMeta.map_data_messages_before_publish -or
+    [int]$observerMeta.map_pose_sample_count -le 0 -or
+    $observerMeta.map_pose_frame_id -ne "map" -or
+    $observerMeta.final_map_graph_frame_id -ne "map" -or
+    $observerMeta.final_cloud_frame_id -ne "map" -or
+    $observerMeta.pose_source -ne "rtabmap_optimized_graph" -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.pre_publish_graph_version) -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.graph_pose_version) -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.pre_publish_source_graph_identity) -or
+    $observerMeta.pre_publish_source_graph_identity -ne $observerMeta.final_source_graph_identity -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.pre_publish_optimized_pose_version) -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.final_optimized_pose_version) -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.pre_publish_map_to_odom_version) -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.final_map_to_odom_version) -or
+    [int]$observerMeta.pre_publish_source_graph_link_count -ne [int]$observerMeta.final_source_graph_link_count -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.dense_pose_version) -or
+    [string]::IsNullOrWhiteSpace([string]$observerMeta.map_version) -or
+    -not $mapCloudIdentityValid
+  ) { throw "RTAB-Map did not provide a settled final optimized graph/cloud for the unchanged source graph." }
   $expectedNeighborEdgeCount = [Math]::Max(0, $expectedLidarScanCount - 1)
   if (
     -not [bool]$observerMeta.odom_input_coverage_complete -or
@@ -624,6 +663,14 @@ try {
       exact_sequence_coverage=$true
     }
     pre_publish_graph_version=$observerMeta.pre_publish_graph_version; pre_publish_graph_version_source=$observerMeta.pre_publish_graph_version_source; graph_pose_version=$observerMeta.graph_pose_version
+    pre_publish_source_graph_identity=$observerMeta.pre_publish_source_graph_identity; final_source_graph_identity=$observerMeta.final_source_graph_identity; source_graph_identity_matches_pre_publish=$observerMeta.source_graph_identity_matches_pre_publish
+    pre_publish_optimized_pose_version=$observerMeta.pre_publish_optimized_pose_version; final_optimized_pose_version=$observerMeta.final_optimized_pose_version
+    pre_publish_map_to_odom_version=$observerMeta.pre_publish_map_to_odom_version; final_map_to_odom_version=$observerMeta.final_map_to_odom_version
+    pre_publish_source_graph_link_count=$observerMeta.pre_publish_source_graph_link_count; final_source_graph_link_count=$observerMeta.final_source_graph_link_count
+    pre_publish_source_graph_link_type_histogram=$observerMeta.pre_publish_source_graph_link_type_histogram; final_source_graph_link_type_histogram=$observerMeta.final_source_graph_link_type_histogram
+    map_cloud_identity_state=$observerMeta.map_cloud_identity_state; final_cloud_origin=$observerMeta.final_cloud_origin
+    map_data_graph_fingerprint=$observerMeta.map_data_graph_fingerprint; map_graph_fingerprint=$observerMeta.map_graph_fingerprint; map_data_matches_map_graph=$observerMeta.map_data_matches_map_graph
+    cached_cloud_graph_fingerprint=$observerMeta.cached_cloud_graph_fingerprint; final_cloud_graph_fingerprint=$observerMeta.final_cloud_graph_fingerprint; map_graph_matches_final_cloud=$observerMeta.map_graph_matches_final_cloud
     dense_pose_version=$observerMeta.dense_pose_version; map_version=$observerMeta.map_version
     map_frame_id=$observerMeta.map_pose_frame_id; optimized=$observerMeta.optimized_pose_graph_complete
     observer_artifact=[ordered]@{path="slam_observer.json"; size_bytes=[long]$observerArtifactInfo.Length; sha256=$observerArtifactHash}

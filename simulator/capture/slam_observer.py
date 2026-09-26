@@ -226,7 +226,7 @@ def _require_neighbor_chain(receipt: dict[str, object], label: str) -> None:
 
 
 def _optimized_graph_receipt(data) -> dict[str, object]:
-    """Validate and hash a complete optimized graph independent of its publication stamp."""
+    """Validate and hash optimized content and its immutable source graph."""
     from simulator.capture.manifest import sha256_json
 
     graph = data.graph
@@ -289,8 +289,33 @@ def _optimized_graph_receipt(data) -> dict[str, object]:
         "links": canonical_links,
         "map_to_odom": transform,
     }
+    source_payload = {
+        "nodes": [
+            {
+                "node_id": int(row["node_id"]),
+                "timestamp_s": float(row["timestamp_s"]),
+                "raw_pose": row["odom_pose"],
+            }
+            for row in pose_rows
+        ],
+        "links": canonical_links,
+    }
+    link_type_histogram: dict[str, int] = {}
+    for link in canonical_links:
+        link_type = str(int(link["type"]))
+        link_type_histogram[link_type] = link_type_histogram.get(link_type, 0) + 1
     return {
         "version": sha256_json(payload),
+        "optimized_pose_version": sha256_json({
+            "optimized_node_poses": [
+                {"node_id": int(row["node_id"]), "optimized_pose": row["optimized_pose"]}
+                for row in pose_rows
+            ],
+        }),
+        "map_to_odom_version": sha256_json({"map_to_odom": transform}),
+        "source_graph_identity": sha256_json(source_payload),
+        "source_graph_link_count": len(canonical_links),
+        "source_graph_link_type_histogram": link_type_histogram,
         **stamp_receipt,
         "positive_unique_node_ids": True,
         "pose_node_id_set_complete": True,
@@ -418,6 +443,17 @@ class SlamObserver:
         self.optimized_keyframe_rows: list[dict[str, object]] = []
         self.pre_publish_graph_version: str | None = None
         self.pre_publish_graph_version_source: str | None = None
+        self.pre_publish_source_graph_identity: str | None = None
+        self.final_source_graph_identity: str | None = None
+        self.source_graph_identity_matches_pre_publish = False
+        self.pre_publish_optimized_pose_version: str | None = None
+        self.final_optimized_pose_version: str | None = None
+        self.pre_publish_map_to_odom_version: str | None = None
+        self.final_map_to_odom_version: str | None = None
+        self.pre_publish_source_graph_link_count: int | None = None
+        self.final_source_graph_link_count: int | None = None
+        self.pre_publish_source_graph_link_type_histogram: dict[str, int] | None = None
+        self.final_source_graph_link_type_histogram: dict[str, int] | None = None
         self.pre_publish_graph_node_count: int | None = None
         self.pre_publish_graph_stamp_sha256: str | None = None
         self.pre_publish_neighbor_edge_count: int | None = None
@@ -434,12 +470,21 @@ class SlamObserver:
         self.odom_input_coverage_complete = False
         self.optimized_pose_graph_complete = False
         self.map_graph_matches_final_cloud = False
+        self.map_data_matches_map_graph = False
+        self.map_data_graph_fingerprint: str | None = None
+        self.map_graph_fingerprint: str | None = None
+        self.cached_cloud_graph_fingerprint: str | None = None
+        self.final_cloud_graph_fingerprint: str | None = None
+        self.map_cloud_identity_state: str | None = None
+        self.final_cloud_origin: str | None = None
         self.final_map_graph_stamp_s: float | None = None
         self.final_cloud_stamp_s: float | None = None
         self.final_map_graph_frame_id: str | None = None
         self.latest_map: list[tuple[float, float, float]] = []
         self.map_stamp_s: float | None = None
         self.map_messages = 0
+        self.map_cloud_callbacks = 0
+        self.map_cloud_callbacks_before_publish = 0
         self.map_graph_messages = 0
         self.map_data_messages = 0
         self.map_graph_before_publish = 0
@@ -450,7 +495,11 @@ class SlamObserver:
         self.map_data_message = None
         self.map_graph_stamp_s: float | None = None
         self.map_data_stamp_s: float | None = None
+        self.map_data_frame_id: str | None = None
         self.map_cloud_frame_id: str | None = None
+        self.cached_cloud_points: list[tuple[float, float, float]] | None = None
+        self.cached_cloud_stamp_s: float | None = None
+        self.cached_cloud_frame_id: str | None = None
         self.point_cloud2 = point_cloud2
         self.node = Node("grocery_sim_offline_slam_observer")
         self.node.create_subscription(Clock, "/clock", self._on_clock, 100)
@@ -522,6 +571,7 @@ class SlamObserver:
     def _on_map(self, message) -> None:
         self.callback_generation += 1
         self.map_publication_generation += 1
+        self.map_cloud_callbacks = getattr(self, "map_cloud_callbacks", 0) + 1
         fields = {"x", "y", "z"}
         names = {field.name for field in message.fields}
         if not fields.issubset(names):
@@ -548,6 +598,7 @@ class SlamObserver:
         self.map_data_messages += 1
         self.map_data_message = message
         self.map_data_stamp_s = _stamp(message.header.stamp)
+        self.map_data_frame_id = str(message.header.frame_id).lstrip("/")
 
     def _request_full_optimized_graph(self) -> None:
         has_client = hasattr(self, "get_map_data_client")
@@ -562,6 +613,11 @@ class SlamObserver:
             receipt = _optimized_graph_receipt(data)
             self.pre_publish_graph_version_source = "strict complete paired pre-request /mapData compatibility payload"
             self.pre_publish_graph_version = str(receipt["version"])
+            self.pre_publish_source_graph_identity = str(receipt["source_graph_identity"])
+            self.pre_publish_optimized_pose_version = str(receipt["optimized_pose_version"])
+            self.pre_publish_map_to_odom_version = str(receipt["map_to_odom_version"])
+            self.pre_publish_source_graph_link_count = int(receipt["source_graph_link_count"])
+            self.pre_publish_source_graph_link_type_histogram = dict(receipt["source_graph_link_type_histogram"])
             self.pre_publish_graph_node_count = int(receipt["count"])
             self.pre_publish_graph_stamp_sha256 = str(receipt["stamp_sha256"])
             self.pre_publish_neighbor_edge_count = int(receipt["neighbor_edge_count"])
@@ -599,6 +655,11 @@ class SlamObserver:
         receipt = _optimized_graph_receipt(data)
         self.pre_publish_graph_version_source = "authoritative pre-request /rtabmap/get_map_data response after replay input drain"
         self.pre_publish_graph_version = str(receipt["version"])
+        self.pre_publish_source_graph_identity = str(receipt["source_graph_identity"])
+        self.pre_publish_optimized_pose_version = str(receipt["optimized_pose_version"])
+        self.pre_publish_map_to_odom_version = str(receipt["map_to_odom_version"])
+        self.pre_publish_source_graph_link_count = int(receipt["source_graph_link_count"])
+        self.pre_publish_source_graph_link_type_histogram = dict(receipt["source_graph_link_type_histogram"])
         self.pre_publish_graph_node_count = int(receipt["count"])
         self.pre_publish_graph_stamp_sha256 = str(receipt["stamp_sha256"])
         self.pre_publish_neighbor_edge_count = int(receipt["neighbor_edge_count"])
@@ -643,8 +704,21 @@ class SlamObserver:
             raise RuntimeError("RTAB-Map did not provide a pre-request graph/cloud baseline")
         if not (self.map_graph_stamp_s == self.map_data_stamp_s == self.map_stamp_s):
             raise RuntimeError("pre-request graph, map data, and cloud do not identify one publication")
-        if self.final_map_graph_frame_id != "map" or self.map_cloud_frame_id != "map":
+        if self.final_map_graph_frame_id != "map" or self.map_data_frame_id != "map" or self.map_cloud_frame_id != "map":
             raise RuntimeError("pre-request graph and cloud must use the map frame")
+        baseline_data_graph = getattr(self.map_data_message, "graph", None)
+        if baseline_data_graph is None:
+            raise RuntimeError("pre-request /mapData omitted its graph payload")
+        baseline_data_fingerprint = _map_graph_fingerprint(baseline_data_graph)
+        baseline_graph_fingerprint = _map_graph_fingerprint(self.map_graph_message)
+        if baseline_data_fingerprint != baseline_graph_fingerprint:
+            raise RuntimeError("pre-request /mapData and /mapGraph payloads do not identify the cloud cohort")
+        if not self.latest_map or any(not all(math.isfinite(float(value)) for value in point) for point in self.latest_map):
+            raise RuntimeError("pre-request map cloud is empty or contains non-finite points")
+        self.cached_cloud_graph_fingerprint = baseline_graph_fingerprint
+        self.cached_cloud_points = list(self.latest_map)
+        self.cached_cloud_stamp_s = self.map_stamp_s
+        self.cached_cloud_frame_id = self.map_cloud_frame_id
         # Incremental /mapData messages are not guaranteed to contain NodeData
         # for every optimized graph pose. Fetch the authoritative complete graph
         # before asking PublishMap to emit the matching graph/data/cloud triplet.
@@ -655,6 +729,7 @@ class SlamObserver:
         request.optimized = True
         request.graph_only = False
         self.map_messages_before_publish = self.map_messages
+        self.map_cloud_callbacks_before_publish = self.map_cloud_callbacks
         self.map_graph_before_publish = self.map_graph_messages
         self.map_data_before_publish = self.map_data_messages
         future = self.publish_map_client.call_async(request)
@@ -676,36 +751,47 @@ class SlamObserver:
         last_generation = self.map_publication_generation
         while self.rclpy.ok():
             now = time.monotonic()
-            self.final_map_span = (
-                self.map_messages > self.map_messages_before_publish
-                and self.map_stamp_s is not None
-                and self.expected_sensor_last_stamp_s is not None
-                and self.map_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
-            )
-            graph_triplet_ready = (
+            fresh_cloud_emitted = self.map_cloud_callbacks > self.map_cloud_callbacks_before_publish
+            graph_cohort_ready = (
                 self.map_graph_messages > self.map_graph_before_publish
                 and self.map_data_messages > self.map_data_before_publish
                 and self.map_graph_stamp_s is not None
                 and self.map_data_stamp_s is not None
-                and self.map_stamp_s is not None
-                and self.map_graph_stamp_s == self.map_data_stamp_s == self.map_stamp_s
+                and self.map_graph_stamp_s == self.map_data_stamp_s
                 and self.final_map_graph_frame_id == "map"
-                and self.map_cloud_frame_id == "map"
+                and self.map_data_frame_id == "map"
+            )
+            if fresh_cloud_emitted:
+                cloud_cohort_ready = (
+                    self.map_messages > self.map_messages_before_publish
+                    and self.map_stamp_s is not None
+                    and self.map_graph_stamp_s == self.map_stamp_s
+                    and self.map_cloud_frame_id == "map"
+                )
+                cloud_span_stamp = self.map_stamp_s
+            else:
+                cloud_cohort_ready = (
+                    self.cached_cloud_points is not None
+                    and self.cached_cloud_stamp_s is not None
+                    and self.cached_cloud_frame_id == "map"
+                    and self.cached_cloud_graph_fingerprint is not None
+                )
+                cloud_span_stamp = self.cached_cloud_stamp_s
+            self.final_map_span = (
+                cloud_cohort_ready
+                and cloud_span_stamp is not None
+                and self.expected_sensor_last_stamp_s is not None
+                and cloud_span_stamp >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
             )
             if self.map_publication_generation != last_generation:
                 quiet_since = None
                 last_generation = self.map_publication_generation
-            elif self.publish_map_acknowledged and self.final_map_span and graph_triplet_ready:
+            elif self.publish_map_acknowledged and self.final_map_span and graph_cohort_ready and cloud_cohort_ready:
                 if quiet_since is None:
                     quiet_since = now
                 elif now - quiet_since >= 1.0:
                     self.drain_complete = True
                     self._capture_final_optimized_graph()
-                    self.map_graph_matches_final_cloud = self.graph_pose_version == self.pre_publish_graph_version
-                    if not self.map_graph_matches_final_cloud:
-                        self.map_pose_rows = []
-                        self.optimized_pose_graph_complete = False
-                        raise RuntimeError("optimized graph changed between pre-request baseline and final map publication")
                     return
             if now >= post_ack_deadline:
                 raise RuntimeError("final optimized map/graph span did not settle within the bounded wait")
@@ -716,16 +802,57 @@ class SlamObserver:
         graph_message = self.map_graph_message
         if data is None or graph_message is None:
             raise RuntimeError("RTAB-Map did not publish post-request optimized graph and map data")
-        if self.map_graph_stamp_s != self.map_data_stamp_s or self.map_graph_stamp_s != self.map_stamp_s:
-            raise RuntimeError("RTAB-Map graph, map data, and cloud stamps do not identify one publication")
-        if str(getattr(data.header, "frame_id", "")).lstrip("/") != "map" or str(getattr(graph_message.header, "frame_id", "")).lstrip("/") != "map" or self.map_cloud_frame_id != "map":
-            raise RuntimeError("RTAB-Map graph, map data, and cloud must use the map frame")
-        if not self.latest_map or not math.isfinite(float(self.map_stamp_s)) or any(not all(math.isfinite(float(value)) for value in point) for point in self.latest_map):
-            raise RuntimeError("RTAB-Map final cloud is empty or contains non-finite points")
+        if self.map_graph_stamp_s != self.map_data_stamp_s:
+            raise RuntimeError("post-request /mapGraph and /mapData stamps do not identify one publication")
+        if str(getattr(data.header, "frame_id", "")).lstrip("/") != "map" or str(getattr(graph_message.header, "frame_id", "")).lstrip("/") != "map":
+            raise RuntimeError("post-request /mapGraph and /mapData must use the map frame")
         graph = getattr(data, "graph", None)
-        if graph is None or _map_graph_fingerprint(graph) != _map_graph_fingerprint(graph_message):
+        if graph is None:
+            raise RuntimeError("post-request /mapData omitted its graph payload")
+        self.map_data_graph_fingerprint = _map_graph_fingerprint(graph)
+        self.map_graph_fingerprint = _map_graph_fingerprint(graph_message)
+        self.map_data_matches_map_graph = self.map_data_graph_fingerprint == self.map_graph_fingerprint
+        if not self.map_data_matches_map_graph:
             raise RuntimeError("/mapGraph and /mapData graph payloads differ despite matching publication stamps")
+        fresh_cloud_emitted = self.map_cloud_callbacks > self.map_cloud_callbacks_before_publish
+        if fresh_cloud_emitted:
+            if (
+                self.map_messages <= self.map_messages_before_publish
+                or self.map_stamp_s != self.map_graph_stamp_s
+                or self.map_cloud_frame_id != "map"
+            ):
+                raise RuntimeError("fresh post-request cloud does not share the settled graph stamp and map frame")
+            self.final_cloud_origin = "fresh_post_publish"
+            self.map_cloud_identity_state = "fresh_shared_publication"
+        else:
+            if (
+                self.cached_cloud_points is None
+                or self.cached_cloud_stamp_s is None
+                or self.cached_cloud_frame_id != "map"
+                or self.cached_cloud_graph_fingerprint != self.map_graph_fingerprint
+            ):
+                raise RuntimeError("cached cloud cannot be reused for a different final graph fingerprint")
+            self.latest_map = list(self.cached_cloud_points)
+            self.map_stamp_s = self.cached_cloud_stamp_s
+            self.map_cloud_frame_id = self.cached_cloud_frame_id
+            self.final_cloud_origin = "cached_pre_publish"
+            self.map_cloud_identity_state = "cached_exact_graph_reuse"
+        if not self.latest_map or self.map_stamp_s is None or not math.isfinite(float(self.map_stamp_s)) or any(not all(math.isfinite(float(value)) for value in point) for point in self.latest_map):
+            raise RuntimeError("RTAB-Map final cloud is empty or contains non-finite points")
+        self.final_cloud_graph_fingerprint = self.map_graph_fingerprint
+        self.map_graph_matches_final_cloud = True
         graph_receipt = _optimized_graph_receipt(data)
+        self.final_source_graph_identity = str(graph_receipt["source_graph_identity"])
+        self.final_optimized_pose_version = str(graph_receipt["optimized_pose_version"])
+        self.final_map_to_odom_version = str(graph_receipt["map_to_odom_version"])
+        self.final_source_graph_link_count = int(graph_receipt["source_graph_link_count"])
+        self.final_source_graph_link_type_histogram = dict(graph_receipt["source_graph_link_type_histogram"])
+        self.source_graph_identity_matches_pre_publish = (
+            self.pre_publish_source_graph_identity is not None
+            and self.final_source_graph_identity == self.pre_publish_source_graph_identity
+        )
+        if not self.source_graph_identity_matches_pre_publish:
+            raise RuntimeError("immutable RTAB-Map source graph changed between GetMap and PublishMap")
         self.optimized_graph_node_count = int(graph_receipt["count"])
         self.optimized_graph_stamp_sha256 = str(graph_receipt["stamp_sha256"])
         self.optimized_graph_neighbor_edge_count = int(graph_receipt["neighbor_edge_count"])
@@ -839,7 +966,7 @@ class SlamObserver:
         })
         self.final_map_graph_stamp_s = self.map_graph_stamp_s
         self.final_cloud_stamp_s = self.map_stamp_s
-        self.final_map_graph_frame_id = "map"
+        self.final_map_graph_frame_id = str(getattr(graph_message.header, "frame_id", "")).lstrip("/")
         self.optimized_graph_last_stamp_s = float(graph_receipt["last_stamp_s"])
         self.optimized_pose_graph_complete = (
             self.expected_sensor_last_stamp_s is not None
@@ -972,7 +1099,10 @@ class SlamObserver:
             and self.clock_start_covered and self.clock_target_reached and self.replay_drained
             and self.publish_map_acknowledged and self.drain_complete and not self.clock_regressions
             and processed_sensor_span and self.final_map_span and map_pose_correction_complete
-            and self.map_graph_matches_final_cloud and getattr(self, "odom_input_coverage_complete", False)
+            and self.map_graph_matches_final_cloud
+            and getattr(self, "map_data_matches_map_graph", False)
+            and getattr(self, "source_graph_identity_matches_pre_publish", False)
+            and getattr(self, "odom_input_coverage_complete", False)
         )
         result = {
             "status": "pending_database_validation" if live_complete else "incomplete",
@@ -985,6 +1115,17 @@ class SlamObserver:
             "map_graph_matches_final_cloud": self.map_graph_matches_final_cloud,
             "pre_publish_graph_version": getattr(self, "pre_publish_graph_version", None),
             "pre_publish_graph_version_source": getattr(self, "pre_publish_graph_version_source", None),
+            "pre_publish_source_graph_identity": getattr(self, "pre_publish_source_graph_identity", None),
+            "final_source_graph_identity": getattr(self, "final_source_graph_identity", None),
+            "source_graph_identity_matches_pre_publish": getattr(self, "source_graph_identity_matches_pre_publish", False),
+            "pre_publish_optimized_pose_version": getattr(self, "pre_publish_optimized_pose_version", None),
+            "final_optimized_pose_version": getattr(self, "final_optimized_pose_version", None),
+            "pre_publish_map_to_odom_version": getattr(self, "pre_publish_map_to_odom_version", None),
+            "final_map_to_odom_version": getattr(self, "final_map_to_odom_version", None),
+            "pre_publish_source_graph_link_count": getattr(self, "pre_publish_source_graph_link_count", None),
+            "final_source_graph_link_count": getattr(self, "final_source_graph_link_count", None),
+            "pre_publish_source_graph_link_type_histogram": getattr(self, "pre_publish_source_graph_link_type_histogram", None),
+            "final_source_graph_link_type_histogram": getattr(self, "final_source_graph_link_type_histogram", None),
             "expected_lidar_scan_count": getattr(self, "expected_lidar_scan_count", None),
             "expected_lidar_stamp_sha256": getattr(self, "expected_lidar_stamp_sha256", None),
             "odom_stamp_sha256": getattr(self, "odom_stamp_sha256", None),
@@ -1007,13 +1148,27 @@ class SlamObserver:
             "optimized_graph_node_ids_valid": getattr(self, "optimized_graph_node_ids_valid", False),
             "dense_pose_version": getattr(self, "dense_pose_version", None),
             "map_version": map_version,
+            "map_data_graph_fingerprint": getattr(self, "map_data_graph_fingerprint", None),
+            "map_graph_fingerprint": getattr(self, "map_graph_fingerprint", None),
+            "map_data_matches_map_graph": getattr(self, "map_data_matches_map_graph", False),
+            "cached_cloud_graph_fingerprint": getattr(self, "cached_cloud_graph_fingerprint", None),
+            "final_cloud_graph_fingerprint": getattr(self, "final_cloud_graph_fingerprint", None),
+            "map_cloud_identity_state": getattr(self, "map_cloud_identity_state", None),
+            "final_cloud_origin": getattr(self, "final_cloud_origin", None),
             "final_map_graph_stamp_s": getattr(self, "final_map_graph_stamp_s", None),
             "final_cloud_stamp_s": getattr(self, "final_cloud_stamp_s", None),
             "final_map_graph_frame_id": getattr(self, "final_map_graph_frame_id", None),
+            "final_cloud_frame_id": getattr(self, "map_cloud_frame_id", None),
             "optimized_graph_last_stamp_s": self.optimized_graph_last_stamp_s,
             "map_to_odom_sample_count": len(self.map_to_odom_rows),
             "files": files,
             "map_message_count": self.map_messages,
+            "map_cloud_callback_count": getattr(self, "map_cloud_callbacks", self.map_messages),
+            "map_cloud_callbacks_before_publish": getattr(self, "map_cloud_callbacks_before_publish", self.map_messages_before_publish),
+            "map_graph_message_count": self.map_graph_messages,
+            "map_graph_messages_before_publish": self.map_graph_before_publish,
+            "map_data_message_count": self.map_data_messages,
+            "map_data_messages_before_publish": self.map_data_before_publish,
             "map_point_count": len(self.latest_map),
             "first_clock_s": self.first_clock_s,
             "last_clock_s": self.last_clock_s,

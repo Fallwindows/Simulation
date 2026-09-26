@@ -431,13 +431,32 @@ def _verify_corrected_pose_artifact_contract(path: Path) -> dict[str, object]:
 
     version_fields = (
         "pose_source", "graph_pose_version", "pre_publish_graph_version",
+        "pre_publish_source_graph_identity", "final_source_graph_identity",
+        "source_graph_identity_matches_pre_publish",
+        "pre_publish_optimized_pose_version", "final_optimized_pose_version",
+        "pre_publish_map_to_odom_version", "final_map_to_odom_version",
+        "pre_publish_source_graph_link_count", "final_source_graph_link_count",
+        "pre_publish_source_graph_link_type_histogram", "final_source_graph_link_type_histogram",
         "map_graph_matches_final_cloud", "optimized_pose_graph_complete",
+        "map_data_graph_fingerprint", "map_graph_fingerprint", "map_data_matches_map_graph",
+        "cached_cloud_graph_fingerprint", "final_cloud_graph_fingerprint",
+        "map_cloud_identity_state", "final_cloud_origin",
+        "final_map_graph_stamp_s", "final_cloud_stamp_s",
+        "final_map_graph_frame_id", "final_cloud_frame_id",
         "map_pose_frame_id", "map_pose_sample_count", "dense_pose_version", "map_version",
     )
     if any(observer.get(key) != embedded_observer.get(key) for key in version_fields):
         raise ValueError("Observer and SLAM manifest disagree on optimized map pose version")
     if any(slam_manifest.get(key) != observer.get(key) for key in (
         "pre_publish_graph_version", "graph_pose_version", "dense_pose_version", "map_version",
+        "pre_publish_source_graph_identity", "final_source_graph_identity",
+        "source_graph_identity_matches_pre_publish", "map_cloud_identity_state", "final_cloud_origin",
+        "pre_publish_optimized_pose_version", "final_optimized_pose_version",
+        "pre_publish_map_to_odom_version", "final_map_to_odom_version",
+        "pre_publish_source_graph_link_count", "final_source_graph_link_count",
+        "pre_publish_source_graph_link_type_histogram", "final_source_graph_link_type_histogram",
+        "map_data_graph_fingerprint", "map_graph_fingerprint", "map_data_matches_map_graph",
+        "cached_cloud_graph_fingerprint", "final_cloud_graph_fingerprint", "map_graph_matches_final_cloud",
     )):
         raise ValueError("Authoritative SLAM manifest disagrees with the observer pose version")
     sample_count = observer.get("map_pose_sample_count")
@@ -445,7 +464,12 @@ def _verify_corrected_pose_artifact_contract(path: Path) -> dict[str, object]:
         raise ValueError("map_pose_sample_count must be a positive integer")
     if observer.get("pose_source") != "rtabmap_optimized_graph":
         raise ValueError("Corrected map poses are not sourced from the finalized optimized graph")
-    if observer.get("map_graph_matches_final_cloud") is not True or observer.get("optimized_pose_graph_complete") is not True:
+    if (
+        observer.get("map_graph_matches_final_cloud") is not True
+        or observer.get("map_data_matches_map_graph") is not True
+        or observer.get("source_graph_identity_matches_pre_publish") is not True
+        or observer.get("optimized_pose_graph_complete") is not True
+    ):
         raise ValueError("Optimized map pose graph is incomplete or does not match the final map")
     if observer.get("map_pose_frame_id") != "map":
         raise ValueError("Optimized map pose stream does not declare frame_id=map")
@@ -455,8 +479,46 @@ def _verify_corrected_pose_artifact_contract(path: Path) -> dict[str, object]:
     pre_publish_version = observer.get("pre_publish_graph_version")
     if not isinstance(pre_publish_version, str) or len(pre_publish_version) != 64 or any(char not in "0123456789abcdef" for char in pre_publish_version):
         raise ValueError("Optimized map pose stream has an invalid pre_publish_graph_version digest")
-    if graph_version != pre_publish_version:
-        raise ValueError("Optimized graph version does not match the pre-publish graph version")
+    pre_publish_source_identity = observer.get("pre_publish_source_graph_identity")
+    final_source_identity = observer.get("final_source_graph_identity")
+    for label, digest in (
+        ("pre_publish_source_graph_identity", pre_publish_source_identity),
+        ("final_source_graph_identity", final_source_identity),
+        ("map_data_graph_fingerprint", observer.get("map_data_graph_fingerprint")),
+        ("map_graph_fingerprint", observer.get("map_graph_fingerprint")),
+        ("final_cloud_graph_fingerprint", observer.get("final_cloud_graph_fingerprint")),
+        ("pre_publish_optimized_pose_version", observer.get("pre_publish_optimized_pose_version")),
+        ("final_optimized_pose_version", observer.get("final_optimized_pose_version")),
+        ("pre_publish_map_to_odom_version", observer.get("pre_publish_map_to_odom_version")),
+        ("final_map_to_odom_version", observer.get("final_map_to_odom_version")),
+    ):
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ValueError(f"Optimized map pose stream has an invalid {label} digest")
+    if pre_publish_source_identity != final_source_identity:
+        raise ValueError("GetMap and PublishMap source graph identities disagree")
+    if (
+        not isinstance(observer.get("pre_publish_source_graph_link_count"), int)
+        or isinstance(observer.get("pre_publish_source_graph_link_count"), bool)
+        or observer.get("pre_publish_source_graph_link_count") != observer.get("final_source_graph_link_count")
+        or not isinstance(observer.get("pre_publish_source_graph_link_type_histogram"), dict)
+        or observer.get("pre_publish_source_graph_link_type_histogram") != observer.get("final_source_graph_link_type_histogram")
+    ):
+        raise ValueError("GetMap and PublishMap source graph link metadata disagree")
+    graph_fingerprint = observer.get("map_graph_fingerprint")
+    if observer.get("map_data_graph_fingerprint") != graph_fingerprint or observer.get("final_cloud_graph_fingerprint") != graph_fingerprint:
+        raise ValueError("Final /mapData, /mapGraph, and cloud graph identities disagree")
+    cloud_identity_state = observer.get("map_cloud_identity_state")
+    if cloud_identity_state == "fresh_shared_publication":
+        if observer.get("final_cloud_origin") != "fresh_post_publish" or observer.get("final_map_graph_stamp_s") != observer.get("final_cloud_stamp_s"):
+            raise ValueError("Fresh final cloud does not share the post-publish graph stamp")
+    elif cloud_identity_state == "cached_exact_graph_reuse":
+        cached_fingerprint = observer.get("cached_cloud_graph_fingerprint")
+        if cached_fingerprint != graph_fingerprint or observer.get("final_cloud_origin") != "cached_pre_publish":
+            raise ValueError("Cached final cloud was not paired with the identical graph fingerprint")
+    else:
+        raise ValueError("Final map cloud has an unsupported graph identity state")
+    if observer.get("final_map_graph_frame_id") != "map" or observer.get("final_cloud_frame_id") != "map":
+        raise ValueError("Final graph/cloud cohort does not use the map frame")
     dense_pose_version = observer.get("dense_pose_version")
     map_version = observer.get("map_version")
     for label, digest in (("dense_pose_version", dense_pose_version), ("map_version", map_version)):
@@ -572,6 +634,8 @@ def _verify_corrected_pose_artifact_contract(path: Path) -> dict[str, object]:
 
     manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
     return {
+        "pre_publish_source_graph_identity": pre_publish_source_identity,
+        "final_source_graph_identity": final_source_identity,
         "graph_pose_version": graph_version,
         "dense_pose_version": dense_pose_version,
         "map_version": map_version,
@@ -1516,6 +1580,8 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "slam_cloud_ply_sha256": pose_provenance.get("slam_cloud_ply_sha256"),
         "slam_cloud_ply_size_bytes": pose_provenance.get("slam_cloud_ply_size_bytes"),
         "map_version": pose_provenance.get("map_version"),
+        "pre_publish_source_graph_identity": pose_provenance.get("pre_publish_source_graph_identity"),
+        "final_source_graph_identity": pose_provenance.get("final_source_graph_identity"),
         "graph_pose_version": pose_provenance.get("graph_pose_version"),
         "dense_pose_version": pose_provenance.get("dense_pose_version"),
         "slam_manifest_sha256": pose_provenance.get("slam_manifest_sha256"),

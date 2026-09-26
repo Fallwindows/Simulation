@@ -212,8 +212,22 @@ def _validate_map_provenance(slam_dir: Path, perception_dir: Path) -> tuple[dict
     if slam_manifest.get("map_frame_id") != "map" or slam_manifest.get("optimized") is not True:
         raise ValueError("SLAM manifest does not declare a complete optimized map-frame output")
     graph_version = slam_manifest.get("graph_pose_version")
-    if not _valid_sha256(graph_version) or slam_manifest.get("pre_publish_graph_version") != graph_version:
-        raise ValueError("SLAM manifest optimized graph versions are invalid or disagree")
+    pre_publish_graph_version = slam_manifest.get("pre_publish_graph_version")
+    if not _valid_sha256(graph_version) or not _valid_sha256(pre_publish_graph_version):
+        raise ValueError("SLAM manifest optimized graph forensic versions are invalid")
+    pre_publish_source_identity = slam_manifest.get("pre_publish_source_graph_identity")
+    final_source_identity = slam_manifest.get("final_source_graph_identity")
+    if (
+        not _valid_sha256(pre_publish_source_identity)
+        or final_source_identity != pre_publish_source_identity
+        or slam_manifest.get("source_graph_identity_matches_pre_publish") is not True
+    ):
+        raise ValueError("SLAM manifest GetMap and PublishMap source graph identities disagree")
+    if (
+        perception_manifest.get("pre_publish_source_graph_identity") != pre_publish_source_identity
+        or perception_manifest.get("final_source_graph_identity") != final_source_identity
+    ):
+        raise ValueError("perception manifest source graph identity does not match the SLAM map")
     observer = slam_manifest.get("observer")
     if not isinstance(observer, dict) or observer.get("status") != "complete":
         raise ValueError("SLAM manifest does not embed a complete observer record")
@@ -221,13 +235,56 @@ def _validate_map_provenance(slam_dir: Path, perception_dir: Path) -> tuple[dict
         "map_version": "map_version",
         "graph_pose_version": "graph_pose_version",
         "pre_publish_graph_version": "pre_publish_graph_version",
+        "pre_publish_source_graph_identity": "pre_publish_source_graph_identity",
+        "final_source_graph_identity": "final_source_graph_identity",
+        "source_graph_identity_matches_pre_publish": "source_graph_identity_matches_pre_publish",
+        "pre_publish_optimized_pose_version": "pre_publish_optimized_pose_version",
+        "final_optimized_pose_version": "final_optimized_pose_version",
+        "pre_publish_map_to_odom_version": "pre_publish_map_to_odom_version",
+        "final_map_to_odom_version": "final_map_to_odom_version",
+        "pre_publish_source_graph_link_count": "pre_publish_source_graph_link_count",
+        "final_source_graph_link_count": "final_source_graph_link_count",
+        "pre_publish_source_graph_link_type_histogram": "pre_publish_source_graph_link_type_histogram",
+        "final_source_graph_link_type_histogram": "final_source_graph_link_type_histogram",
+        "map_cloud_identity_state": "map_cloud_identity_state",
+        "final_cloud_origin": "final_cloud_origin",
+        "map_data_graph_fingerprint": "map_data_graph_fingerprint",
+        "map_graph_fingerprint": "map_graph_fingerprint",
+        "map_data_matches_map_graph": "map_data_matches_map_graph",
+        "cached_cloud_graph_fingerprint": "cached_cloud_graph_fingerprint",
+        "final_cloud_graph_fingerprint": "final_cloud_graph_fingerprint",
+        "map_graph_matches_final_cloud": "map_graph_matches_final_cloud",
         "map_pose_frame_id": "map_frame_id",
     }
     for observer_field, manifest_field in observer_fields.items():
         if observer.get(observer_field) != slam_manifest.get(manifest_field):
             raise ValueError(f"SLAM manifest observer disagrees on {observer_field}")
-    if observer.get("map_graph_matches_final_cloud") is not True or observer.get("optimized_pose_graph_complete") is not True or slam_manifest.get("optimized") is not True:
+    if (
+        observer.get("map_graph_matches_final_cloud") is not True
+        or observer.get("map_data_matches_map_graph") is not True
+        or observer.get("source_graph_identity_matches_pre_publish") is not True
+        or observer.get("optimized_pose_graph_complete") is not True
+        or slam_manifest.get("optimized") is not True
+    ):
         raise ValueError("SLAM observer does not confirm the final optimized graph/cloud")
+    for label in (
+        "pre_publish_optimized_pose_version", "final_optimized_pose_version",
+        "pre_publish_map_to_odom_version", "final_map_to_odom_version",
+        "map_data_graph_fingerprint", "map_graph_fingerprint", "final_cloud_graph_fingerprint",
+    ):
+        if not _valid_sha256(observer.get(label)):
+            raise ValueError(f"SLAM observer has an invalid {label}")
+    graph_fingerprint = observer.get("map_graph_fingerprint")
+    if observer.get("map_data_graph_fingerprint") != graph_fingerprint or observer.get("final_cloud_graph_fingerprint") != graph_fingerprint:
+        raise ValueError("SLAM observer final graph/cloud fingerprints disagree")
+    if observer.get("map_cloud_identity_state") == "fresh_shared_publication":
+        if observer.get("final_cloud_origin") != "fresh_post_publish" or observer.get("final_map_graph_stamp_s") != observer.get("final_cloud_stamp_s"):
+            raise ValueError("SLAM observer fresh cloud does not share the final graph stamp")
+    elif observer.get("map_cloud_identity_state") == "cached_exact_graph_reuse":
+        if observer.get("final_cloud_origin") != "cached_pre_publish" or observer.get("cached_cloud_graph_fingerprint") != graph_fingerprint:
+            raise ValueError("SLAM observer cached cloud does not match the final graph")
+    else:
+        raise ValueError("SLAM observer final cloud identity state is unsupported")
 
     observer_record = slam_manifest.get("observer_artifact")
     observer_path = slam_dir / "slam_observer.json"
@@ -299,6 +356,8 @@ def _validate_map_provenance(slam_dir: Path, perception_dir: Path) -> tuple[dict
 
     provenance = {
         "map_version": map_version,
+        "pre_publish_source_graph_identity": pre_publish_source_identity,
+        "final_source_graph_identity": final_source_identity,
         "slam_manifest": {"path": "../slam/slam_manifest.json", "size_bytes": len(slam_bytes), "sha256": _sha256(slam_bytes)},
         "perception_manifest": {"path": "perception_manifest.json", "size_bytes": len(perception_bytes), "sha256": _sha256(perception_bytes)},
         "slam_map_cloud": {"path": "../slam/slam_map.ply", "size_bytes": len(cloud_bytes), "sha256": _sha256(cloud_bytes), "frame_id": "map", "role": "final_optimized_cloud"},
