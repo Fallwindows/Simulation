@@ -6,10 +6,13 @@ import math
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
+import robot_spike.production.run_grasp_smoke as grasp_smoke
 from robot_spike.production.isaac_feedback import FeedbackUnavailableError
 from robot_spike.production.isaac_grasp import (
     Isaac61GraspFeedbackAdapter,
+    IsaacArmApproachPort,
     IsaacArmLiftPort,
     IsaacContactBindings,
 )
@@ -25,7 +28,11 @@ from robot_spike.production.physical_grasp import (
 )
 from robot_spike.production.run_grasp_smoke import (
     GraspSmokeRunner,
+    PREGRASP_ARM_JOINTS_RAD,
+    _terminate_process,
+    diagnostic_fingertip_paths,
     exact_contact_bindings,
+    pickup_reset_plan,
     runtime_preflight_evidence,
     run_isaac,
 )
@@ -70,9 +77,13 @@ class FakePose:
         self.position = list(position)
         x, y, z, w = orientation_xyzw
         self.orientation_wxyz = [w, x, y, z]
+        self.velocity = [0.0] * 6
 
     def get_world_poses(self):
         return FakeArray([self.position]), FakeArray([self.orientation_wxyz])
+
+    def get_velocities(self):
+        return FakeArray([self.velocity])
 
 
 class Reading:
@@ -129,6 +140,24 @@ class AcceptingLift:
         return True
 
 
+class ImmediateApproach:
+    def __init__(self):
+        self.last_error = None
+        self.requested = False
+
+    def request_approach(self, target, maximum_duration_s):
+        self.requested = True
+        return maximum_duration_s > 0.0
+
+    def advance(self):
+        return True
+
+    def target_reached(self):
+        return True
+
+    def diagnostics(self):
+        return {"requested": self.requested, "target_reached": True}
+
 class FakePhysics:
     def __init__(self, clock):
         self.clock = clock
@@ -150,7 +179,12 @@ class FakeKinematics:
         return ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0))
 
     def solve(self, target, start):
-        return FakeIK({name: 0.01 for name in ARM_DOF_NAMES})
+        return FakeIK(
+            {
+                name: (-0.01 if name == "right_elbow_joint" else 0.01)
+                for name in ARM_DOF_NAMES
+            }
+        )
 
 
 class FakePlanner:
@@ -203,6 +237,15 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             articulation, palm, product, sensor, lambda: clock[0],
             lambda handle: handles[handle], self.bindings,
             maximum_contact_age_s=0.025,
+            diagnostic_link_poses={
+                "right_palm": palm,
+                "right_index_fingertip": palm,
+            },
+            product_velocity=product,
+            joint_target_source=lambda: {
+                name: articulation.positions[name]
+                for name in (*ARM_DOF_NAMES, *HAND_DOF_NAMES)
+            },
         )
         return adapter, articulation, palm, product, sensor, clock, handles
 
@@ -216,6 +259,17 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertEqual(contacts[self.layout.pickup_support.fixture.prim_path].robot_link_name, None)
         self.assertEqual(observed.product_pose_world.orientation_xyzw,
                          self.layout.product.source_reset_pose.orientation_xyzw)
+        diagnostics = adapter.diagnostics()
+        self.assertEqual(
+            diagnostics["product_pose_world"]["position_m"],
+            self.layout.product.source_reset_pose.position_m,
+        )
+        self.assertEqual(diagnostics["product_velocity_world"]["linear_m_s"], (0.0,) * 3)
+        self.assertIn("right_index_fingertip", diagnostics["diagnostic_link_poses_world"])
+        self.assertEqual(diagnostics["maximum_abs_joint_target_error_rad"], 0.0)
+        self.assertEqual(
+            diagnostics["raw_contacts"][1]["body1"], self.paths["right_thumb_dp"]
+        )
 
     def test_marker_or_unbound_body_path_fails_closed(self):
         adapter, _, _, _, _, _, handles = self.make_adapter([(1, 9, 0.01)])
@@ -301,6 +355,18 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "required hand links"):
             exact_contact_bindings("/World/Robot", names, paths, "/p", "/p/c", "/s")
 
+    def test_fingertip_diagnostics_use_fixed_marker_paths_not_contact_identity(self):
+        markers = diagnostic_fingertip_paths(self.bindings)
+        self.assertEqual(
+            markers["right_thumb_fingertip"],
+            self.paths["right_thumb_dp"] + "/right_thumb_fingertip",
+        )
+        self.assertEqual(
+            markers["right_index_fingertip"],
+            self.paths["right_index_ip"] + "/right_index_fingertip",
+        )
+        self.assertTrue(set(markers.values()).isdisjoint(self.bindings.allowed_body_paths))
+
     def test_arm_lift_port_binds_product_arm_names_and_inclusive_deadline(self):
         articulation = FakeArticulation(self.spec)
         control = RecordingController()
@@ -321,6 +387,115 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertFalse(port.advance())
         self.assertEqual(port.last_error, "arm lift deadline expired")
 
+    def test_arm_approach_uses_r3_target_and_measured_gate(self):
+        articulation = FakeArticulation(self.spec)
+        control = ArticulationController(self.spec, articulation)
+        clock = [1.0]
+        port = IsaacArmApproachPort(
+            control,
+            articulation,
+            FakeKinematics(),
+            lambda: clock[0],
+            command_period_s=0.01,
+        )
+        port.planner = FakePlanner()
+        target = ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0))
+        self.assertTrue(port.request_approach(target, 0.1))
+        self.assertTrue(port.advance())
+        self.assertTrue(port.target_reached())
+        self.assertTrue(port.diagnostics()["target_reached"])
+
+    def test_runner_accepts_exact_deadline_confirmation_and_rejects_late_tick(self):
+        target = ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0))
+
+        def run_with_timestamps(timestamps):
+            clock = [0.0]
+            articulation = FakeArticulation(self.spec)
+            command = RecordingController()
+            approach = IsaacArmApproachPort(
+                command,
+                articulation,
+                FakeKinematics(),
+                lambda: clock[0],
+                command_period_s=0.01,
+            )
+            approach.planner = FakePlanner()
+
+            class ScheduledPhysics:
+                def __init__(self):
+                    self.index = 0
+
+                def step(self):
+                    clock[0] = timestamps[self.index]
+                    self.index += 1
+
+            class StartRecordingController:
+                phase = GraspPhase.IDLE
+                failure = None
+
+                def __init__(self):
+                    self.start_calls = 0
+
+                @property
+                def status(self):
+                    return self
+
+                def start(self):
+                    self.start_calls += 1
+
+            controller = StartRecordingController()
+            with tempfile.TemporaryDirectory() as temporary:
+                result = GraspSmokeRunner(
+                    ScheduledPhysics(),
+                    controller,
+                    approach,
+                    object(),
+                    lambda: None,
+                    target,
+                    lambda: {},
+                    maximum_physics_steps=3,
+                    status_path=Path(temporary) / "status.json",
+                    preflight={"test": True},
+                ).run()
+            return controller, result
+
+        on_deadline, boundary_result = run_with_timestamps((1.0, 2.0, 3.0))
+        self.assertEqual(on_deadline.start_calls, 1)
+        self.assertEqual(boundary_result.samples[-1]["approach_confirmations"], 3)
+
+        late, late_result = run_with_timestamps((1.0, 2.0, 3.000001))
+        self.assertEqual(late.start_calls, 0)
+        self.assertEqual(late_result.status, "fail")
+        self.assertEqual(late_result.failure, "arm approach deadline expired")
+        self.assertEqual(late_result.samples[-1]["approach_confirmations"], 0)
+    def test_pickup_reset_plan_stages_base_and_preserves_dynamic_product(self):
+        from robot_spike.production.arm_reach import RightArmKinematics
+
+        kinematics = RightArmKinematics(self.spec)
+        plan = pickup_reset_plan(self.spec, self.layout, kinematics)
+        self.assertEqual(plan.root_position_m[2], self.spec.root_position_m[2])
+        self.assertAlmostEqual(
+            sum(value * value for value in plan.root_orientation_wxyz), 1.0
+        )
+        self.assertEqual(set(PREGRASP_ARM_JOINTS_RAD), set(ARM_DOF_NAMES))
+        product_position = self.layout.product.source_reset_pose.position_m
+        planar_standoff_m = math.hypot(
+            plan.predicted_palm_position_world_m[0] - product_position[0],
+            plan.predicted_palm_position_world_m[1] - product_position[1],
+        )
+        self.assertAlmostEqual(
+            planar_standoff_m,
+            min(self.layout.product.dimensions_m[:2]) / 2.0,
+        )
+        self.assertLess(
+            plan.root_position_m[1], self.layout.pickup_support.fixture.minimum_m[1]
+        )
+        solved = kinematics.solve(
+            plan.arm_target, {name: 0.0 for name in ARM_DOF_NAMES}
+        )
+        self.assertLessEqual(solved.position_error_m, 2.0e-4)
+        self.assertLessEqual(solved.orientation_error_rad, 2.0e-3)
+
     def test_smoke_sequence_requires_contacts_and_measured_lift(self):
         adapter, articulation, palm, product, sensor, clock, _ = self.make_adapter()
         joint_controller = ArticulationController(self.spec, articulation)
@@ -333,8 +508,11 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary:
             result = GraspSmokeRunner(
-                FakePhysics(clock), controller, lift, adapter.diagnostics,
-                maximum_physics_steps=8,
+                FakePhysics(clock), controller, ImmediateApproach(), lift,
+                adapter.read_observation,
+                ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)),
+                adapter.diagnostics,
+                maximum_physics_steps=14,
                 status_path=Path(temporary) / "status.json",
                 preflight={"test": True},
             ).run()
@@ -361,14 +539,28 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "failed.json"
             result = GraspSmokeRunner(
-                FakePhysics(clock), controller, lift, adapter.diagnostics,
+                FakePhysics(clock), controller, ImmediateApproach(), lift,
+                adapter.read_observation,
+                ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)),
+                adapter.diagnostics,
                 maximum_physics_steps=2, status_path=path, preflight={"test": True},
             ).run()
             report = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(result.status, "fail")
-        self.assertEqual(result.failure, "feedback_unavailable")
+        self.assertIn("unbound contact body", result.failure)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["state_write_policy"]["post_reset_direct_state_writes"], 0)
+
+    def test_runtime_fail_result_reaches_hard_exit_status(self):
+        failed = grasp_smoke.SmokeResult("fail", "failed", "contact_not_verified", 1, ())
+        args = argparse.Namespace(physics_hz=120.0, maximum_steps=10)
+        with mock.patch.object(grasp_smoke, "_arguments", return_value=args), mock.patch.object(
+            grasp_smoke, "run_isaac", return_value=failed
+        ):
+            self.assertEqual(grasp_smoke.main([]), 1)
+        captured = []
+        _terminate_process(1, hard_exit=captured.append)
+        self.assertEqual(captured, [1])
 
     def test_preflight_failure_receipt_binds_expected_and_observed_identities(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -7,6 +7,7 @@ known simulation state is intentional and documented.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Protocol, Sequence
 
@@ -51,13 +52,45 @@ class ArticulationController:
             self.articulation.set_dof_position_targets([list(values)], dof_indices=list(indices))
         return names
 
-    def reset(self) -> None:
-        """Restore root/joint pose and all velocities to the configured state.
+    def reset(
+        self,
+        *,
+        root_position_m: Sequence[float] | None = None,
+        root_orientation_wxyz: Sequence[float] | None = None,
+    ) -> None:
+        """Restore root/joint pose and velocities at one explicit reset boundary.
 
         Reset is the sole API path allowed to teleport articulation state. It
-        also seeds drive targets to the reset pose so the first subsequent
-        physics step does not pull toward stale pre-reset targets.
+        accepts a caller-validated root pose for a bounded smoke fixture while
+        retaining the configured pose by default. It also seeds drive targets
+        so the first subsequent physics step does not pull toward stale targets.
         """
+
+        position = tuple(
+            float(value)
+            for value in (
+                self.spec.root_position_m
+                if root_position_m is None
+                else root_position_m
+            )
+        )
+        orientation = tuple(
+            float(value)
+            for value in (
+                self.spec.root_orientation_wxyz
+                if root_orientation_wxyz is None
+                else root_orientation_wxyz
+            )
+        )
+        if len(position) != 3 or not all(math.isfinite(value) for value in position):
+            raise ValueError("reset root position must contain three finite values")
+        if len(orientation) != 4 or not all(
+            math.isfinite(value) for value in orientation
+        ):
+            raise ValueError("reset root orientation must contain four finite values")
+        norm = math.sqrt(sum(value * value for value in orientation))
+        if abs(norm - 1.0) > 1.0e-6:
+            raise ValueError("reset root orientation must be a unit quaternion")
 
         self.spec.bind_runtime_dofs(self._runtime_names)
         reset = self.spec.validate_targets(self.spec.reset_joint_positions)
@@ -67,8 +100,8 @@ class ArticulationController:
         zeros = [0.0] * len(names_in_runtime_order)
 
         self.articulation.set_world_poses(
-            positions=[list(self.spec.root_position_m)],
-            orientations=[list(self.spec.root_orientation_wxyz)],
+            positions=[list(position)],
+            orientations=[list(orientation)],
         )
         self.articulation.set_velocities(
             linear_velocities=[[0.0, 0.0, 0.0]],

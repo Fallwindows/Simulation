@@ -236,6 +236,18 @@ class ProductionRobotModelTests(unittest.TestCase):
         self.assertEqual(joint_velocities, [0.0] * 40)
         self.assertEqual(drive_targets, joint_positions)
 
+    def test_explicit_reset_accepts_a_finite_unit_pickup_root_pose(self):
+        fake = FakeArticulation(tuple(reversed(self.spec.canonical_dof_order)))
+        controller = ArticulationController(self.spec, fake)
+        controller.reset(
+            root_position_m=(-4.8, 0.7, 0.635),
+            root_orientation_wxyz=(2**-0.5, 0.0, 0.0, 2**-0.5),
+        )
+        world = fake.calls[0][2]
+        self.assertEqual(world["positions"], [[-4.8, 0.7, 0.635]])
+        with self.assertRaisesRegex(ValueError, "unit quaternion"):
+            controller.reset(root_orientation_wxyz=(2.0, 0.0, 0.0, 0.0))
+
 
 if __name__ == "__main__":
     unittest.main()

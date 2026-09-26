@@ -42,6 +42,10 @@ class PoseBackend(Protocol):
     def get_world_poses(self): ...
 
 
+class VelocityBackend(Protocol):
+    def get_velocities(self): ...
+
+
 class ContactReading(Protocol):
     is_valid: bool
     in_contact: bool
@@ -146,6 +150,9 @@ class Isaac61GraspFeedbackAdapter:
         bindings: IsaacContactBindings,
         *,
         maximum_contact_age_s: float,
+        diagnostic_link_poses: Mapping[str, PoseBackend] | None = None,
+        product_velocity: VelocityBackend | None = None,
+        joint_target_source: Callable[[], Mapping[str, float]] | None = None,
     ) -> None:
         if not math.isfinite(maximum_contact_age_s) or maximum_contact_age_s < 0.0:
             raise ValueError("maximum contact age must be finite and nonnegative")
@@ -157,6 +164,9 @@ class Isaac61GraspFeedbackAdapter:
         self.body_path_resolver = body_path_resolver
         self.bindings = bindings
         self.maximum_contact_age_s = float(maximum_contact_age_s)
+        self.diagnostic_link_poses = dict(diagnostic_link_poses or {})
+        self.product_velocity = product_velocity
+        self.joint_target_source = joint_target_source
         self._dof_names = tuple(str(name) for name in articulation.dof_names)
         self._link_names = tuple(str(name) for name in articulation.link_names)
         if len(set(self._dof_names)) != len(self._dof_names):
@@ -224,13 +234,14 @@ class Isaac61GraspFeedbackAdapter:
 
         forces: dict[tuple[str, str], float] = {}
         raw_times: list[float] = []
+        raw_diagnostics: list[dict[str, object]] = []
         for index, record in enumerate(raw):
             if not isinstance(record, Mapping):
                 raise FeedbackUnavailableError(f"raw contact {index} is not a mapping")
             try:
                 body0 = self._resolve_body(record["body0"])
                 body1 = self._resolve_body(record["body1"])
-                _xyz(record["position"], f"raw contact {index} position")
+                position = _xyz(record["position"], f"raw contact {index} position")
                 normal = _xyz(record["normal"], f"raw contact {index} normal")
                 impulse = _xyz(record["impulse"], f"raw contact {index} impulse")
                 record_time = float(record["time"])
@@ -255,6 +266,18 @@ class Isaac61GraspFeedbackAdapter:
             key = (self.bindings.product_body_prim_path, other)
             forces[key] = forces.get(key, 0.0) + force
             raw_times.append(record_time)
+            raw_diagnostics.append(
+                {
+                    "body0": body0,
+                    "body1": body1,
+                    "position_m": position,
+                    "normal": normal,
+                    "impulse_ns": impulse,
+                    "time_s": record_time,
+                    "dt_s": dt,
+                    "force_n": force,
+                }
+            )
 
         path_to_link = {
             path: link for link, path in self.bindings.robot_contacts.link_body_prim_paths.items()
@@ -270,6 +293,7 @@ class Isaac61GraspFeedbackAdapter:
             "in_contact": in_contact,
             "raw_contact_count": len(raw),
             "raw_times_s": raw_times,
+            "raw_contacts": raw_diagnostics,
             "normalized_contacts": [
                 {"body0": item.body0_prim_path, "body1": item.body1_prim_path,
                  "normal_force_n": item.normal_force_n,
@@ -288,18 +312,248 @@ class Isaac61GraspFeedbackAdapter:
         positions = _single_row(
             self.articulation.get_dof_positions(), len(self._dof_names), "DOF positions"
         )
-        joints = {name: positions[index] for index, name in enumerate(self._dof_names) if name in HAND_DOF_NAMES}
+        relevant_names = set(HAND_DOF_NAMES) | set(ARM_DOF_NAMES)
+        relevant_joints = {
+            name: positions[index]
+            for index, name in enumerate(self._dof_names)
+            if name in relevant_names
+        }
+        joints = {name: relevant_joints[name] for name in HAND_DOF_NAMES}
         contacts = self._contacts(timestamp_s)
+        palm_pose = self._pose(self.palm_pose, "right palm")
+        product_pose = self._pose(self.product_pose, "product")
+        measured_link_poses = {
+            name: {
+                "position_m": pose.position_m,
+                "orientation_xyzw": pose.orientation_xyzw,
+            }
+            for name, backend in sorted(self.diagnostic_link_poses.items())
+            for pose in (self._pose(backend, name),)
+        }
+        velocity = None
+        if self.product_velocity is not None:
+            velocity = _single_row(
+                self.product_velocity.get_velocities(), 6, "product velocity"
+            )
+        targets: dict[str, float] = {}
+        if self.joint_target_source is not None:
+            raw_targets = self.joint_target_source()
+            if not isinstance(raw_targets, Mapping):
+                raise FeedbackUnavailableError("joint target source did not return a mapping")
+            for name, raw_value in raw_targets.items():
+                if name not in relevant_names:
+                    continue
+                value = float(raw_value)
+                if not math.isfinite(value):
+                    raise FeedbackUnavailableError("joint target source contains a nonfinite value")
+                targets[str(name)] = value
+        target_errors = {
+            name: targets[name] - relevant_joints[name]
+            for name in sorted(set(targets).intersection(relevant_joints))
+        }
+        self._diagnostics.update(
+            {
+                "product_pose_world": {
+                    "position_m": product_pose.position_m,
+                    "orientation_xyzw": product_pose.orientation_xyzw,
+                },
+                "product_velocity_world": None
+                if velocity is None
+                else {
+                    "linear_m_s": velocity[:3],
+                    "angular_rad_s": velocity[3:],
+                },
+                "palm_pose_world": {
+                    "position_m": palm_pose.position_m,
+                    "orientation_xyzw": palm_pose.orientation_xyzw,
+                },
+                "diagnostic_link_poses_world": measured_link_poses,
+                "joint_positions_rad": dict(sorted(relevant_joints.items())),
+                "joint_targets_rad": dict(sorted(targets.items())),
+                "joint_target_errors_rad": target_errors,
+                "maximum_abs_joint_target_error_rad": max(
+                    (abs(value) for value in target_errors.values()), default=None
+                ),
+            }
+        )
         observation = GraspObservation(
             timestamp_s=timestamp_s,
             product_prim_path=self.bindings.product_body_prim_path,
             hand_joint_positions_rad=MappingProxyType(joints),
-            palm_pose_world=self._pose(self.palm_pose, "right palm"),
-            product_pose_world=self._pose(self.product_pose, "product"),
+            palm_pose_world=palm_pose,
+            product_pose_world=product_pose,
             contacts=contacts,
         )
         self._last_timestamp_s = timestamp_s
         return observation
+
+
+class IsaacArmApproachPort:
+    """Bounded R3 right-arm pregrasp motion with a measured tool-pose gate."""
+
+    def __init__(
+        self,
+        controller: PositionTargetController,
+        articulation: ArticulationStateBackend,
+        kinematics: RightArmKinematics,
+        timestamp_source: Callable[[], float],
+        *,
+        command_period_s: float,
+        position_tolerance_m: float = 0.015,
+        orientation_tolerance_rad: float = 0.08,
+    ) -> None:
+        if not all(
+            math.isfinite(value) and value > 0.0
+            for value in (
+                command_period_s,
+                position_tolerance_m,
+                orientation_tolerance_rad,
+            )
+        ):
+            raise ValueError("approach periods and tolerances must be finite and positive")
+        self.controller = controller
+        self.articulation = articulation
+        self.kinematics = kinematics
+        self.timestamp_source = timestamp_source
+        self.command_period_s = float(command_period_s)
+        self.position_tolerance_m = float(position_tolerance_m)
+        self.orientation_tolerance_rad = float(orientation_tolerance_rad)
+        self.planner = ArmReachPlanner(kinematics, command_period_s=command_period_s)
+        self._dof_names = tuple(str(name) for name in articulation.dof_names)
+        if not set(ARM_DOF_NAMES).issubset(self._dof_names):
+            raise ValueError("articulation is missing a right-arm DOF")
+        self._target: ToolPose | None = None
+        self._goal: dict[str, float] = {}
+        self._waypoints: list[dict[str, float]] = []
+        self._deadline_s: float | None = None
+        self.last_error: str | None = None
+
+    def _measured_arm(self) -> dict[str, float]:
+        row = _single_row(
+            self.articulation.get_dof_positions(), len(self._dof_names), "DOF positions"
+        )
+        return {name: row[self._dof_names.index(name)] for name in ARM_DOF_NAMES}
+
+    def request_approach(self, target: ToolPose, maximum_duration_s: float) -> bool:
+        if self._target is not None or self._waypoints or self._deadline_s is not None:
+            return False
+        if not math.isfinite(maximum_duration_s) or maximum_duration_s <= 0.0:
+            return False
+        try:
+            start = self._measured_arm()
+            self._goal = self.kinematics.solve(target, start).as_mapping()
+            steps = max(
+                1,
+                max(
+                    math.ceil(
+                        abs(self._goal[name] - start[name])
+                        / self.planner.maximum_step_for_joint(name)
+                    )
+                    for name in ARM_DOF_NAMES
+                ),
+            )
+            self._waypoints = [
+                {
+                    name: start[name] + (self._goal[name] - start[name]) * step / steps
+                    for name in ARM_DOF_NAMES
+                }
+                for step in range(1, steps + 1)
+            ]
+        except Exception as exc:
+            self.last_error = str(exc)
+            self._waypoints = []
+            return False
+        if len(self._waypoints) * self.command_period_s > maximum_duration_s:
+            self.last_error = "bounded arm approach cannot finish before deadline"
+            self._waypoints = []
+            return False
+        now = float(self.timestamp_source())
+        if not math.isfinite(now):
+            self.last_error = "approach timestamp is nonfinite"
+            self._waypoints = []
+            return False
+        self._target = target
+        self._deadline_s = now + maximum_duration_s
+        return True
+
+    def _observation_within_deadline(self) -> bool:
+        if self._target is None or self._deadline_s is None:
+            return False
+        try:
+            now = float(self.timestamp_source())
+        except (TypeError, ValueError, OverflowError):
+            now = math.nan
+        if not math.isfinite(now) or now > self._deadline_s:
+            self.last_error = "arm approach deadline expired"
+            self._waypoints.clear()
+            return False
+        return True
+
+    def advance(self) -> bool:
+        if not self._observation_within_deadline():
+            return False
+        if not self._waypoints:
+            return True
+        targets = self._waypoints.pop(0)
+        commanded = tuple(self.controller.command_joint_positions(targets))
+        if commanded != ARM_DOF_NAMES:
+            self.last_error = f"unexpected arm approach command set: {commanded}"
+            self._waypoints.clear()
+            return False
+        return True
+
+    def measured_error(self) -> tuple[float, float]:
+        if self._target is None:
+            raise FeedbackUnavailableError("arm approach was not requested")
+        measured = self.kinematics.forward(self._measured_arm())
+        position_error = math.sqrt(
+            sum(
+                (measured.position_m[index] - self._target.position_m[index]) ** 2
+                for index in range(3)
+            )
+        )
+        dot = abs(
+            sum(
+                measured.orientation_xyzw[index] * self._target.orientation_xyzw[index]
+                for index in range(4)
+            )
+        )
+        orientation_error = 2.0 * math.acos(min(1.0, max(-1.0, dot)))
+        return position_error, orientation_error
+
+    def target_reached(self) -> bool:
+        # This gate is called after the physics step and measured observation.
+        # Rechecking the same latched deadline here prevents a late sample from
+        # being counted merely because advance() ran before the step.
+        if not self._observation_within_deadline():
+            return False
+        position_error, orientation_error = self.measured_error()
+        return (
+            not self._waypoints
+            and position_error <= self.position_tolerance_m
+            and orientation_error <= self.orientation_tolerance_rad
+        )
+
+    def diagnostics(self) -> dict[str, object]:
+        if self._target is None:
+            return {"requested": False, "last_error": self.last_error}
+        position_error, orientation_error = self.measured_error()
+        return {
+            "requested": True,
+            "target": {
+                "position_m_in_waist": self._target.position_m,
+                "orientation_xyzw_in_waist": self._target.orientation_xyzw,
+            },
+            "goal_joint_positions_rad": dict(sorted(self._goal.items())),
+            "remaining_waypoints": len(self._waypoints),
+            "position_error_m": position_error,
+            "orientation_error_rad": orientation_error,
+            "position_tolerance_m": self.position_tolerance_m,
+            "orientation_tolerance_rad": self.orientation_tolerance_rad,
+            "target_reached": self.target_reached(),
+            "deadline_s": self._deadline_s,
+            "last_error": self.last_error,
+        }
 
 
 class IsaacArmLiftPort:
