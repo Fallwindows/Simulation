@@ -351,6 +351,65 @@ def _interpolate_joint_targets(
     }
 
 
+def _settle_gated_ramp_targets(
+    *,
+    start: dict[str, float],
+    nominal: dict[str, float],
+    balanced: dict[str, float],
+    measured: dict[str, float],
+    fraction: float,
+    maximum_target_error_rad: float,
+) -> dict[str, float]:
+    """Ramp nominal crouch while applying the measured restoring offset in full.
+
+    Every output stays inside the convex per-joint envelope of the measured
+    start, validated nominal target, and validated balanced target, then inside
+    the existing measured target-error gate.  This preserves the full feedback
+    correction while a nominal crouch increment is paused for settling.
+    """
+
+    if not (
+        start.keys() == nominal.keys() == balanced.keys() == measured.keys()
+    ):
+        raise ValueError("settle-gated ramp vectors must have identical names")
+    nominal_progress = _interpolate_joint_targets(start, nominal, fraction)
+    targets: dict[str, float] = {}
+    for name in start:
+        raw = nominal_progress[name] + balanced[name] - nominal[name]
+        envelope_low = min(start[name], nominal[name], balanced[name])
+        envelope_high = max(start[name], nominal[name], balanced[name])
+        error_low = measured[name] - maximum_target_error_rad
+        error_high = measured[name] + maximum_target_error_rad
+        low = max(envelope_low, error_low)
+        high = min(envelope_high, error_high)
+        if low > high:
+            raise ValueError(f"settle-gated target envelope is empty for {name}")
+        targets[name] = max(low, min(high, raw))
+    return targets
+
+
+def _handoff_settling_failures(
+    feedback: LocomotionFeedback, config: GaitConfig
+) -> tuple[list[str], dict[str, float]]:
+    """Apply the existing docking speed gates to a startup handoff sample."""
+
+    linear_speed = math.sqrt(
+        sum(value * value for value in feedback.root_linear_velocity_body_mps)
+    )
+    angular_speed = math.sqrt(
+        sum(value * value for value in feedback.root_angular_velocity_body_rps)
+    )
+    failures: list[str] = []
+    if linear_speed > config.dock_linear_speed_tolerance_mps:
+        failures.append("root linear speed has not settled for gait handoff")
+    if angular_speed > config.dock_angular_speed_tolerance_rps:
+        failures.append("root angular speed has not settled for gait handoff")
+    return failures, {
+        "handoff_root_linear_speed_mps": linear_speed,
+        "handoff_root_angular_speed_rps": angular_speed,
+    }
+
+
 def _kinematic_safety_failures(
     diagnostics: dict[str, Any], config: GaitConfig
 ) -> tuple[list[str], dict[str, float]]:
@@ -666,6 +725,11 @@ def _staged_double_support_startup(
             stability_failures.append("feedback timestamp did not advance")
         if feedback.support_margin_m < config.minimum_support_margin_m:
             stability_failures.append("COM projection left the configured support margin")
+        settling_failures, settling_metrics = _handoff_settling_failures(
+            feedback, config
+        )
+        stability_failures.extend(settling_failures)
+        gate_metrics.update(settling_metrics)
         gate_metrics["support_margin_m"] = feedback.support_margin_m
         if gate_failures:
             consecutive_stable_samples = 0
@@ -718,10 +782,32 @@ def _staged_double_support_startup(
         "ConservativeGaitTargetGenerator"
     )
     latest = acquired
-    for step_index in range(1, ramp_steps + 1):
+    maximum_ramp_samples = (
+        step_budget["total"]
+        - int(report["stability_achieved_step"])
+        - dwell_steps
+    )
+    report["step_budget"]["maximum_target_ramp_samples"] = maximum_ramp_samples
+    completed_ramp_steps = 0
+    ramp_sample_count = 0
+    while (
+        completed_ramp_steps < ramp_steps
+        and ramp_sample_count < maximum_ramp_samples
+    ):
+        ramp_sample_count += 1
+        report["actual_target_ramp_samples"] = ramp_sample_count
+        target_progress_step = completed_ramp_steps + 1
+        target_progress_fraction = target_progress_step / ramp_steps
         balanced_destination, balance_metrics = balanced_targets("target_ramp", latest)
-        targets = _interpolate_joint_targets(
-            start_targets, balanced_destination, step_index / ramp_steps
+        targets = _settle_gated_ramp_targets(
+            start=start_targets,
+            nominal=crouch_targets,
+            balanced=balanced_destination,
+            measured={
+                name: float(latest.joint_position_rad[name]) for name in LEG_JOINTS
+            },
+            fraction=target_progress_fraction,
+            maximum_target_error_rad=config.maximum_target_error_rad,
         )
         joint_controller.command_joint_positions(targets)
         step_physics()
@@ -731,7 +817,9 @@ def _staged_double_support_startup(
             report["events"].append(
                 {
                     "stage": "target_ramp",
-                    "step": step_index,
+                    "step": ramp_sample_count,
+                    "target_progress_step": target_progress_step,
+                    "target_progress_fraction": target_progress_fraction,
                     "status": "rejected",
                     "feedback_error": str(exc),
                     "balance_observation": balance_metrics,
@@ -744,13 +832,27 @@ def _staged_double_support_startup(
         failures, metrics = _startup_feedback_failures(
             latest, diagnostics, targets, config
         )
+        settling_failures, settling_metrics = _handoff_settling_failures(
+            latest, config
+        )
+        metrics.update(settling_metrics)
+        if not failures and not settling_failures:
+            completed_ramp_steps = target_progress_step
+        status = (
+            "rejected"
+            if failures
+            else ("settling" if settling_failures else "accepted")
+        )
         report["events"].append(
             {
                 "stage": "target_ramp",
-                "step": step_index,
-                "status": "accepted" if not failures else "rejected",
+                "step": ramp_sample_count,
+                "target_progress_step": target_progress_step,
+                "target_progress_fraction": target_progress_fraction,
+                "status": status,
                 "timestamp_s": latest.timestamp_s,
                 "metrics": metrics,
+                "settling_failures": settling_failures,
                 "balance_observation": balance_metrics,
                 "commanded_joint_targets_rad": targets,
                 "diagnostics": diagnostics if failures else None,
@@ -759,9 +861,16 @@ def _staged_double_support_startup(
         publish()
         if failures:
             abort("target_ramp", "; ".join(failures))
+    if completed_ramp_steps < ramp_steps:
+        abort(
+            "target_ramp",
+            "bounded window ended before every settle-gated target-ramp increment",
+        )
 
     maximum_dwell_steps = (
-        step_budget["total"] - int(report["stability_achieved_step"]) - ramp_steps
+        step_budget["total"]
+        - int(report["stability_achieved_step"])
+        - ramp_sample_count
     )
     report["step_budget"]["maximum_verified_dwell"] = maximum_dwell_steps
     consecutive_settled_samples = 0
@@ -788,19 +897,10 @@ def _staged_double_support_startup(
         failures, metrics = _startup_feedback_failures(
             latest, diagnostics, targets, config
         )
-        linear_speed = math.sqrt(
-            sum(value * value for value in latest.root_linear_velocity_body_mps)
+        settling_failures, settling_metrics = _handoff_settling_failures(
+            latest, config
         )
-        angular_speed = math.sqrt(
-            sum(value * value for value in latest.root_angular_velocity_body_rps)
-        )
-        metrics["handoff_root_linear_speed_mps"] = linear_speed
-        metrics["handoff_root_angular_speed_rps"] = angular_speed
-        settling_failures: list[str] = []
-        if linear_speed > config.dock_linear_speed_tolerance_mps:
-            settling_failures.append("root linear speed has not settled for gait handoff")
-        if angular_speed > config.dock_angular_speed_tolerance_rps:
-            settling_failures.append("root angular speed has not settled for gait handoff")
+        metrics.update(settling_metrics)
         if failures or settling_failures:
             consecutive_settled_samples = 0
         else:

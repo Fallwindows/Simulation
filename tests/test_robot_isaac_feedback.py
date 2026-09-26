@@ -42,6 +42,7 @@ from robot_spike.production.run_locomotion_smoke import (
     _record_identity_boundary,
     _startup_step_budget,
     _startup_feedback_failures,
+    _settle_gated_ramp_targets,
     _staged_double_support_startup,
     _terminate_process,
     _validate_arguments,
@@ -306,9 +307,62 @@ class StartupFeedbackSource:
                 joints=self.controller.commands[-1],
                 support_margin=margin,
             )
+        if self.mode == "transient_pre_ramp_drift" and self.read_count <= 2:
+            return startup_feedback(
+                timestamp=1.0 + 0.1 * self.read_count,
+                root_linear=(0.10, 0.0, 0.0),
+                root_angular=(0.0, 0.20, 0.0),
+            )
+        if self.mode in {
+            "transient_target_ramp_drift",
+            "persistent_target_ramp_drift",
+        } and self.controller.commands:
+            drifting = (
+                self.mode == "persistent_target_ramp_drift"
+                or len(self.controller.commands) <= 2
+            )
+            return startup_feedback(
+                timestamp=1.0 + 0.1 * self.read_count,
+                joints=self.controller.commands[-1],
+                root_linear=(0.10, 0.0, 0.0) if drifting else (0.0, 0.0, 0.0),
+                root_angular=(0.0, 0.20, 0.0) if drifting else (0.0, 0.0, 0.0),
+            )
+        if self.mode == "e957_runtime_drift" and self.controller.commands:
+            command_count = len(self.controller.commands)
+            fraction = min(1.0, (command_count - 1) / 75.0)
+            return startup_feedback(
+                timestamp=1.0 + 0.1 * self.read_count,
+                joints=self.controller.commands[-1],
+                root_pitch=-0.024144011784225504 + fraction * (
+                    -0.13839704013215037 + 0.024144011784225504
+                ),
+                support_margin=0.03312557208595011 + fraction * (
+                    -0.015189933393479682 - 0.03312557208595011
+                ),
+                root_linear=(
+                    -0.04248633664861314 + fraction * (
+                        -0.11771585425455122 + 0.04248633664861314
+                    ),
+                    0.0,
+                    0.0,
+                ),
+                root_angular=(
+                    0.0,
+                    -0.07075670534406134 + fraction * (
+                        -0.22349596015751427 + 0.07075670534406134
+                    ),
+                    0.0,
+                ),
+            )
         if self.mode in {"transient_handoff_drift", "persistent_handoff_drift"}:
             dwell_command = len(self.controller.commands) - 3
-            drifting = self.mode == "persistent_handoff_drift" or dwell_command <= 2
+            drifting = (
+                dwell_command > 0
+                and (
+                    self.mode == "persistent_handoff_drift"
+                    or dwell_command <= 2
+                )
+            )
             return startup_feedback(
                 timestamp=1.0 + 0.1 * self.read_count,
                 joints=(
@@ -1196,6 +1250,183 @@ class IsaacFeedbackTests(unittest.TestCase):
         ])
         self.assertEqual(dwell[-1]["consecutive_settled_samples"], 3)
         self.assertEqual(len(controller.commands), 8)
+
+    def test_pre_ramp_requires_settled_root_before_first_target(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "transient_pre_ramp_drift"
+
+        _final, report = _staged_double_support_startup(
+            feedback_source=source,  # type: ignore[arg-type]
+            joint_controller=controller,  # type: ignore[arg-type]
+            step_physics=lambda: None,
+            reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+            crouch_targets={name: 0.18 for name in LEG_JOINTS},
+            balanced_crouch_targets=test_balanced_crouch,
+            physics_dt=0.1,
+            maximum_duration_s=2.0,
+        )
+
+        pre_ramp = [
+            event
+            for event in report["events"]
+            if event["stage"] == "pre_ramp_stabilization"
+        ]
+        self.assertEqual(
+            [event["status"] for event in pre_ramp],
+            ["dwell_reset", "dwell_reset", "stabilizing", "stabilizing", "stable"],
+        )
+        self.assertIn(
+            "root linear speed has not settled for gait handoff",
+            pre_ramp[0]["stability_failures"],
+        )
+        self.assertIn(
+            "root angular speed has not settled for gait handoff",
+            pre_ramp[0]["stability_failures"],
+        )
+        self.assertEqual(report["stability_achieved_step"], 5)
+        self.assertEqual(controller.command_read_counts[0], 5)
+
+    def test_target_ramp_holds_each_increment_until_root_settles(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "transient_target_ramp_drift"
+
+        _final, report = _staged_double_support_startup(
+            feedback_source=source,  # type: ignore[arg-type]
+            joint_controller=controller,  # type: ignore[arg-type]
+            step_physics=lambda: None,
+            reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+            crouch_targets={name: 0.18 for name in LEG_JOINTS},
+            balanced_crouch_targets=lambda _feedback: {
+                name: 0.21 for name in LEG_JOINTS
+            },
+            physics_dt=0.1,
+            maximum_duration_s=2.0,
+        )
+
+        ramp = [event for event in report["events"] if event["stage"] == "target_ramp"]
+        self.assertEqual(
+            [event["status"] for event in ramp],
+            ["settling", "settling", "accepted", "accepted", "accepted"],
+        )
+        self.assertEqual(
+            [event["target_progress_step"] for event in ramp],
+            [1, 1, 1, 2, 3],
+        )
+        self.assertEqual(report["actual_target_ramp_samples"], 5)
+        self.assertEqual(controller.commands[0], controller.commands[1])
+        self.assertEqual(controller.commands[1], controller.commands[2])
+        self.assertAlmostEqual(
+            controller.commands[0][LEG_JOINTS[0]],
+            0.02 + (0.18 - 0.02) / 3.0 + (0.21 - 0.18),
+        )
+        self.assertEqual(len(controller.commands), 8)
+
+        self.assertEqual(
+            _settle_gated_ramp_targets(
+                start={"joint": 0.0},
+                nominal={"joint": 0.18},
+                balanced={"joint": 0.21},
+                measured={"joint": 0.0},
+                fraction=1.0 / 3.0,
+                maximum_target_error_rad=0.05,
+            ),
+            {"joint": 0.05},
+        )
+        with self.assertRaisesRegex(ValueError, "target envelope is empty"):
+            _settle_gated_ramp_targets(
+                start={"joint": 0.0},
+                nominal={"joint": 0.10},
+                balanced={"joint": 0.20},
+                measured={"joint": 1.0},
+                fraction=1.0 / 3.0,
+                maximum_target_error_rad=0.05,
+            )
+
+    def test_e957_drift_is_held_at_first_ramp_increment_then_fails_closed(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "e957_runtime_drift"
+
+        with self.assertRaisesRegex(
+            StartupValidationError, "COM projection left the configured support margin"
+        ) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
+                physics_dt=1.0 / 120.0,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "target_ramp")
+        ramp = [
+            event
+            for event in raised.exception.report["events"]
+            if event["stage"] == "target_ramp"
+        ]
+        self.assertEqual(len(ramp), 76)
+        self.assertTrue(all(event["status"] == "settling" for event in ramp[:-1]))
+        self.assertEqual(ramp[-1]["status"], "rejected")
+        self.assertTrue(all(event["target_progress_step"] == 1 for event in ramp))
+        self.assertTrue(
+            all(
+                event["target_progress_fraction"] == 1.0 / 36.0
+                for event in ramp
+            )
+        )
+        self.assertAlmostEqual(
+            ramp[-1]["metrics"]["support_margin_m"],
+            -0.015189933393479682,
+        )
+        self.assertEqual(len(controller.commands), 76)
+        self.assertFalse(
+            any(
+                event["stage"] == "verified_dwell"
+                for event in raised.exception.report["events"]
+            )
+        )
+
+    def test_persistent_target_ramp_drift_exhausts_bounded_budget(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "persistent_target_ramp_drift"
+
+        with self.assertRaisesRegex(
+            StartupValidationError, "before every settle-gated target-ramp increment"
+        ) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "target_ramp")
+        ramp = [
+            event
+            for event in raised.exception.report["events"]
+            if event["stage"] == "target_ramp"
+        ]
+        self.assertEqual(len(ramp), 14)
+        self.assertTrue(all(event["status"] == "settling" for event in ramp))
+        self.assertTrue(all(event["target_progress_step"] == 1 for event in ramp))
+        self.assertEqual(raised.exception.report["actual_target_ramp_samples"], 14)
+        self.assertEqual(len(controller.commands), 14)
+        self.assertFalse(
+            any(
+                event["stage"] == "verified_dwell"
+                for event in raised.exception.report["events"]
+            )
+        )
 
     def test_persistent_handoff_drift_times_out_before_gait(self):
         controller = StartupController()
