@@ -52,8 +52,10 @@ controller's `minimum_contact_force_n` remains the sole grasp threshold.
 
 ## Pose, freshness, and lift
 
-The adapter reads finger positions from the articulation and palm/product
-world poses from `RigidPrim.get_world_poses()`. Isaac `wxyz` orientations are
+The adapter reads named arm/hand positions, product velocity, product/palm
+world poses, and all five fingertip-marker world poses. Rigid bodies use
+`RigidPrim`; the collision-free fingertip markers use `XformPrim` only for
+geometry diagnostics. Isaac `wxyz` orientations are
 normalized and converted to the controller's `xyzw` convention. Simulation,
 aggregate contact, and every raw contact timestamp must be finite and fresh;
 simulation time must increase strictly.
@@ -80,7 +82,12 @@ boundary it imports the unchanged production URDF, selects its PhysX variant,
 authors the existing aisle/restocking fixture and collision-enabled nonkinematic
 pasta box, locates the single full articulation, creates a product-parented
 contact sensor, and performs one explicit robot reset before the runner starts.
-All later robot motion uses named drive targets; all product motion is physics.
+For this isolated R4 smoke, that sole reset places the stationary base at a
+deterministic pickup pose derived from the layout product pose and R3 forward
+kinematics. A bounded R3 arm approach must reach its measured palm target for
+three samples before the finger controller starts. All later robot motion uses
+named drive targets; the base remains stationary and all product motion is
+physics.
 
 The runner has a physics-step bound and writes an atomically replaced,
 file-flushed status document before motion, after every sample, and at the
@@ -121,6 +128,30 @@ Translation remains the existing `Gf.Vec3d`; rigid-body, nonkinematic, mass,
 collision, material, and initialization-only reset-policy authoring are
 unchanged. A CPU typed-op regression exercises this exact pose-authoring path.
 The correction has not been rerun in Isaac pending fresh source review.
+
+## First contact-sequence result
+
+Exact reviewed integration `ff0ed920113b9b23ce82bb05242a835b750774fd`
+(tree `c67f784624b4b76956dda1d08cee41d75456a5e7`) passed identity and typed
+orientation setup. Its receipt is `R4-grasp-ff0ed92/grasp_smoke_status.json`;
+the Kit log is `kit_20260926_064742.log`. It completed 23 preshape samples and
+120 close samples, then failed `contact_not_verified` at step 143. All 144
+samples reported only four product/support contact points, about 3.44 N at the
+end, with no hand link, no lift request, and no physical grasp evidence.
+
+The trace did not contain geometry, but the source identity proves the cause
+of the failed setup: the robot reset root was `(0, 0, 0.635)` while the product
+was at `(-4.35, 0.96, 0.9175)`, and the old runner issued no arm approach before
+finger closure. The successor's pickup reset keeps the configured root height,
+places the base outside the pickup board, and uses the unchanged dynamic
+product pose. Per-sample evidence now includes product pose/velocity, palm and
+fingertip poses, named arm/hand measurements and active-target errors, R3 tool
+target/error, and every resolved raw contact body path and geometry record.
+Missing contact still aborts; no attachment, product state write, or synthetic
+contact was added. The prior runtime fail receipt accompanied process exit 0,
+so the entry point now flushes streams and uses the established hard-exit path
+to propagate its computed 0/1 result through `python.bat`. No further Isaac run
+occurred before fresh review.
 
 ## Source-only validation limits
 

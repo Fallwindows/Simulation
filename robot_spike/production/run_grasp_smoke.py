@@ -15,17 +15,20 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from typing import Callable, Protocol
 
-from robot_spike.production.arm_reach import RightArmKinematics
+from robot_spike.production.arm_reach import ARM_DOF_NAMES, RightArmKinematics, ToolPose
 from robot_spike.production.isaac_grasp import (
     Isaac61GraspFeedbackAdapter,
+    IsaacArmApproachPort,
     IsaacArmLiftPort,
     IsaacContactBindings,
 )
 from robot_spike.production.model import canonical_text_sha256, load_production_spec
 from robot_spike.production.physical_grasp import (
+    HAND_DOF_NAMES,
     GraspLimits,
     GraspPhase,
     PhysicalGraspController,
@@ -44,6 +47,12 @@ PRODUCTION_URDF_CANONICAL_SHA256 = "b605c9a54f4a8494d333fd7cc5a20de3b4c76ffc83e3
 BASELINE_SCENARIO_SHA256 = "12d41a428dfe0e82da60584da9595b1c74090b33f375cc8be60b237941d8a5d0"
 ROBOT_CONFIG_SHA256 = "b6b2a0a524b65e683a69324debd212f2e91b7e446f8141d2b11f6ab75b473fe7"
 ISAAC_BUILD = "6.1.0-rc.26+release.49347.2d230af4.gl"
+WAIST_ORIGIN_IN_ROOT_M = (-0.052, 0.0, 0.074755)
+PREGRASP_ARM_JOINTS_RAD = dict(
+    zip(ARM_DOF_NAMES, (-0.224, 0.893, 0.790, -1.558, 0.061, -0.463))
+)
+PREGRASP_MAXIMUM_DURATION_S = 3.0
+PREGRASP_CONFIRMATION_SAMPLES = 3
 
 
 class PhysicsStepper(Protocol):
@@ -52,6 +61,18 @@ class PhysicsStepper(Protocol):
 
 class AdvancingLiftPort(Protocol):
     def advance(self) -> bool: ...
+
+
+class AdvancingApproachPort(Protocol):
+    last_error: str | None
+
+    def request_approach(self, target: ToolPose, maximum_duration_s: float) -> bool: ...
+
+    def advance(self) -> bool: ...
+
+    def target_reached(self) -> bool: ...
+
+    def diagnostics(self) -> dict[str, object]: ...
 
 
 def _sha256(path: Path) -> str:
@@ -178,6 +199,96 @@ def write_durable_json(path: Path, value: object) -> None:
 
 
 @dataclass(frozen=True)
+class PickupResetPlan:
+    root_position_m: tuple[float, float, float]
+    root_orientation_wxyz: tuple[float, float, float, float]
+    arm_target: ToolPose
+    predicted_palm_position_world_m: tuple[float, float, float]
+    product_position_world_m: tuple[float, float, float]
+
+    def evidence(self) -> dict[str, object]:
+        return {
+            "root_position_m": self.root_position_m,
+            "root_orientation_wxyz": self.root_orientation_wxyz,
+            "arm_target_position_m_in_waist": self.arm_target.position_m,
+            "arm_target_orientation_xyzw_in_waist": self.arm_target.orientation_xyzw,
+            "predicted_palm_position_world_m": self.predicted_palm_position_world_m,
+            "product_position_world_m": self.product_position_world_m,
+            "source": "layout product pose plus validated URDF/R3 forward kinematics",
+            "application": "sole explicit robot reset before smoke physics",
+        }
+
+
+def pickup_reset_plan(spec, layout, kinematics: RightArmKinematics) -> PickupResetPlan:
+    """Place the stationary base outside the pickup board and aim the palm inward."""
+
+    goal = spec.validate_targets(PREGRASP_ARM_JOINTS_RAD)
+    target = kinematics.forward({name: goal[name] for name in ARM_DOF_NAMES})
+    x, y, z, w = target.orientation_xyzw
+    palm_approach_x = 2.0 * (x * z + y * w)
+    palm_approach_y = 2.0 * (y * z - x * w)
+    if math.hypot(palm_approach_x, palm_approach_y) <= 1.0e-9:
+        raise RuntimeError("pregrasp palm approach axis has no horizontal projection")
+    local_x = WAIST_ORIGIN_IN_ROOT_M[0] + target.position_m[0]
+    local_y = WAIST_ORIGIN_IN_ROOT_M[1] + target.position_m[1]
+    if math.hypot(local_x, local_y) <= 1.0e-9:
+        raise RuntimeError("pregrasp arm target has no horizontal reach")
+    # Put the pelvis on the open, negative-y side of the pickup board by
+    # rotating the root-to-palm reach toward +Y. The palm approach axis is then
+    # used to select the corresponding product face.
+    yaw = math.pi / 2.0 - math.atan2(local_y, local_x)
+    cosine = math.cos(yaw)
+    sine = math.sin(yaw)
+    rotated_x = cosine * local_x - sine * local_y
+    rotated_y = sine * local_x + cosine * local_y
+    approach_x = cosine * palm_approach_x - sine * palm_approach_y
+    approach_y = sine * palm_approach_x + cosine * palm_approach_y
+    approach_norm = math.hypot(approach_x, approach_y)
+    approach_x /= approach_norm
+    approach_y /= approach_norm
+    product = tuple(float(value) for value in layout.product.source_reset_pose.position_m)
+    face_offset = min(layout.product.dimensions_m[:2]) / 2.0
+    desired_palm_xy = (
+        product[0] - face_offset * approach_x,
+        product[1] - face_offset * approach_y,
+    )
+    root = (
+        desired_palm_xy[0] - rotated_x,
+        desired_palm_xy[1] - rotated_y,
+        float(spec.root_position_m[2]),
+    )
+    orientation = (math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0))
+    predicted_palm = (
+        desired_palm_xy[0],
+        desired_palm_xy[1],
+        root[2] + WAIST_ORIGIN_IN_ROOT_M[2] + target.position_m[2],
+    )
+    return PickupResetPlan(root, orientation, target, predicted_palm, product)
+
+
+class TrackingArticulationController:
+    """Delegate every command to the production controller and retain targets."""
+
+    def __init__(self, controller: ArticulationController):
+        self._controller = controller
+        self.spec = controller.spec
+        self._targets: dict[str, float] = {}
+
+    def reset(self, **kwargs) -> None:
+        self._controller.reset(**kwargs)
+        self._targets = dict(self.spec.reset_joint_positions)
+
+    def command_joint_positions(self, targets: dict[str, float]):
+        commanded = tuple(self._controller.command_joint_positions(targets))
+        if set(commanded) == set(targets) and len(commanded) == len(targets):
+            self._targets.update({name: float(targets[name]) for name in commanded})
+        return commanded
+
+    def targets(self) -> dict[str, float]:
+        return dict(self._targets)
+
+
+@dataclass(frozen=True)
 class SmokeResult:
     status: str
     terminal_phase: str
@@ -193,7 +304,10 @@ class GraspSmokeRunner:
         self,
         physics: PhysicsStepper,
         controller: PhysicalGraspController,
+        arm_approach: AdvancingApproachPort,
         arm_lift: AdvancingLiftPort,
+        approach_observer: Callable[[], object],
+        approach_target: ToolPose,
         diagnostics: Callable[[], dict[str, object]],
         *,
         maximum_physics_steps: int,
@@ -204,7 +318,10 @@ class GraspSmokeRunner:
             raise ValueError("maximum physics steps must be a positive integer")
         self.physics = physics
         self.controller = controller
+        self.arm_approach = arm_approach
         self.arm_lift = arm_lift
+        self.approach_observer = approach_observer
+        self.approach_target = approach_target
         self.diagnostics = diagnostics
         self.maximum_physics_steps = maximum_physics_steps
         self.status_path = status_path
@@ -219,6 +336,7 @@ class GraspSmokeRunner:
                 "explicit_robot_reset_before_runner": True,
                 "post_reset_direct_state_writes": 0,
                 "finger_and_arm_motion": "ArticulationController.command_joint_positions",
+                "base_motion_after_reset": "none",
                 "product_motion": "physics_only",
             },
             "samples": samples,
@@ -231,20 +349,58 @@ class GraspSmokeRunner:
     def run(self) -> SmokeResult:
         samples: list[dict[str, object]] = []
         self._report("starting", samples)
-        try:
-            self.controller.start()
-        except Exception as exc:
-            self._report("error", samples, str(exc))
-            raise
+        if not self.arm_approach.request_approach(
+            self.approach_target, PREGRASP_MAXIMUM_DURATION_S
+        ):
+            error = self.arm_approach.last_error or "arm approach request rejected"
+            self._report("fail", samples, error)
+            return SmokeResult("fail", "approach_failed", error, 0, ())
         self._report("running", samples)
         error: str | None = None
+        grasp_started = False
+        approach_confirmations = 0
         for step in range(self.maximum_physics_steps):
-            if self.controller.phase is GraspPhase.LIFTING and not self.arm_lift.advance():
+            if not grasp_started:
+                if not self.arm_approach.advance():
+                    error = self.arm_approach.last_error or "arm approach could not advance"
+            elif self.controller.phase is GraspPhase.LIFTING and not self.arm_lift.advance():
                 error = "arm lift port could not advance within its bounded deadline"
             self.physics.step()
+            if not grasp_started:
+                try:
+                    self.approach_observer()
+                    reached = self.arm_approach.target_reached()
+                except Exception as exc:
+                    error = f"arm approach measurement failed: {exc}"
+                    reached = False
+                approach_confirmations = approach_confirmations + 1 if reached else 0
+                sample = {
+                    "step": step,
+                    "sequence_phase": "approaching",
+                    "phase": "idle",
+                    "failure": error,
+                    "approach_confirmations": approach_confirmations,
+                    "approach": self.arm_approach.diagnostics(),
+                    "contact_confirmations": 0,
+                    "lift_confirmations": 0,
+                    "adapter": self.diagnostics(),
+                }
+                samples.append(sample)
+                self._report("running", samples, error)
+                if error is not None:
+                    break
+                if approach_confirmations >= PREGRASP_CONFIRMATION_SAMPLES:
+                    try:
+                        self.controller.start()
+                    except Exception as exc:
+                        error = str(exc)
+                        break
+                    grasp_started = True
+                continue
             status = self.controller.step()
             sample = {
                 "step": step,
+                "sequence_phase": "grasp",
                 "phase": status.phase.value,
                 "failure": status.failure.value if status.failure else None,
                 "phase_observations": status.phase_observations,
@@ -257,7 +413,9 @@ class GraspSmokeRunner:
             if status.phase in (GraspPhase.COMPLETE, GraspPhase.FAILED):
                 break
         terminal = self.controller.status
-        if terminal.phase not in (GraspPhase.COMPLETE, GraspPhase.FAILED):
+        if not grasp_started and error is None:
+            error = "arm approach did not reach its measured target before the step bound"
+        elif terminal.phase not in (GraspPhase.COMPLETE, GraspPhase.FAILED):
             error = error or "smoke harness physics-step bound expired"
         passed = terminal.phase is GraspPhase.COMPLETE and error is None
         self._report("pass" if passed else "fail", samples, error)
@@ -295,6 +453,23 @@ def exact_contact_bindings(
     )
 
 
+def diagnostic_fingertip_paths(bindings: IsaacContactBindings) -> dict[str, str]:
+    """Derive the five fixed marker paths from their validated parent bodies."""
+
+    parents = {
+        "right_thumb_fingertip": "right_thumb_dp",
+        "right_index_fingertip": "right_index_ip",
+        "right_middle_fingertip": "right_middle_ip",
+        "right_ring_fingertip": "right_ring_ip",
+        "right_pinky_fingertip": "right_pinky_ip",
+    }
+    body_paths = bindings.robot_contacts.link_body_prim_paths
+    return {
+        marker: f"{body_paths[parent]}/{marker}"
+        for marker, parent in parents.items()
+    }
+
+
 def runtime_preflight_evidence(
     identity_receipt: dict[str, object],
     bindings: IsaacContactBindings,
@@ -306,6 +481,8 @@ def runtime_preflight_evidence(
     robot_link_count: int,
     robot_dof_count: int,
     product_contact_sensor_path: str,
+    pickup_reset: PickupResetPlan | None = None,
+    diagnostic_pose_paths: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Bind runtime paths and setup to the already validated source identity."""
 
@@ -350,6 +527,8 @@ def runtime_preflight_evidence(
         "product_contact_sensor": product_contact_sensor_path,
         "sensor_min_threshold_n": 0.0,
         "sensor_radius": -1.0,
+        "pickup_reset_plan": None if pickup_reset is None else pickup_reset.evidence(),
+        "diagnostic_pose_paths": dict(sorted((diagnostic_pose_paths or {}).items())),
     }
 
 
@@ -403,7 +582,7 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
         app = SimulationApp({"headless": True, "fast_shutdown": False})
         import omni.timeline
         import omni.usd
-        from isaacsim.core.experimental.prims import Articulation, RigidPrim
+        from isaacsim.core.experimental.prims import Articulation, RigidPrim, XformPrim
         from isaacsim.core.experimental.utils import app as app_utils
         from isaacsim.core.simulation_manager import SimulationManager
         from isaacsim.sensors.experimental.physics import Contact, ContactSensor
@@ -450,6 +629,21 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
         by_name = dict(zip(articulation.link_names, link_paths))
         palm = RigidPrim([by_name["right_palm"]], resolve_paths=False)
         product = RigidPrim([handles.product_rigid_body_prim_path], resolve_paths=False)
+        fingertip_paths = diagnostic_fingertip_paths(bindings)
+        missing_diagnostic_paths = [
+            path for path in fingertip_paths.values() if not stage.GetPrimAtPath(path).IsValid()
+        ]
+        if missing_diagnostic_paths:
+            raise RuntimeError(
+                f"imported robot lacks diagnostic fingertip paths: {missing_diagnostic_paths}"
+            )
+        diagnostic_link_poses = {"right_palm": palm}
+        diagnostic_link_poses.update(
+            {
+                name: XformPrim([path], resolve_paths=False)
+                for name, path in fingertip_paths.items()
+            }
+        )
         sensor_path = handles.product_rigid_body_prim_path + "/grasp_contact_sensor"
         sensor = ContactSensor(Contact.create(sensor_path, min_threshold=0.0,
                                                max_threshold=100000.0, radius=-1.0))
@@ -458,16 +652,30 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
         timeline.play()
         app_utils.update_app(steps=3)
         physics_dt = float(SimulationManager.get_physics_dt())
-        joint_controller = ArticulationController(spec, articulation)
+        kinematics = RightArmKinematics(spec)
+        reset_plan = pickup_reset_plan(spec, layout, kinematics)
+        joint_controller = TrackingArticulationController(
+            ArticulationController(spec, articulation)
+        )
         feedback = Isaac61GraspFeedbackAdapter(
             articulation, palm, product, sensor,
             SimulationManager.get_simulation_time,
             lambda handle: str(PhysicsSchemaTools.intToSdfPath(handle)),
             bindings,
             maximum_contact_age_s=2.5 * physics_dt,
+            diagnostic_link_poses=diagnostic_link_poses,
+            product_velocity=product,
+            joint_target_source=joint_controller.targets,
+        )
+        approach = IsaacArmApproachPort(
+            joint_controller,
+            articulation,
+            kinematics,
+            SimulationManager.get_simulation_time,
+            command_period_s=physics_dt,
         )
         lift = IsaacArmLiftPort(
-            joint_controller, articulation, RightArmKinematics(spec),
+            joint_controller, articulation, kinematics,
             SimulationManager.get_simulation_time,
             handles.product_rigid_body_prim_path,
             command_period_s=physics_dt,
@@ -490,6 +698,10 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
             robot_link_count=len(link_paths),
             robot_dof_count=len(articulation.dof_names),
             product_contact_sensor_path=sensor_path,
+            pickup_reset=reset_plan,
+            diagnostic_pose_paths={
+                "right_palm": by_name["right_palm"], **fingertip_paths
+            },
         )
         terminal_receipt = {
             "schema_version": 1,
@@ -497,9 +709,18 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
             "preflight": preflight,
         }
         write_durable_json(status_path, terminal_receipt)
-        joint_controller.reset()
+        joint_controller.reset(
+            root_position_m=reset_plan.root_position_m,
+            root_orientation_wxyz=reset_plan.root_orientation_wxyz,
+        )
         return GraspSmokeRunner(
-            _Physics(), grasp, lift, feedback.diagnostics,
+            _Physics(),
+            grasp,
+            approach,
+            lift,
+            feedback.read_observation,
+            reset_plan.arm_target,
+            feedback.diagnostics,
             maximum_physics_steps=args.maximum_steps,
             status_path=status_path,
             preflight=preflight,
@@ -539,5 +760,18 @@ def main(argv=None) -> int:
     return 0 if run_isaac(args, repo).status == "pass" else 1
 
 
+def _terminate_process(
+    exit_code: int, *, hard_exit: Callable[[int], object] = os._exit
+) -> None:
+    """Flush durable output, then set kit.exe's status for python.bat."""
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    hard_exit(int(exit_code))
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _terminate_process(main())
