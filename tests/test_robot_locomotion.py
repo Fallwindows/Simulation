@@ -68,13 +68,18 @@ class RobotLocomotionTests(unittest.TestCase):
         linear=(0.0, 0.0, 0.0),
         angular=(0.0, 0.0, 0.0),
         tilt=(0.0, 0.0),
+        root_height_m=None,
     ):
         joints = dict(self.spec.reset_joint_positions)
         velocities = {name: 0.0 for name in joints}
         return LocomotionFeedback(
             timestamp_s=timestamp_s,
             root_pose=root_pose,
-            root_height_m=self.spec.root_position_m[2],
+            root_height_m=(
+                self.spec.root_position_m[2]
+                if root_height_m is None
+                else root_height_m
+            ),
             root_tilt_roll_pitch_rad=tilt,
             root_linear_velocity_body_mps=linear,
             root_angular_velocity_body_rps=angular,
@@ -207,6 +212,60 @@ class RobotLocomotionTests(unittest.TestCase):
             previous_foot[step.side] = step.foot_target
             previous = step.body_target
 
+    def test_lateral_waypoints_produce_distinct_bounded_roll_targets(self):
+        planner = WaypointStepPlanner(self.config)
+        feedback = self.feedback(0.5)
+        generator = ConservativeGaitTargetGenerator(self.spec, self.config)
+        commands = []
+        for lateral_m in (0.015, -0.015):
+            step = planner.plan(
+                PlanarPose(0.0, 0.0, 0.0),
+                [PlanarPose(0.02, lateral_m, 0.0)],
+            )[0]
+            targets = generator.targets(
+                feedback,
+                GaitPhase.LEFT_SWING,
+                0.8,
+                BalanceCorrection(0.0, 0.0),
+                step=step,
+                swing_start_pose=feedback.left_foot.pose,
+                swing_start_joint_positions=feedback.joint_position_rad,
+            )
+            commands.append(targets)
+        positive, negative = commands
+        self.assertGreater(positive["left_hip_roll_joint"], 0.0)
+        self.assertLess(negative["left_hip_roll_joint"], 0.0)
+        self.assertNotEqual(
+            positive["left_ankle_roll_joint"],
+            negative["left_ankle_roll_joint"],
+        )
+        for targets in commands:
+            self.assertEqual(self.spec.validate_targets(targets), targets)
+
+    def test_measured_off_nominal_foot_distance_or_yaw_faults_before_liftoff(self):
+        cases = (
+            FootPose((-0.10, 0.0675, 0.0), 0.0),
+            FootPose((0.0, 0.0675, 0.0), math.radians(20.0)),
+        )
+        for measured_pose in cases:
+            with self.subTest(measured_pose=measured_pose):
+                source = MutableFeedbackSource(
+                    self.feedback(0.0, left_pose=measured_pose)
+                )
+                commands = RecordingJointController(self.spec)
+                controller = BipedLocomotionController(
+                    self.spec, commands, source, config=self.config
+                )
+                controller.start_route([PlanarPose(0.03, 0.0, 0.0)])
+                self.assertEqual(controller.update().phase, GaitPhase.DOUBLE_SUPPORT)
+                command_count = len(commands.commands)
+                source.feedback = self.feedback(0.31, left_pose=measured_pose)
+                failed = controller.update()
+                self.assertEqual(failed.state, LocomotionState.FAULT)
+                self.assertEqual(failed.joint_targets_rad, {})
+                self.assertEqual(len(commands.commands), command_count)
+                self.assertIn("measured swing-foot", failed.failure_reason)
+
     def test_contact_gates_liftoff_and_touchdown_then_dock_requires_settle(self):
         source = MutableFeedbackSource(self.feedback(0.0))
         commands = RecordingJointController(self.spec)
@@ -333,6 +392,31 @@ class RobotLocomotionTests(unittest.TestCase):
 
         unsafe = balance.evaluate(self.feedback(0.1, support_margin_m=-0.02))
         self.assertIn("support margin", unsafe.unsafe_reason)
+
+    def test_collapsed_or_invalid_root_height_fails_before_gait_command(self):
+        balance = BalanceFeedbackController(self.config)
+        for height in (-1.0, 1.5):
+            with self.subTest(height=height):
+                correction = balance.evaluate(
+                    self.feedback(0.0, root_height_m=height)
+                )
+                self.assertIn("root clearance", correction.unsafe_reason)
+
+        source = MutableFeedbackSource(self.feedback(0.0, root_height_m=-1.0))
+        commands = RecordingJointController(self.spec)
+        controller = BipedLocomotionController(
+            self.spec, commands, source, config=self.config
+        )
+        controller.start_route([PlanarPose(0.03, 0.0, 0.0)])
+        failed = controller.update()
+        self.assertEqual(failed.state, LocomotionState.FAULT)
+        self.assertEqual(failed.joint_targets_rad, {})
+        self.assertEqual(commands.commands, [])
+
+        source.feedback = self.feedback(0.1, root_height_m=float("nan"))
+        with self.assertRaisesRegex(ValueError, "root height must be finite"):
+            controller.update()
+        self.assertEqual(commands.commands, [])
 
     def test_direct_root_and_joint_state_writes_are_confined_to_explicit_reset(self):
         forbidden = {

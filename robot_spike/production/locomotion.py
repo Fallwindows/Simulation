@@ -114,7 +114,8 @@ class FootFeedback:
 class LocomotionFeedback:
     """Measured state required by the gait and balance policies.
 
-    Root velocities and tilt are expressed in the root/body frame.  Foot,
+    Root velocities and tilt are expressed in the root/body frame;
+    ``root_height_m`` is the world-frame root Z coordinate.  Foot,
     center-of-mass, and support-center positions are in the world frame.  A
     positive support margin means the projected COM is inside the active
     support polygon; a negative value means it is outside.
@@ -178,6 +179,7 @@ class GaitConfig:
     neutral_knee_flexion_rad: float = 0.18
     swing_knee_flexion_rad: float = 0.34
     landing_hip_pitch_rad: float = 0.075
+    landing_hip_roll_rad: float = 0.040
     joint_limit_margin_rad: float = 0.005
     maximum_target_error_rad: float = 0.30
     joint_velocity_damping_s: float = 0.012
@@ -185,11 +187,13 @@ class GaitConfig:
     maximum_root_tilt_rad: float = math.radians(12.0)
     maximum_root_angular_speed_rps: float = 1.0
     maximum_root_linear_speed_mps: float = 0.35
+    minimum_root_clearance_m: float = 0.45
+    maximum_root_clearance_m: float = 0.80
     minimum_support_margin_m: float = -0.015
     maximum_plan_steps: int = 512
 
     def __post_init__(self) -> None:
-        finite_values = (
+        positive_values = (
             self.max_step_length_m,
             self.max_step_yaw_rad,
             self.nominal_speed_mps,
@@ -210,9 +214,9 @@ class GaitConfig:
             self.dock_timeout_s,
             self.stop_settle_duration_s,
             self.stop_timeout_s,
-            self.neutral_knee_flexion_rad,
             self.swing_knee_flexion_rad,
             self.landing_hip_pitch_rad,
+            self.landing_hip_roll_rad,
             self.joint_limit_margin_rad,
             self.maximum_target_error_rad,
             self.joint_velocity_damping_s,
@@ -220,12 +224,17 @@ class GaitConfig:
             self.maximum_root_tilt_rad,
             self.maximum_root_angular_speed_rps,
             self.maximum_root_linear_speed_mps,
+            self.minimum_root_clearance_m,
+            self.maximum_root_clearance_m,
+        )
+        finite_values = (
+            *positive_values,
+            self.neutral_knee_flexion_rad,
             self.minimum_support_margin_m,
         )
         if not all(math.isfinite(value) for value in finite_values):
             raise LocomotionError("gait configuration values must be finite")
-        positive = finite_values[:20] + finite_values[21:30]
-        if any(value <= 0.0 for value in positive):
+        if any(value <= 0.0 for value in positive_values):
             raise LocomotionError("positive gait configuration values must be greater than zero")
         if not 0.0 < self.minimum_touchdown_progress <= 1.0:
             raise LocomotionError("minimum_touchdown_progress must be in (0, 1]")
@@ -243,6 +252,8 @@ class GaitConfig:
             raise LocomotionError("swing knee flexion must not be below neutral flexion")
         if self.neutral_knee_flexion_rad < 0.0:
             raise LocomotionError("neutral knee flexion must be nonnegative")
+        if self.minimum_root_clearance_m >= self.maximum_root_clearance_m:
+            raise LocomotionError("root clearance envelope must have increasing bounds")
         if self.maximum_plan_steps < 1:
             raise LocomotionError("maximum_plan_steps must be positive")
 
@@ -398,6 +409,30 @@ class BalanceFeedbackController:
             reasons.append("root linear speed exceeded limit")
         if feedback.support_margin_m < self.config.minimum_support_margin_m:
             reasons.append("COM projection left support margin")
+        contact_heights = [
+            feedback.foot(side).pose.position_m[2]
+            for side in FootSide
+            if feedback.foot(side).in_contact
+        ]
+        support_height = (
+            max(contact_heights)
+            if contact_heights
+            else min(
+                feedback.left_foot.pose.position_m[2],
+                feedback.right_foot.pose.position_m[2],
+            )
+        )
+        root_clearance = feedback.root_height_m - support_height
+        if not (
+            self.config.minimum_root_clearance_m
+            <= root_clearance
+            <= self.config.maximum_root_clearance_m
+        ):
+            reasons.append(
+                "root clearance outside "
+                f"[{self.config.minimum_root_clearance_m:.3f}, "
+                f"{self.config.maximum_root_clearance_m:.3f}] m envelope"
+            )
 
         dx_world = feedback.com_position_world_m[0] - feedback.support_center_world_m[0]
         dy_world = feedback.com_position_world_m[1] - feedback.support_center_world_m[1]
@@ -493,7 +528,11 @@ class ConservativeGaitTargetGenerator:
             cosine = math.cos(feedback.root_pose.yaw_rad)
             sine = math.sin(feedback.root_pose.yaw_rad)
             forward = cosine * dx_world + sine * dy_world
+            lateral = -sine * dx_world + cosine * dy_world
             stride_scale = max(-1.0, min(1.0, forward / self.config.max_step_length_m))
+            lateral_scale = max(
+                -1.0, min(1.0, lateral / self.config.max_step_length_m)
+            )
             knee = (
                 self.config.neutral_knee_flexion_rad
                 + bump
@@ -513,6 +552,12 @@ class ConservativeGaitTargetGenerator:
                 f"{prefix}_ankle_pitch_joint": sign * physical_ankle,
                 f"{prefix}_hip_yaw_joint": blend
                 * _wrap_angle(step.foot_target.yaw_rad - swing_start_pose.yaw_rad),
+                f"{prefix}_hip_roll_joint": lateral_scale
+                * self.config.landing_hip_roll_rad,
+                # Both hip-roll axes are +X and both ankle-roll axes are -X,
+                # so equal numeric signs approximately preserve sole roll.
+                f"{prefix}_ankle_roll_joint": lateral_scale
+                * self.config.landing_hip_roll_rad,
             }
             for name, destination in landing.items():
                 source = float(swing_start_joint_positions[name])
@@ -667,11 +712,11 @@ class BipedLocomotionController:
                 else 0.0
             ),
         )
-        if correction.unsafe_reason and self.state not in {
-            LocomotionState.IDLE,
-            LocomotionState.FAULT,
-        }:
+        if correction.unsafe_reason and self.state is not LocomotionState.FAULT:
             self._fault(correction.unsafe_reason)
+            return self._fault_command()
+        if self.state is LocomotionState.FAULT:
+            return self._fault_command()
 
         swing_reference: FootPose | None = None
         active_step = self._active_step()
@@ -685,6 +730,9 @@ class BipedLocomotionController:
             self._update_docking(feedback)
         elif self.state is LocomotionState.STOPPING:
             self._update_stopping(feedback)
+
+        if self.state is LocomotionState.FAULT:
+            return self._fault_command()
 
         # Transitions above can change the active step or phase.
         active_step = self._active_step()
@@ -714,13 +762,7 @@ class BipedLocomotionController:
             self.articulation_controller.command_joint_positions(dict(targets))
         except JointTargetError as exc:
             self._fault(f"joint target validation failed: {exc}")
-            targets = symmetric_crouch_targets(
-                self.spec,
-                knee_flexion_rad=self.config.neutral_knee_flexion_rad,
-                limit_margin_rad=self.config.joint_limit_margin_rad,
-            )
-            self.articulation_controller.command_joint_positions(targets)
-            swing_reference = None
+            return self._fault_command()
         return LocomotionCommand(
             state=self.state,
             phase=self.phase,
@@ -759,6 +801,25 @@ class BipedLocomotionController:
             else 0.0
         )
         if both_contact and continuous_contact_s >= self.config.double_support_duration_s:
+            measured_foot = feedback.foot(step.side).pose
+            measured_step_distance = math.dist(
+                measured_foot.position_m, step.foot_target.position_m
+            )
+            measured_step_yaw = abs(
+                _wrap_angle(step.foot_target.yaw_rad - measured_foot.yaw_rad)
+            )
+            if measured_step_distance > self.config.max_step_length_m + 1e-12:
+                self._fault(
+                    "measured swing-foot displacement exceeds max_step_length_m: "
+                    f"{measured_step_distance:.6f} m"
+                )
+                return
+            if measured_step_yaw > self.config.max_step_yaw_rad + 1e-12:
+                self._fault(
+                    "measured swing-foot yaw exceeds max_step_yaw_rad: "
+                    f"{measured_step_yaw:.6f} rad"
+                )
+                return
             self.phase = (
                 GaitPhase.LEFT_SWING if step.side is FootSide.LEFT else GaitPhase.RIGHT_SWING
             )
@@ -890,6 +951,19 @@ class BipedLocomotionController:
         self.failure_reason = reason
         self._swing_start_pose = None
         self._swing_start_joint_positions = None
+
+    def _fault_command(self) -> LocomotionCommand:
+        """Report a latched fault without issuing another articulation command."""
+
+        return LocomotionCommand(
+            state=LocomotionState.FAULT,
+            phase=GaitPhase.DOUBLE_SUPPORT,
+            joint_targets_rad={},
+            swing_foot_reference=None,
+            active_step_index=self._step_index,
+            planned_step_count=len(self._steps),
+            failure_reason=self.failure_reason,
+        )
 
 
 def _validate_planar_pose(pose: PlanarPose, label: str) -> None:

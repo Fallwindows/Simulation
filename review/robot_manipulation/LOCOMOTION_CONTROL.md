@@ -70,6 +70,31 @@ reads the actual Isaac/PhysX articulation and contact sensors. The module does
 not guess Isaac API method names for link pose, contact, COM, or velocity reads.
 This keeps version-specific physics glue explicit at the integration boundary.
 
+The safety policy also checks measured root clearance above the highest
+contacting foot against a configurable `[0.45, 0.80] m` envelope. A collapsed
+or implausibly elevated root latches a fault before another articulation target
+is sent. The envelope brackets the R1 model's documented 0.635 m neutral reset
+clearance by 0.185 m below and 0.165 m above; it is a conservative simulation
+safety assumption pending measured Isaac settling data, not a hardware limit.
+
+## Revision response to independent review
+
+- `RST-003-F01`: fixed. Before each liftoff, the controller now compares the
+  captured measured swing-foot pose with the planned target. A displacement
+  above 0.060 m or yaw change above 8 degrees faults before entering swing.
+  CPU regression cases cover a 0.13 m off-nominal displacement and a 20 degree
+  off-nominal yaw.
+- `RST-003-F02`: fixed. Body-frame lateral foot displacement now produces a
+  bounded hip/ankle roll landing target while preserving URDF limits. Opposite
+  lateral routes produce distinct, opposite-sign commands in the CPU test.
+- `RST-003-F03`: fixed. Balance safety now derives root clearance from measured
+  root height and contacting-foot world height and enforces the documented
+  envelope. Collapsed, over-height, and nonfinite inputs are covered; unsafe
+  feedback and latched faults issue no further gait target.
+
+These are programmer changes awaiting fresh independent review; this note does
+not mark any finding accepted or the R2 gate passed.
+
 ## CPU checks and what they establish
 
 `tests/test_robot_locomotion.py` covers:
