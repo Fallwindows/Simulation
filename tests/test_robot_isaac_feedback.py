@@ -186,6 +186,7 @@ def startup_feedback(
     left_contact: bool = True,
     right_contact: bool = True,
     root_pitch: float = 0.0,
+    support_margin: float = 0.03,
 ) -> LocomotionFeedback:
     positions = joints if joints is not None else {name: 0.0 for name in LEG_JOINTS}
     return LocomotionFeedback(
@@ -201,8 +202,12 @@ def startup_feedback(
         joint_velocity_rad_s={name: 0.0 for name in LEG_JOINTS},
         com_position_world_m=(0.0, 0.0, 0.50),
         support_center_world_m=(0.0, 0.0, 0.0),
-        support_margin_m=0.03,
+        support_margin_m=support_margin,
     )
+
+
+def test_balanced_crouch(_feedback: LocomotionFeedback) -> dict[str, float]:
+    return {name: 0.18 for name in LEG_JOINTS}
 
 
 class StartupController:
@@ -264,6 +269,12 @@ class StartupFeedbackSource:
                 name: -1.0 for name in LEG_JOINTS
             }
             return startup_feedback(joints={name: -1.0 for name in LEG_JOINTS})
+        if self.mode == "dwell_margin_failure" and len(self.controller.commands) >= 4:
+            return startup_feedback(
+                timestamp=1.0 + 0.1 * self.read_count,
+                joints=self.controller.commands[-1],
+                support_margin=-0.016,
+            )
         joints = (
             self.controller.commands[-1]
             if self.controller.commands
@@ -540,6 +551,32 @@ class IsaacFeedbackTests(unittest.TestCase):
         }
         self.assertIn("fast_shutdown", config_values)
         self.assertIs(config_values["fast_shutdown"], False)
+        startup_calls = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_staged_double_support_startup"
+        ]
+        gait_constructors = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "BipedLocomotionController"
+        ]
+        gait_commands = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "start_route"
+        ]
+        self.assertEqual(len(startup_calls), 1)
+        self.assertEqual(len(gait_constructors), 1)
+        self.assertEqual(len(gait_commands), 1)
+        self.assertLess(startup_calls[0], gait_constructors[0])
+        self.assertLess(gait_constructors[0], gait_commands[0])
 
     def test_smoke_arguments_fail_before_isaac_for_invalid_values(self):
         valid = {
@@ -1016,6 +1053,7 @@ class IsaacFeedbackTests(unittest.TestCase):
             step_physics=lambda: physics_steps.append(len(physics_steps) + 1),
             reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
             crouch_targets=crouch,
+            balanced_crouch_targets=lambda _feedback: dict(crouch),
             physics_dt=0.1,
             maximum_duration_s=2.0,
             progress=lambda value: progress.append(copy.deepcopy(value)),
@@ -1030,7 +1068,7 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(report["step_budget"]["target_ramp"], 3)
         self.assertEqual(report["step_budget"]["verified_dwell"], 3)
         self.assertEqual(len(physics_steps), 9)
-        self.assertEqual(len(controller.commands), 3)
+        self.assertEqual(len(controller.commands), 6)
         self.assertEqual(controller.command_read_counts[0], 3)
         self.assertEqual(
             report["pre_ramp_hold"]["post_reset_commands_before_stability"], 0
@@ -1043,6 +1081,33 @@ class IsaacFeedbackTests(unittest.TestCase):
             _interpolate_joint_targets({"joint": 1.0}, {"joint": 3.0}, 0.5),
             {"joint": 2.0},
         )
+
+    def test_verified_dwell_margin_failure_aborts_before_gait(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "dwell_margin_failure"
+
+        with self.assertRaisesRegex(
+            StartupValidationError, "COM projection left the configured support margin"
+        ) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "verified_dwell")
+        self.assertEqual(len(controller.commands), 4)
+        event = raised.exception.report["events"][-1]
+        self.assertEqual(event["stage"], "verified_dwell")
+        self.assertEqual(event["status"], "rejected")
+        self.assertAlmostEqual(event["metrics"]["support_margin_m"], -0.016)
+        self.assertIn("commanded_joint_targets_rad", event)
 
     def test_sole_normal_tilt_rejects_thirty_degrees_and_honors_boundary(self):
         config = GaitConfig()
@@ -1089,6 +1154,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                 step_physics=lambda: None,
                 reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
             )
@@ -1115,6 +1181,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                 step_physics=lambda: None,
                 reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
                 progress=lambda value: progress.append(copy.deepcopy(value)),
@@ -1149,6 +1216,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                         step_physics=lambda: physics_steps.append(1),
                         reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                         crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                        balanced_crouch_targets=test_balanced_crouch,
                         physics_dt=0.1,
                         maximum_duration_s=2.0,
                     )
@@ -1172,6 +1240,7 @@ class IsaacFeedbackTests(unittest.TestCase):
             step_physics=lambda: None,
             reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
             crouch_targets={name: 0.18 for name in LEG_JOINTS},
+            balanced_crouch_targets=test_balanced_crouch,
             physics_dt=0.1,
             maximum_duration_s=2.0,
         )
@@ -1194,7 +1263,7 @@ class IsaacFeedbackTests(unittest.TestCase):
         )
         self.assertEqual(report["stability_achieved_step"], 5)
         self.assertEqual(controller.command_read_counts[0], 5)
-        self.assertEqual(len(controller.commands), 3)
+        self.assertEqual(len(controller.commands), 6)
         self.assertEqual(final.joint_position_rad, controller.commands[-1])
 
     def test_pre_ramp_hold_target_limit_aborts_without_a_command(self):
@@ -1208,6 +1277,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                 step_physics=lambda: None,
                 reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
             )
@@ -1235,6 +1305,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                 step_physics=lambda: None,
                 reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
             )
@@ -1254,6 +1325,7 @@ class IsaacFeedbackTests(unittest.TestCase):
                 step_physics=lambda: None,
                 reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
                 crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
                 physics_dt=0.1,
                 maximum_duration_s=2.0,
             )

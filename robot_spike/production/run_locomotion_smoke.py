@@ -25,9 +25,12 @@ from robot_spike.production.isaac_feedback import (
     Isaac61LocomotionFeedbackAdapter,
 )
 from robot_spike.production.locomotion import (
+    BalanceFeedbackController,
     BipedLocomotionController,
+    ConservativeGaitTargetGenerator,
     FootSide,
     GaitConfig,
+    GaitPhase,
     LEG_JOINTS,
     LocomotionFeedback,
     LocomotionState,
@@ -495,6 +498,7 @@ def _staged_double_support_startup(
     step_physics: Callable[[], None],
     reset_hold_targets: dict[str, float],
     crouch_targets: dict[str, float],
+    balanced_crouch_targets: Callable[[LocomotionFeedback], dict[str, float]],
     physics_dt: float,
     maximum_duration_s: float,
     config: GaitConfig = GaitConfig(),
@@ -552,6 +556,17 @@ def _staged_double_support_startup(
         report["failure_reason"] = reason
         publish()
         raise StartupValidationError(phase, reason, report)
+
+    def balanced_targets(phase: str, feedback: LocomotionFeedback) -> dict[str, float]:
+        try:
+            targets = balanced_crouch_targets(feedback)
+        except Exception as exc:
+            abort(phase, f"balanced crouch target generation failed: {exc}")
+        if set(targets) != set(LEG_JOINTS):
+            abort(phase, "balanced crouch targets do not name every leg joint")
+        if not all(math.isfinite(float(value)) for value in targets.values()):
+            abort(phase, "balanced crouch targets contain a nonfinite value")
+        return {name: float(targets[name]) for name in LEG_JOINTS}
 
     acquired: LocomotionFeedback | None = None
     consecutive_stable_samples = 0
@@ -679,11 +694,16 @@ def _staged_double_support_startup(
         name: float(acquired.joint_position_rad[name]) for name in LEG_JOINTS
     }
     report["ramp_start_joint_position_rad"] = start_targets
-    report["crouch_targets_rad"] = dict(crouch_targets)
+    report["nominal_crouch_targets_rad"] = dict(crouch_targets)
+    report["crouch_balance_policy"] = (
+        "existing BalanceFeedbackController and double-support "
+        "ConservativeGaitTargetGenerator"
+    )
     latest = acquired
     for step_index in range(1, ramp_steps + 1):
+        balanced_destination = balanced_targets("target_ramp", latest)
         targets = _interpolate_joint_targets(
-            start_targets, crouch_targets, step_index / ramp_steps
+            start_targets, balanced_destination, step_index / ramp_steps
         )
         joint_controller.command_joint_positions(targets)
         step_physics()
@@ -721,6 +741,8 @@ def _staged_double_support_startup(
             abort("target_ramp", "; ".join(failures))
 
     for step_index in range(1, dwell_steps + 1):
+        targets = balanced_targets("verified_dwell", latest)
+        joint_controller.command_joint_positions(targets)
         step_physics()
         try:
             latest = feedback_source.read_feedback()
@@ -731,14 +753,14 @@ def _staged_double_support_startup(
                     "step": step_index,
                     "status": "rejected",
                     "feedback_error": str(exc),
-                    "commanded_joint_targets_rad": dict(crouch_targets),
+                    "commanded_joint_targets_rad": targets,
                     "diagnostics": feedback_source.adapter.diagnostics(),
                 }
             )
             abort("verified_dwell", f"measured contact/support was lost: {exc}")
         diagnostics = feedback_source.adapter.diagnostics()
         failures, metrics = _startup_feedback_failures(
-            latest, diagnostics, crouch_targets, config
+            latest, diagnostics, targets, config
         )
         report["events"].append(
             {
@@ -747,6 +769,7 @@ def _staged_double_support_startup(
                 "status": "accepted" if not failures else "rejected",
                 "timestamp_s": latest.timestamp_s,
                 "metrics": metrics,
+                "commanded_joint_targets_rad": targets,
                 "diagnostics": diagnostics if failures else None,
             }
         )
@@ -1171,6 +1194,21 @@ def run_isaac(
             # later robot command is a drive target and physics advances state.
             joint_controller.reset()
             recording_source = _RecordingFeedbackSource(adapter)
+            startup_balance = BalanceFeedbackController()
+            startup_target_generator = ConservativeGaitTargetGenerator(spec)
+
+            def balanced_crouch(feedback: LocomotionFeedback) -> dict[str, float]:
+                correction = startup_balance.evaluate(feedback)
+                if correction.unsafe_reason is not None:
+                    raise FeedbackUnavailableError(
+                        f"balanced crouch input is unsafe: {correction.unsafe_reason}"
+                    )
+                return startup_target_generator.targets(
+                    feedback,
+                    GaitPhase.DOUBLE_SUPPORT,
+                    0.0,
+                    correction,
+                )
 
             def persist_startup(startup_report: dict[str, Any]) -> None:
                 repeat_result["startup"] = startup_report
@@ -1188,6 +1226,7 @@ def run_isaac(
                         for name in LEG_JOINTS
                     },
                     crouch_targets=symmetric_crouch_targets(spec),
+                    balanced_crouch_targets=balanced_crouch,
                     physics_dt=physics_dt,
                     maximum_duration_s=args.settle_s,
                     progress=persist_startup,

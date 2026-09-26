@@ -299,6 +299,22 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   final dwell. The previously accepted 0.9714285714 s value now fails before
   `SimulationApp`; the exact 16/14 s boundary produces a six-step pre-ramp
   window and passes.
+- `RST-004-F10`: exact approved integration
+  `5f18484550ac000efc4cfc6ee529c3bf48aa5962` passed pre-ramp stabilization
+  and all 36 fixed-crouch ramp samples, then failed safely during verified
+  dwell. At dwell step 26 the measured root had drifted to X=-0.0550 m with
+  pitch -0.1492 rad and 0.162 m/s linear speed; both feet remained in contact,
+  but the signed COM support margin was -0.015887 m against the unchanged
+  -0.015 m gate. The harness now uses the existing bounded
+  `BalanceFeedbackController` and double-support
+  `ConservativeGaitTargetGenerator` on every ramp and dwell increment. This
+  makes the nominal crouch target responsive to measured pitch, velocity, and
+  COM offset with the existing 0.045 rad correction cap. Any unsafe input or
+  existing support, tilt, speed, clearance, sole, or tracking gate still aborts
+  before gait. The durable receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-5f18484\locomotion_smoke_status.json`;
+  the Kit log is
+  `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_061041.log`.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -375,9 +391,10 @@ the existing 1.2 s timeout as a shared pre-ramp stabilization window. The reset
 targets stay active without another command. Contact or support loss resets the
 consecutive counter, and the ramp remains locked until 0.30 s of fresh positive
 bilateral contact, advancing timestamps, adequate support margin, target
-tracking, and root/sole safety has accumulated. It then interpolates from the
-measured stable joint state to the symmetric crouch over the existing 0.30 s
-double-support duration and verifies another 0.30 s dwell. Each increment uses
+  tracking, and root/sole safety has accumulated. It then interpolates from the
+measured stable joint state toward the existing balance-corrected symmetric
+crouch over the existing 0.30 s double-support duration and verifies another
+0.30 s dwell while refreshing that target from each measured sample. Each increment uses
 the existing control gates: 12 degree root/sole tilt envelope, 0.35 m/s root
 linear speed, 1.0 rad/s root angular component, 0.30 rad joint target error,
 `[-0.015 m]` minimum support margin, and `[0.45, 0.80] m` root clearance. Sole
