@@ -396,6 +396,9 @@ class Isaac61GraspFeedbackAdapter:
         return observation
 
 
+MEASURED_JOINT_LIMIT_NOISE_RAD = 1.0e-5
+
+
 class IsaacArmApproachPort:
     """Bounded R3 right-arm pregrasp motion with a measured tool-pose gate."""
 
@@ -434,6 +437,7 @@ class IsaacArmApproachPort:
         self._goal: dict[str, float] = {}
         self._waypoints: list[dict[str, float]] = []
         self._deadline_s: float | None = None
+        self._measured_limit_noise_projection_rad: dict[str, float] = {}
         self.last_error: str | None = None
 
     def _measured_arm(self) -> dict[str, float]:
@@ -442,13 +446,40 @@ class IsaacArmApproachPort:
         )
         return {name: row[self._dof_names.index(name)] for name in ARM_DOF_NAMES}
 
+    def _measured_arm_for_fk(self) -> dict[str, float]:
+        measured = self._measured_arm()
+        projected = dict(measured)
+        adjustments: dict[str, float] = {}
+        for name, value in measured.items():
+            limit = self.kinematics.spec.model.joint_limits[name]
+            if value < limit.lower:
+                excess = limit.lower - value
+                if excess > MEASURED_JOINT_LIMIT_NOISE_RAD:
+                    raise FeedbackUnavailableError(
+                        f"measured {name!r} is {value:.9g} rad, {excess:.9g} rad "
+                        "below its physical lower limit"
+                    )
+                projected[name] = limit.lower
+                adjustments[name] = limit.lower - value
+            elif value > limit.upper:
+                excess = value - limit.upper
+                if excess > MEASURED_JOINT_LIMIT_NOISE_RAD:
+                    raise FeedbackUnavailableError(
+                        f"measured {name!r} is {value:.9g} rad, {excess:.9g} rad "
+                        "above its physical upper limit"
+                    )
+                projected[name] = limit.upper
+                adjustments[name] = limit.upper - value
+        self._measured_limit_noise_projection_rad = adjustments
+        return projected
+
     def request_approach(self, target: ToolPose, maximum_duration_s: float) -> bool:
         if self._target is not None or self._waypoints or self._deadline_s is not None:
             return False
         if not math.isfinite(maximum_duration_s) or maximum_duration_s <= 0.0:
             return False
         try:
-            start = self._measured_arm()
+            start = self._measured_arm_for_fk()
             self._goal = self.kinematics.solve(target, start).as_mapping()
             steps = max(
                 1,
@@ -513,7 +544,7 @@ class IsaacArmApproachPort:
     def measured_error(self) -> tuple[float, float]:
         if self._target is None:
             raise FeedbackUnavailableError("arm approach was not requested")
-        measured = self.kinematics.forward(self._measured_arm())
+        measured = self.kinematics.forward(self._measured_arm_for_fk())
         position_error = math.sqrt(
             sum(
                 (measured.position_m[index] - self._target.position_m[index]) ** 2
@@ -560,6 +591,12 @@ class IsaacArmApproachPort:
             "orientation_tolerance_rad": self.orientation_tolerance_rad,
             "target_reached": self.target_reached(),
             "deadline_s": self._deadline_s,
+            "measured_joint_limit_noise_tolerance_rad": (
+                MEASURED_JOINT_LIMIT_NOISE_RAD
+            ),
+            "measured_joint_limit_noise_projection_rad": dict(
+                sorted(self._measured_limit_noise_projection_rad.items())
+            ),
             "last_error": self.last_error,
         }
 

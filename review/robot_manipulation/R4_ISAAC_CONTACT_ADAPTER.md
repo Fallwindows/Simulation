@@ -213,6 +213,37 @@ product, contact gates, and target-only command path are unchanged. CPU
 regression includes the exact measured ec103 plateau and the new joint/geometry
 bounds. No further Isaac, PhysX, or GPU run occurred before fresh exact review.
 
+## Measured joint-limit float-noise failure
+
+Exact reviewed integration `09e7526ba350d62ed6b64cc41215c2105ff9eb8b`
+(tree `93bd5b6460c406619356c5fd917366378b8f4d8c`) passed identity,
+setup, and reset, then exited before its first durable approach sample. Its
+receipt is `R4-grasp-09e7526/grasp_smoke_status.json`; the Kit log is
+`kit_20260926_074838.log`. PhysX measured `right_elbow_joint` at
+`+6.1739928e-7` rad, 0.62 microradian above the authored zero upper limit. The
+approach diagnostics passed that measured value through R3's strict command
+validator, which correctly rejected it. The runner caught the first
+measurement exception but called the same throwing diagnostics again while
+building the sample, so only a top-level `status=error` receipt survived and
+the launcher surfaced exit 0.
+
+The correction keeps R3 command validation unchanged. At the R4 measured-FK
+boundary only, finite joint observations no farther than `1e-5` rad outside an
+authored limit are projected to that exact limit. The raw articulation reading
+remains available in adapter evidence, and approach diagnostics record every
+projection and the tolerance. A larger measured excursion fails closed. The
+same `+6.1739928e-7` value remains invalid when submitted as a command target;
+no target violation is hidden or clamped.
+
+Adapter and approach diagnostics are now captured as explicit unavailable
+records if evidence generation fails, so they cannot prevent the causal sample
+and terminal fail receipt from being written. The module entrypoint defaults
+to exit 1, prints any escaped exception, flushes streams, and always uses the
+existing hard-exit path. CPU regressions cover the exact measured value, a
+larger violation, strict command rejection, durable diagnostic failure, and
+native exit 1. No Isaac, PhysX, or GPU rerun occurred before fresh exact
+review.
+
 ## Source-only validation limits
 
 CPU fakes cover path resolution, impulse conversion, orientation conversion,
