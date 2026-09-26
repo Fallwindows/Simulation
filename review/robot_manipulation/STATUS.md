@@ -4,7 +4,7 @@ Updated: 2026-09-26
 
 Overall restocking goal: **in progress; R8 not complete**
 
-Current task: **RST-001 R1 code candidate under review preparation**
+Current task: **R2 locomotion source approved; feedback adapter under independent review**
 
 ## Current result
 
@@ -69,3 +69,11 @@ The task was configured for GPT-5.6 Sol with high reasoning effort. The worker
 runtime did not expose an independently observable model or effort identity, so
 observed model and observed effort are recorded as `unknown`.
 
+
+## R2 source and R3 reach code review outcomes (2026-09-26)
+
+The exact RST-003 locomotion source candidate db94dd139cd0e1e60a01557c25103a3c792ce9d6 / tree 29752b846a0ad72999a9c31fca251d4c32d78878 received independent approval after revisions. The reviewer confirmed the specified owner acceptance document SHA-256 7ea5ca5fa7558aa0a58bf94999adf545a7f6b53232fd155e2cc051cb15bcf0ad and the formal relevant robot input-manifest Git-blob SHA-256 8c4f698803a8e877eb714a3c1d0964d284480eb95f6fe055efec9dd2ddf2b542. The focused model/locomotion CPU suite passed 25/25. The early static review found and closed measured-step bounds, lateral-control, root-height safety, hip-yaw sign/touchdown-yaw, and invalid-feedback fault-latching issues. This approves source behavior only. Physical gait, root stability, foot tracking/contact, balance, support margin, drive tuning, route, stop/dock, and repeatability remain open pending R2 Isaac/PhysX validation.
+
+RST-004 runtime feedback adapter and R2 smoke harness candidate 208642a5c363a7b91905926f86c553330855562d / tree c2b1e4190b6332df1dc85d96135a82da39b54420, based on the approved RST-003 candidate, passes 22 focused CPU tests and statically binds to Isaac Sim 6.1 measured articulation, contact, mass, COM, and simulation-time APIs. It has not run in Isaac, PhysX, or on the GPU; the first exact independent review returned REQUEST_CHANGES: the harness must hash the actual owner spec and production_manifest.json, and revalidate the source/runtime identity vector at each repeat and before final success. A revision is underway; no R2 runtime gate is claimed passed.
+
+The RST-005 arm-reach source candidate 6b297645a889c376b44969b62e3e39f471584383 / tree 5f9dad7cdb94069656cd6672fc1f0d4688698c31 is independently approved with zero findings. Its focused arm-reach and production-model CPU tests passed 18/18. The review confirmed the corrected weighted-DLS merit function converges for the previously missed reachable near-target case. This is a CPU/source approval only; physical reach, support during arm motion, and collision clearance remain open.
