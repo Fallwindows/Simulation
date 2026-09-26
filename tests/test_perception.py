@@ -1049,10 +1049,54 @@ class PerceptionTests(unittest.TestCase):
             self.assertFalse(localization["lidar_input_stream_read"])
             self.assertEqual(localization["raw_lidar_message_count"], 0)
             self.assertEqual(localization["valid_decoded_scan_count"], 0)
+            self.assertEqual(localization["usable_finite_scan_count"], 0)
             self.assertEqual(localization["pose_covered_scan_count"], 0)
             self.assertEqual(localization["projected_point_count"], 0)
             self.assertEqual(localization["track_count_with_3d_estimate"], 0)
             self.assertIn("lidar_message_count_mismatch", localization["reason"])
+
+    def test_nonfinite_lidar_scan_cannot_satisfy_sealed_count(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            rows = [
+                {"timestamp_s": 0.0, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0,
+                 "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0, "frame_id": "map"},
+                {"timestamp_s": 0.1, "x_m": 0.1, "y_m": 0.0, "z_m": 0.0,
+                 "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0, "frame_id": "map"},
+            ]
+            odom_rows = [{**row, "x_m": 0.0, "frame_id": "odom"} for row in rows]
+            slam = _write_pose_contract_case(root, "mixed_finite_lidar", rows, odom_rows)
+            geometry = {
+                "rig_lidar_t": np.zeros(3), "rig_lidar_r": np.eye(3),
+                "rig_camera_t": np.zeros(3), "rig_camera_r": np.eye(3),
+                "link_optical_r": np.eye(3), "fx": 1.0, "fy": 1.0, "cx": 50.0, "cy": 50.0,
+            }
+            frames = [{"frame_index": 0, "stamp_s": 0.0, "width": 100, "height": 100}]
+            annotations = [{
+                "frame_index": 0,
+                "detections": [{"track_id": 1, "raw_track_id": 1, "bbox_xyxy": [0, 0, 99, 99]}],
+            }]
+            points = np.asarray([[-0.01, 0.0, 2.0], [0.0, 0.0, 2.0], [0.01, 0.0, 2.0]])
+
+            def mixed_reader(_bag, diagnostics=None):
+                diagnostics.update(
+                    raw_lidar_message_count=2,
+                    valid_decoded_scan_count=2,
+                    usable_finite_scan_count=1,
+                )
+                return [(0.01, points, np.asarray([0, 1, 2]))]
+
+            with patch("simulator.perception.rgb_tracking._load_sensor_geometry", return_value=geometry), \
+                 patch("simulator.perception.rgb_tracking._read_lidar_scans", side_effect=mixed_reader):
+                estimates, _, localization, _ = _augment_with_lidar_estimates(
+                    root / "capture", slam, frames, annotations, expected_lidar_message_count=2
+                )
+            self.assertIn(1, estimates, "the finite scan should prove the failure is exact coverage, not no support")
+            self.assertEqual(localization["raw_lidar_message_count"], 2)
+            self.assertEqual(localization["valid_decoded_scan_count"], 2)
+            self.assertEqual(localization["usable_finite_scan_count"], 1)
+            self.assertEqual(localization["status"], "incomplete")
+            self.assertIn("usable_finite_scan_count_mismatch", localization["reason"])
 
     def test_generic_validator_rejects_self_declared_legacy_waiver(self):
         legacy = {
@@ -1075,6 +1119,13 @@ class PerceptionTests(unittest.TestCase):
             output = Path(fixture["perception"])
             manifest_path = slam / "slam_manifest.json"
             original = manifest_path.read_bytes()
+            payload = json.loads(original)
+            payload.pop("observer")
+            payload.pop("observer_artifact")
+            manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "requires canonical SLAM observer provenance"):
+                build_perception_input_bindings(capture, slam, output)
+
             payload = json.loads(original)
             payload["ground_truth_subscribed"] = True
             manifest_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -1127,6 +1178,7 @@ class PerceptionTests(unittest.TestCase):
                 "expected_lidar_message_count": 2,
                 "raw_lidar_message_count": 2,
                 "valid_decoded_scan_count": 2,
+                "usable_finite_scan_count": 2,
                 "pose_covered_scan_count": 1,
                 "projected_scan_count": 1,
                 "projected_point_count": 3,

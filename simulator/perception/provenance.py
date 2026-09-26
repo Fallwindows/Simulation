@@ -176,19 +176,20 @@ def build_perception_input_bindings(
 
     observer = slam.get("observer")
     observer_binding = slam.get("observer_artifact")
-    if observer is not None or observer_binding is not None:
-        if not isinstance(observer, dict) or not isinstance(observer_binding, dict):
-            raise ValueError("SLAM observer provenance is incomplete")
-        if observer.get("ground_truth_subscribed") is not False:
-            raise ValueError("perception cannot consume a truth-subscribed SLAM observer")
-        observer_path = _resolved_child(slam_root, str(observer_binding.get("path", "")), "SLAM observer")
-        observer_sha = str(observer_binding.get("sha256", "")).lower()
-        if not SHA256_PATTERN.fullmatch(observer_sha) or sha256_file(observer_path) != observer_sha:
-            raise ValueError("SLAM observer bytes do not match its producer binding")
-        if int(observer_binding.get("size_bytes", -1)) != observer_path.stat().st_size:
-            raise ValueError("SLAM observer size does not match its producer binding")
-        if _json(observer_path) != observer:
-            raise ValueError("embedded and file-backed SLAM observer provenance differ")
+    if not isinstance(observer, dict) or not isinstance(observer_binding, dict):
+        raise ValueError("modern perception requires canonical SLAM observer provenance")
+    if observer_binding.get("path") != "slam_observer.json":
+        raise ValueError("SLAM observer binding must name canonical slam_observer.json")
+    if observer.get("ground_truth_subscribed") is not False:
+        raise ValueError("perception cannot consume a truth-subscribed SLAM observer")
+    observer_path = _resolved_child(slam_root, "slam_observer.json", "SLAM observer")
+    observer_sha = str(observer_binding.get("sha256", "")).lower()
+    if not SHA256_PATTERN.fullmatch(observer_sha) or sha256_file(observer_path) != observer_sha:
+        raise ValueError("SLAM observer bytes do not match its producer binding")
+    if int(observer_binding.get("size_bytes", -1)) != observer_path.stat().st_size:
+        raise ValueError("SLAM observer size does not match its producer binding")
+    if _json(observer_path) != observer:
+        raise ValueError("embedded and file-backed SLAM observer provenance differ")
 
     artifacts = slam.get("artifacts")
     trajectory_binding = next(

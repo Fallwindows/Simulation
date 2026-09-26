@@ -931,6 +931,8 @@ def _read_lidar_scans(bag_dir: Path, diagnostics: dict[str, int] | None = None):
             diagnostics["valid_decoded_scan_count"] = diagnostics.get("valid_decoded_scan_count", 0) + 1
         source_indices = _select_lidar_point_indices(points)
         if len(source_indices):
+            if diagnostics is not None:
+                diagnostics["usable_finite_scan_count"] = diagnostics.get("usable_finite_scan_count", 0) + 1
             stamp = float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0
             yield stamp, points[source_indices], source_indices
 
@@ -1182,16 +1184,21 @@ def _augment_with_lidar_estimates(
         }
     raw_lidar_message_count = int(lidar_read_diagnostics.get("raw_lidar_message_count", yielded_scan_count))
     valid_decoded_scan_count = int(lidar_read_diagnostics.get("valid_decoded_scan_count", yielded_scan_count))
+    usable_finite_scan_count = int(lidar_read_diagnostics.get("usable_finite_scan_count", yielded_scan_count))
     incomplete_reasons = []
     if raw_lidar_message_count <= 0:
         incomplete_reasons.append("no_lidar_messages_read")
     if valid_decoded_scan_count <= 0:
         incomplete_reasons.append("no_valid_lidar_scans_decoded")
+    if usable_finite_scan_count <= 0:
+        incomplete_reasons.append("no_finite_usable_lidar_scans")
     if expected_lidar_message_count is not None:
         if raw_lidar_message_count != expected_lidar_message_count:
             incomplete_reasons.append("lidar_message_count_mismatch")
         if valid_decoded_scan_count != expected_lidar_message_count:
             incomplete_reasons.append("valid_lidar_scan_count_mismatch")
+        if usable_finite_scan_count != expected_lidar_message_count:
+            incomplete_reasons.append("usable_finite_scan_count_mismatch")
     if pose_covered_scan_count <= 0:
         incomplete_reasons.append("no_pose_covered_lidar_scans")
     if projected_scan_count <= 0 or projected_point_count <= 0:
@@ -1229,6 +1236,7 @@ def _augment_with_lidar_estimates(
         "expected_lidar_message_count": expected_lidar_message_count,
         "raw_lidar_message_count": raw_lidar_message_count,
         "valid_decoded_scan_count": valid_decoded_scan_count,
+        "usable_finite_scan_count": usable_finite_scan_count,
         "unique_lidar_scan_count": len(seen_scan_stamps),
         "pose_covered_scan_count": pose_covered_scan_count,
         "projected_scan_count": projected_scan_count,
@@ -1629,6 +1637,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             int(localization.get("expected_lidar_message_count", -1)) == expected_lidar_messages,
             int(localization.get("raw_lidar_message_count", -1)) == expected_lidar_messages,
             int(localization.get("valid_decoded_scan_count", -1)) == expected_lidar_messages,
+            int(localization.get("usable_finite_scan_count", -1)) == expected_lidar_messages,
         )
         positive_support = (
             int(localization.get("pose_covered_scan_count", 0)) > 0,
