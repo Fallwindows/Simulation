@@ -488,6 +488,7 @@ class SlamObserver:
         self.map_data_graph_fingerprint: str | None = None
         self.map_graph_fingerprint: str | None = None
         self.cached_cloud_graph_fingerprint: str | None = None
+        self.cached_cloud_payload_fingerprint: str | None = None
         self.final_cloud_graph_fingerprint: str | None = None
         self.map_cloud_identity_state: str | None = None
         self.final_cloud_origin: str | None = None
@@ -736,6 +737,7 @@ class SlamObserver:
         if not self.latest_map or any(not all(math.isfinite(float(value)) for value in point) for point in self.latest_map):
             raise RuntimeError("pre-request map cloud is empty or contains non-finite points")
         self.cached_cloud_graph_fingerprint = baseline_graph_fingerprint
+        self.cached_cloud_payload_fingerprint = self.map_cloud_payload_fingerprint
         self.cached_cloud_points = list(self.latest_map)
         self.cached_cloud_stamp_s = self.map_stamp_s
         self.cached_cloud_frame_id = self.map_cloud_frame_id
@@ -749,8 +751,6 @@ class SlamObserver:
         if max_attempts <= 0:
             raise RuntimeError("PublishMap retry count must be positive")
         overall_deadline = time.monotonic() + self.close_timeout_s
-        observed_graph_fingerprints: set[str] = set()
-        observed_cloud_payload_fingerprints: set[str] = set()
 
         for attempt in range(1, max_attempts + 1):
             now = time.monotonic()
@@ -787,6 +787,7 @@ class SlamObserver:
                 "graph_fingerprints": [],
                 "cloud_payload_fingerprints": [],
                 "source_graph_identity": None,
+                "cloud_identity_state": None,
                 "accepted": False,
             }
             self.publish_map_attempt_receipts.append(attempt_receipt)
@@ -842,49 +843,64 @@ class SlamObserver:
                 if fresh_graph:
                     graph_fingerprint = _map_graph_fingerprint(self.map_graph_message)
                     attempt_graph_fingerprints.add(graph_fingerprint)
-                    observed_graph_fingerprints.add(graph_fingerprint)
                 if fresh_data:
                     data_graph = getattr(self.map_data_message, "graph", None)
                     if data_graph is None:
                         raise RuntimeError("fresh post-request /mapData omitted its graph payload")
                     data_fingerprint = _map_graph_fingerprint(data_graph)
                     attempt_graph_fingerprints.add(data_fingerprint)
-                    observed_graph_fingerprints.add(data_fingerprint)
                 if fresh_cloud:
                     cloud_payload_fingerprint = self.map_cloud_payload_fingerprint
                     if cloud_payload_fingerprint is None:
                         raise RuntimeError("fresh post-request cloud omitted its raw payload fingerprint")
                     attempt_cloud_payload_fingerprints.add(cloud_payload_fingerprint)
-                    observed_cloud_payload_fingerprints.add(cloud_payload_fingerprint)
                 attempt_receipt["graph_fingerprints"] = sorted(attempt_graph_fingerprints)
                 attempt_receipt["cloud_payload_fingerprints"] = sorted(attempt_cloud_payload_fingerprints)
-                if len(observed_graph_fingerprints) > 1 or len(observed_cloud_payload_fingerprints) > 1:
-                    raise RuntimeError(
-                        "PublishMap retries emitted inconsistent graph or raw cloud payload fingerprints"
-                    )
 
-                exact_triplet = fresh_cloud and fresh_graph and fresh_data
-                if exact_triplet:
+                fresh_graph_pair = fresh_graph and fresh_data
+                cloud_cohort_ready = False
+                cloud_span_stamp: float | None = None
+                if fresh_graph_pair:
                     if not (
-                        self.map_graph_stamp_s == self.map_data_stamp_s == self.map_stamp_s
-                        and self.final_map_graph_frame_id == self.map_data_frame_id == self.map_cloud_frame_id == "map"
+                        self.map_graph_stamp_s == self.map_data_stamp_s
+                        and self.final_map_graph_frame_id == self.map_data_frame_id == "map"
                     ):
-                        raise RuntimeError("fresh PublishMap graph/data/cloud triplet does not share one map-frame stamp")
+                        raise RuntimeError("fresh PublishMap /mapData and /mapGraph do not share one map-frame stamp")
                     if data_fingerprint != graph_fingerprint:
                         raise RuntimeError("fresh PublishMap /mapData and /mapGraph fingerprints differ")
                     source_receipt = _optimized_graph_receipt(self.map_data_message)
                     attempt_receipt["source_graph_identity"] = str(source_receipt["source_graph_identity"])
                     if str(source_receipt["source_graph_identity"]) != self.pre_publish_source_graph_identity:
                         raise RuntimeError("immutable RTAB-Map source graph changed between GetMap and PublishMap")
+                    if fresh_cloud:
+                        if not (
+                            self.map_stamp_s == self.map_graph_stamp_s
+                            and self.map_cloud_frame_id == "map"
+                        ):
+                            raise RuntimeError("fresh PublishMap cloud does not share the graph stamp and map frame")
+                        cloud_cohort_ready = True
+                        cloud_span_stamp = self.map_stamp_s
+                        attempt_receipt["cloud_identity_state"] = "fresh_shared_publication"
+                    elif (
+                        self.cached_cloud_points is not None
+                        and self.cached_cloud_stamp_s == self.map_graph_stamp_s
+                        and self.cached_cloud_frame_id == "map"
+                        and self.cached_cloud_graph_fingerprint == graph_fingerprint
+                        and self.cached_cloud_payload_fingerprint is not None
+                    ):
+                        cloud_cohort_ready = True
+                        cloud_span_stamp = self.cached_cloud_stamp_s
+                        attempt_receipt["cloud_identity_state"] = "cached_exact_graph_reuse"
                     self.final_map_span = (
-                        self.map_stamp_s is not None
+                        cloud_cohort_ready
+                        and cloud_span_stamp is not None
                         and self.expected_sensor_last_stamp_s is not None
-                        and self.map_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
+                        and cloud_span_stamp >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
                     )
                 if self.map_publication_generation != last_generation:
                     quiet_since = None
                     last_generation = self.map_publication_generation
-                elif exact_triplet and self.final_map_span:
+                elif fresh_graph_pair and cloud_cohort_ready and self.final_map_span:
                     if quiet_since is None:
                         quiet_since = now
                     elif now - quiet_since >= 1.0:
@@ -924,17 +940,35 @@ class SlamObserver:
         self.map_data_matches_map_graph = self.map_data_graph_fingerprint == self.map_graph_fingerprint
         if not self.map_data_matches_map_graph:
             raise RuntimeError("/mapGraph and /mapData graph payloads differ despite matching publication stamps")
-        if (
-            self.map_cloud_callbacks <= self.map_cloud_callbacks_before_publish
-            or self.map_messages <= self.map_messages_before_publish
-            or self.map_stamp_s != self.map_graph_stamp_s
-            or self.map_cloud_frame_id != "map"
-            or self.map_cloud_payload_fingerprint is None
-        ):
-            raise RuntimeError("fresh post-request cloud does not share the settled graph stamp and map frame")
-        self.final_cloud_origin = "fresh_post_publish"
-        self.map_cloud_identity_state = "fresh_shared_publication"
-        self.final_cloud_payload_fingerprint = self.map_cloud_payload_fingerprint
+        fresh_cloud = (
+            self.map_cloud_callbacks > self.map_cloud_callbacks_before_publish
+            and self.map_messages > self.map_messages_before_publish
+        )
+        if fresh_cloud:
+            if (
+                self.map_stamp_s != self.map_graph_stamp_s
+                or self.map_cloud_frame_id != "map"
+                or self.map_cloud_payload_fingerprint is None
+            ):
+                raise RuntimeError("fresh post-request cloud does not share the settled graph stamp and map frame")
+            self.final_cloud_origin = "fresh_post_publish"
+            self.map_cloud_identity_state = "fresh_shared_publication"
+            self.final_cloud_payload_fingerprint = self.map_cloud_payload_fingerprint
+        else:
+            if (
+                self.cached_cloud_points is None
+                or self.cached_cloud_stamp_s != self.map_graph_stamp_s
+                or self.cached_cloud_frame_id != "map"
+                or self.cached_cloud_graph_fingerprint != self.map_graph_fingerprint
+                or self.cached_cloud_payload_fingerprint is None
+            ):
+                raise RuntimeError("cached cloud does not exactly match the final graph fingerprint, stamp, and map frame")
+            self.latest_map = list(self.cached_cloud_points)
+            self.map_stamp_s = self.cached_cloud_stamp_s
+            self.map_cloud_frame_id = self.cached_cloud_frame_id
+            self.final_cloud_origin = "cached_pre_publish"
+            self.map_cloud_identity_state = "cached_exact_graph_reuse"
+            self.final_cloud_payload_fingerprint = self.cached_cloud_payload_fingerprint
         if not self.latest_map or self.map_stamp_s is None or not math.isfinite(float(self.map_stamp_s)) or any(not all(math.isfinite(float(value)) for value in point) for point in self.latest_map):
             raise RuntimeError("RTAB-Map final cloud is empty or contains non-finite points")
         self.final_cloud_graph_fingerprint = self.map_graph_fingerprint
@@ -1250,6 +1284,7 @@ class SlamObserver:
             "map_graph_fingerprint": getattr(self, "map_graph_fingerprint", None),
             "map_data_matches_map_graph": getattr(self, "map_data_matches_map_graph", False),
             "cached_cloud_graph_fingerprint": getattr(self, "cached_cloud_graph_fingerprint", None),
+            "cached_cloud_payload_fingerprint": getattr(self, "cached_cloud_payload_fingerprint", None),
             "final_cloud_graph_fingerprint": getattr(self, "final_cloud_graph_fingerprint", None),
             "final_cloud_payload_fingerprint": getattr(self, "final_cloud_payload_fingerprint", None),
             "map_cloud_identity_state": getattr(self, "map_cloud_identity_state", None),
