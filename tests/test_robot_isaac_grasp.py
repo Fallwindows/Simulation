@@ -77,13 +77,17 @@ class FakePose:
         self.position = list(position)
         x, y, z, w = orientation_xyzw
         self.orientation_wxyz = [w, x, y, z]
-        self.velocity = [0.0] * 6
+        self.linear_velocity = [0.0] * 3
+        self.angular_velocity = [0.0] * 3
 
     def get_world_poses(self):
         return FakeArray([self.position]), FakeArray([self.orientation_wxyz])
 
     def get_velocities(self):
-        return FakeArray([self.velocity])
+        return (
+            FakeArray([self.linear_velocity]),
+            FakeArray([self.angular_velocity]),
+        )
 
 
 class Reading:
@@ -270,6 +274,35 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertEqual(
             diagnostics["raw_contacts"][1]["body1"], self.paths["right_thumb_dp"]
         )
+
+    def test_product_velocity_uses_installed_split_rigid_prim_shape(self):
+        adapter, _, _, product, _, clock, _ = self.make_adapter()
+        product.linear_velocity = [0.125, -0.25, 0.5]
+        product.angular_velocity = [-0.75, 1.0, -1.25]
+        adapter.read_observation()
+        velocity = adapter.diagnostics()["product_velocity_world"]
+        self.assertEqual(velocity["linear_m_s"], (0.125, -0.25, 0.5))
+        self.assertEqual(velocity["angular_rad_s"], (-0.75, 1.0, -1.25))
+
+        product.get_velocities = lambda: FakeArray([[0.0] * 6])
+        clock[0] += 0.01
+        with self.assertRaisesRegex(FeedbackUnavailableError, "linear, angular"):
+            adapter.read_observation()
+
+        product.get_velocities = lambda: (
+            FakeArray([[0.0, 0.0]]), FakeArray([[0.0, 0.0, math.nan]])
+        )
+        clock[0] += 0.01
+        with self.assertRaisesRegex(FeedbackUnavailableError, r"shape \(3,\)"):
+            adapter.read_observation()
+
+        product.get_velocities = lambda: (
+            FakeArray([[0.0, 0.0, 0.0]]),
+            FakeArray([[0.0, 0.0, math.nan]]),
+        )
+        clock[0] += 0.01
+        with self.assertRaisesRegex(FeedbackUnavailableError, "nonfinite"):
+            adapter.read_observation()
 
     def test_marker_or_unbound_body_path_fails_closed(self):
         adapter, _, _, _, _, _, handles = self.make_adapter([(1, 9, 0.01)])

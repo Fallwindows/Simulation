@@ -43,7 +43,7 @@ class PoseBackend(Protocol):
 
 
 class VelocityBackend(Protocol):
-    def get_velocities(self): ...
+    def get_velocities(self) -> tuple[object, object]: ...
 
 
 class ContactReading(Protocol):
@@ -86,6 +86,16 @@ def _single_row(value, columns: int, label: str) -> tuple[float, ...]:
     if not isinstance(value, (list, tuple)) or len(value) != 1:
         raise FeedbackUnavailableError(f"{label} must have shape (1, {columns})")
     return _vector(value[0], columns, f"{label} row")
+
+
+def _single_rigid_velocity(value: object) -> tuple[float, ...]:
+    if not isinstance(value, tuple) or len(value) != 2:
+        raise FeedbackUnavailableError(
+            "product velocity must be the (linear, angular) tuple returned by RigidPrim"
+        )
+    linear = _single_row(value[0], 3, "product linear velocity")
+    angular = _single_row(value[1], 3, "product angular velocity")
+    return linear + angular
 
 
 def _xyz(value: object, label: str) -> tuple[float, float, float]:
@@ -332,9 +342,7 @@ class Isaac61GraspFeedbackAdapter:
         }
         velocity = None
         if self.product_velocity is not None:
-            velocity = _single_row(
-                self.product_velocity.get_velocities(), 6, "product velocity"
-            )
+            velocity = _single_rigid_velocity(self.product_velocity.get_velocities())
         targets: dict[str, float] = {}
         if self.joint_target_source is not None:
             raw_targets = self.joint_target_source()

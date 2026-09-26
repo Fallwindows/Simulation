@@ -153,6 +153,32 @@ so the entry point now flushes streams and uses the established hard-exit path
 to propagate its computed 0/1 result through `python.bat`. No further Isaac run
 occurred before fresh review.
 
+## First measured-approach adapter failure
+
+Exact reviewed integration `e95721e641ea6a82ee53b4e49f118fe0574a0df4`
+(tree `6212d73543a4ea3d80571dd6806a61bf274288a3`) passed identity
+preflight, setup, and reset. Its durable receipt is
+`R4-grasp-e95721e/grasp_smoke_status.json`; the Kit log is
+`kit_20260926_073835.log`. The first approach sample at step 0 recorded four
+physical product/support contacts with aggregate force about 3.455 N, zero
+approach confirmations, and no finger or lift command. It then failed closed
+with `arm approach measurement failed: product velocity must have shape (1,
+6)`.
+
+The installed Isaac 6.1 experimental `RigidPrim.get_velocities()` contract in
+`isaacsim.core.experimental.prims/.../impl/rigid_prim.py` returns a tuple of
+linear and angular arrays, each shape `(N, 3)`. The inspected installed file has
+SHA-256
+`4b3da8b14df262c09ef1e19b4deef67ad9e29525255d2463d4e17808ce93bb67`.
+The adapter had incorrectly treated that tuple as one `(1, 6)` array. The
+source correction reads both measured arrays, requires exactly one finite
+three-component row from each, and concatenates them only for diagnostics. It
+does not substitute zeros, set velocity, move the product, relax contact
+checks, or change the approach/grasp controller. CPU tests cover the installed
+split return shape and reject the old combined shape, malformed rows, and
+nonfinite components. No further Isaac, PhysX, or GPU run occurred before
+fresh exact review.
+
 ## Source-only validation limits
 
 CPU fakes cover path resolution, impulse conversion, orientation conversion,
