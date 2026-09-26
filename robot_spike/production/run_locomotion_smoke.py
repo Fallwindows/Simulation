@@ -16,7 +16,7 @@ from pathlib import Path
 import subprocess
 import sys
 import traceback
-from typing import Any
+from typing import Any, Callable
 
 from robot_spike.production.isaac_feedback import (
     ASIMOV_SOLE_GEOMETRY,
@@ -35,13 +35,20 @@ from robot_spike.production.runtime import ArticulationController, IsaacRobotLoa
 
 
 OWNER_SPEC_SHA256 = "7ea5ca5fa7558aa0a58bf94999adf545a7f6b53232fd155e2cc051cb15bcf0ad"
+OWNER_SPEC_PATH = Path(
+    "C:/Users/suyog/.codex/visualizations/2026/09/26/"
+    "01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e/"
+    "ROBOT_BACKROOM_RESTOCKING_IMPLEMENTATION_SPEC.md"
+)
 EVIDENCE_FILES = (
     "robot_spike/production/isaac_feedback.py",
     "robot_spike/production/locomotion.py",
     "robot_spike/production/model.py",
     "robot_spike/production/runtime.py",
     "robot_spike/production/robot_config.json",
+    "robot_spike/production/production_manifest.json",
     "robot_spike/production/asimov_orcahand_restocking.urdf",
+    "robot_spike/asimov_orcahand_right.urdf",
     "robot_spike/production/run_locomotion_smoke.py",
     "tests/test_robot_isaac_feedback.py",
     "review/robot_manipulation/LOCOMOTION_CONTROL.md",
@@ -62,7 +69,7 @@ def _arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expected-candidate-sha", required=True)
     parser.add_argument("--expected-candidate-tree-sha", required=True)
-    parser.add_argument("--acceptance-spec-sha256", default=OWNER_SPEC_SHA256)
+    parser.add_argument("--acceptance-spec", type=Path, default=OWNER_SPEC_PATH)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--forward-m", type=float, default=0.06)
     parser.add_argument("--physics-hz", type=int, default=120)
@@ -97,14 +104,21 @@ def _git(repo: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def source_identity(repo: Path, expected_candidate: str, expected_tree: str) -> dict[str, Any]:
-    """Fail before SimulationApp when source is dirty or the requested snapshot differs."""
+def source_identity(
+    repo: Path,
+    expected_candidate: str,
+    expected_tree: str,
+    *,
+    require_clean: bool = True,
+) -> dict[str, Any]:
+    """Read the exact candidate and every directly consumed source input."""
 
     candidate = _git(repo, "rev-parse", "HEAD")
     tree = _git(repo, "rev-parse", "HEAD^{tree}")
-    dirty = _git(repo, "status", "--porcelain=v1")
-    if dirty:
-        raise RuntimeError(f"refusing to run from a dirty worktree:\n{dirty}")
+    if require_clean:
+        dirty = _git(repo, "status", "--porcelain=v1")
+        if dirty:
+            raise RuntimeError(f"refusing to run from a dirty worktree:\n{dirty}")
     if candidate != expected_candidate:
         raise RuntimeError(
             f"candidate mismatch: expected {expected_candidate}, checked out {candidate}"
@@ -122,6 +136,141 @@ def source_identity(repo: Path, expected_candidate: str, expected_tree: str) -> 
         "candidate_tree_sha": tree,
         "source_files_sha256": hashes,
     }
+
+
+def acceptance_spec_identity(
+    path: Path, expected_sha256: str = OWNER_SPEC_SHA256
+) -> dict[str, str]:
+    """Hash the actual acceptance-spec bytes and reject any mismatch."""
+
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise RuntimeError(f"acceptance specification is missing: {resolved}")
+    observed = _sha256(resolved)
+    if observed != expected_sha256:
+        raise RuntimeError(
+            "acceptance specification SHA-256 mismatch: "
+            f"expected {expected_sha256}, observed {observed} at {resolved}"
+        )
+    return {
+        "path": str(resolved),
+        "sha256": observed,
+        "expected_sha256": expected_sha256,
+    }
+
+
+def evidence_identity(
+    repo: Path,
+    expected_candidate: str,
+    expected_tree: str,
+    acceptance_spec: Path,
+    *,
+    require_clean: bool,
+    isaac_root: Path = Path("C:/isaacsim"),
+) -> dict[str, Any]:
+    """Read the complete owner-spec, source/input, and installed-API vector."""
+
+    return {
+        "acceptance_spec": acceptance_spec_identity(acceptance_spec),
+        "source": source_identity(
+            repo,
+            expected_candidate,
+            expected_tree,
+            require_clean=require_clean,
+        ),
+        "installed_isaac": installed_isaac_identity(isaac_root),
+    }
+
+
+def _identity_sha256(identity: dict[str, Any]) -> str:
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _identity_mismatches(expected: object, observed: object, path: str = "identity") -> list[str]:
+    if isinstance(expected, dict) and isinstance(observed, dict):
+        mismatches: list[str] = []
+        for key in sorted(set(expected) | set(observed)):
+            child = f"{path}.{key}"
+            if key not in observed:
+                mismatches.append(f"{child}: missing")
+            elif key not in expected:
+                mismatches.append(f"{child}: unexpected")
+            else:
+                mismatches.extend(_identity_mismatches(expected[key], observed[key], child))
+        return mismatches
+    if expected != observed:
+        return [f"{path}: expected {expected!r}, observed {observed!r}"]
+    return []
+
+
+class EvidenceIdentityMismatchError(RuntimeError):
+    """A repeat/final boundary no longer matches the initial identity vector."""
+
+    def __init__(self, check: dict[str, Any]):
+        self.check = check
+        detail = check.get("error") or "; ".join(check.get("mismatches", ()))
+        super().__init__(f"evidence identity check {check['phase']!r} failed: {detail}")
+
+
+class EvidenceIdentityGuard:
+    """Re-read and compare evidence identity at deterministic run boundaries."""
+
+    def __init__(
+        self,
+        initial_identity: dict[str, Any],
+        identity_reader: Callable[[], dict[str, Any]],
+    ) -> None:
+        self.initial_identity = initial_identity
+        self.identity_reader = identity_reader
+        self.checks: list[dict[str, Any]] = []
+
+    def check(self, phase: str) -> dict[str, Any]:
+        check: dict[str, Any] = {"phase": phase}
+        try:
+            observed = self.identity_reader()
+        except Exception as exc:
+            check.update(
+                {
+                    "status": "error",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            self.checks.append(check)
+            raise EvidenceIdentityMismatchError(check) from exc
+        mismatches = _identity_mismatches(self.initial_identity, observed)
+        check.update(
+            {
+                "status": "match" if not mismatches else "mismatch",
+                "observed_identity_sha256": _identity_sha256(observed),
+                "mismatches": mismatches,
+            }
+        )
+        self.checks.append(check)
+        if mismatches:
+            raise EvidenceIdentityMismatchError(check)
+        return check
+
+
+def _record_identity_boundary(
+    guard: EvidenceIdentityGuard,
+    phase: str,
+    result: dict[str, Any],
+    status_path: Path,
+    repeat_result: dict[str, Any] | None = None,
+) -> None:
+    """Persist a boundary check, including a mismatch, before continuing or failing."""
+
+    try:
+        check = guard.check(phase)
+    except EvidenceIdentityMismatchError as exc:
+        check = exc.check
+        raise
+    finally:
+        if "check" in locals() and repeat_result is not None:
+            repeat_result["identity_checks"].append(check)
+        status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
 
 
 class _RecordingFeedbackSource:
@@ -265,7 +414,7 @@ def installed_isaac_identity(isaac_root: Path = Path("C:/isaacsim")) -> dict[str
         "version": version,
         "api_source_files_sha256": files,
         "contact_raw_data_world_frame_documentation": (
-            "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/py/api/"
+            "https://docs.isaacsim.omniverse.nvidia.com/6.1.0/py/api/"
             "structisaacsim_1_1sensors_1_1experimental_1_1physics_1_1_contact_raw_data.html"
         ),
     }
@@ -301,8 +450,7 @@ def _maximum_lagged_target_error(samples: list[dict[str, Any]]) -> float:
 def run_isaac(
     args: argparse.Namespace,
     repo: Path,
-    identity: dict[str, Any],
-    isaac_identity: dict[str, Any],
+    initial_identity: dict[str, Any],
     output: Path,
 ) -> dict[str, Any]:
     # All Isaac imports remain below this boundary.  Calling this function is
@@ -395,12 +543,22 @@ def run_isaac(
             SimulationManager.get_simulation_time,
             maximum_contact_age_s=2.5 * physics_dt,
         )
+        guard = EvidenceIdentityGuard(
+            initial_identity,
+            lambda: evidence_identity(
+                repo,
+                args.expected_candidate_sha,
+                args.expected_candidate_tree_sha,
+                args.acceptance_spec,
+                require_clean=False,
+            ),
+        )
         result: dict[str, Any] = {
             "schema_version": 1,
             "status": "running",
-            "acceptance_spec_sha256": args.acceptance_spec_sha256,
-            "source_identity": identity,
-            "installed_isaac_identity": isaac_identity,
+            "initial_evidence_identity": initial_identity,
+            "initial_evidence_identity_sha256": _identity_sha256(initial_identity),
+            "identity_checks": guard.checks,
             "runtime": {
                 "physics_engine": "physx",
                 "physics_hz": args.physics_hz,
@@ -446,9 +604,17 @@ def run_isaac(
                 "repeat_index": repeat_index,
                 "status": "running",
                 "samples_path": sample_path.name,
+                "identity_checks": [],
             }
             result["repeats"].append(repeat_result)
             status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            _record_identity_boundary(
+                guard,
+                f"repeat_{repeat_index}_start",
+                result,
+                status_path,
+                repeat_result,
+            )
             # This is the only state-writing operation in a repeat.  Every
             # later robot command is a drive target and physics advances state.
             joint_controller.reset()
@@ -482,6 +648,13 @@ def run_isaac(
             if command is None:
                 raise RuntimeError("locomotion loop did not execute")
             metrics = _repeat_metrics(samples, command, target)
+            _record_identity_boundary(
+                guard,
+                f"repeat_{repeat_index}_end",
+                result,
+                status_path,
+                repeat_result,
+            )
             repeat_result.update(
                 {
                     "status": metrics["status"],
@@ -490,23 +663,20 @@ def run_isaac(
                     "samples_sha256": _sha256(sample_path),
                 }
             )
-            result["status"] = (
-                "pass"
-                if len(result["repeats"]) == args.repeats
-                and all(item["metrics"]["status"] == "pass" for item in result["repeats"])
-                else "fail"
-            )
+            result["status"] = "running" if metrics["status"] == "pass" else "fail"
             status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             if metrics["status"] != "pass":
                 break
 
         result["repeatability"] = _repeatability(result["repeats"])
-        result["status"] = (
-            "pass"
-            if len(result["repeats"]) == args.repeats
-            and all(item["metrics"]["status"] == "pass" for item in result["repeats"])
-            else "fail"
+        all_repeats_passed = len(result["repeats"]) == args.repeats and all(
+            item["metrics"]["status"] == "pass" for item in result["repeats"]
         )
+        if all_repeats_passed:
+            _record_identity_boundary(
+                guard, "final_success", result, status_path
+            )
+        result["status"] = "pass" if all_repeats_passed else "fail"
         status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         return result
     finally:
@@ -538,23 +708,21 @@ def _repeatability(repeats: list[dict[str, Any]]) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _arguments(argv)
-    if args.acceptance_spec_sha256 != OWNER_SPEC_SHA256:
-        raise RuntimeError(
-            "acceptance specification mismatch: this candidate is tied to "
-            f"{OWNER_SPEC_SHA256}, got {args.acceptance_spec_sha256}"
-        )
     _validate_arguments(args)
     repo = Path(__file__).resolve().parents[2]
     output = args.output.resolve()
     if output.exists():
         raise RuntimeError(f"refusing to overwrite output: {output}")
-    identity = source_identity(
-        repo, args.expected_candidate_sha, args.expected_candidate_tree_sha
+    initial_identity = evidence_identity(
+        repo,
+        args.expected_candidate_sha,
+        args.expected_candidate_tree_sha,
+        args.acceptance_spec,
+        require_clean=True,
     )
-    isaac_identity = installed_isaac_identity()
     output.mkdir(parents=True)
     try:
-        result = run_isaac(args, repo, identity, isaac_identity, output)
+        result = run_isaac(args, repo, initial_identity, output)
     except BaseException as exc:
         partial_result = None
         partial_path = output / "locomotion_smoke_status.json"
@@ -566,9 +734,8 @@ def main(argv: list[str] | None = None) -> int:
         failure = {
             "schema_version": 1,
             "status": "error",
-            "acceptance_spec_sha256": args.acceptance_spec_sha256,
-            "source_identity": identity,
-            "installed_isaac_identity": isaac_identity,
+            "initial_evidence_identity": initial_identity,
+            "initial_evidence_identity_sha256": _identity_sha256(initial_identity),
             "error_type": type(exc).__name__,
             "error": str(exc),
             "traceback": traceback.format_exc(),

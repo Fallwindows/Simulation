@@ -142,7 +142,7 @@ Local source inspection used the installed
 | Root velocity | Same file, `get_velocities()` lines 2454–2493: tensor root linear and angular velocity, each `(N,3)`. The installed underlying `omni.physics.tensors` `api.py` lines 1555–1570 identifies root velocity as global-frame; the adapter inverse-rotates both vectors into the controller's root body frame. |
 | Joint state | Same file, `get_dof_positions()` lines 1951–1994 and `get_dof_velocities()` lines 2054–2095: ordered `(N,D)` tensor reads; `dof_names` lines 221–240 supplies binding order. |
 | Link identity and pose | Same file, `link_names`/`link_paths` lines 410–455 supplies ordered link paths. `RigidPrim.get_world_poses()` in `impl\rigid_prim.py` lines 291–336 returns each link's world position and `wxyz` orientation. The future harness constructs this view before physics starts and rejects a path lacking `RigidBodyAPI`. |
-| Contact report | `C:\isaacsim\exts\isaacsim.sensors.experimental.physics\isaacsim\sensors\experimental\physics\impl\contact_sensor.py`, `get_sensor_reading()` lines 157–185 returns explicit validity, contact state, force, and time; `get_raw_data()` lines 187–200 returns body IDs, position, normal, impulse, time, and dt. `contact.py` lines 169–199 verifies a rigid-body ancestor and applies `PhysxContactReportAPI`. NVIDIA's generated `ContactRawData` API for this experimental sensor identifies x/y/z as world coordinates: `https://docs.isaacsim.omniverse.nvidia.com/6.0.0/py/api/structisaacsim_1_1sensors_1_1experimental_1_1physics_1_1_contact_raw_data.html`. |
+| Contact report | `C:\isaacsim\exts\isaacsim.sensors.experimental.physics\isaacsim\sensors\experimental\physics\impl\contact_sensor.py`, `get_sensor_reading()` lines 157–185 returns explicit validity, contact state, force, and time; `get_raw_data()` lines 187–200 returns body IDs, position, normal, impulse, time, and dt. `contact.py` lines 169–199 verifies a rigid-body ancestor and applies `PhysxContactReportAPI`. NVIDIA's generated Isaac Sim 6.1 `ContactRawData` API identifies x/y/z as world coordinates: `https://docs.isaacsim.omniverse.nvidia.com/6.1.0/py/api/structisaacsim_1_1sensors_1_1experimental_1_1physics_1_1_contact_raw_data.html`. |
 | Link masses and COM | Experimental articulation `get_link_masses()` lines 3830–3890 returns `(N,L)` and `get_link_coms()` lines 3892–3937 returns `(N,L,3/4)`. The underlying installed `omni.physics.tensors` `api.py` lines 2309–2328 explicitly says the principal-axis/COM pose is relative to and expressed in each rigid-body prim frame; the adapter composes it with the link world pose before mass weighting. |
 | Simulation time/step | `C:\isaacsim\exts\isaacsim.core.simulation_manager\isaacsim\core\simulation_manager\impl\simulation_manager.py`, `get_simulation_time()` lines 895–911 and `step()` lines 968–1021. The harness fixes and verifies physics dt before play. |
 | Support margin | Isaac supplies contact points, link state, mass, and COM rather than a ready biped support margin. The adapter's dependency-free convex-hull and signed half-space calculation is covered analytically on CPU; it fails on fewer than three non-collinear measured points. |
@@ -177,6 +177,16 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   cannot resume commands without a new controller/reset lifecycle.
 - `RST-003-R2-I01`: addressed in revision 3 with the exact acceptance-spec path
   and SHA-256 plus one formal raw-Git-blob input-manifest identity above.
+- `RST-004-F01`: addressed in this revision. Preflight opens and hashes the
+  actual owner acceptance-spec bytes, rejects a missing or mismatched file, and
+  includes `production_manifest.json`, both configuration-selected URDFs, the
+  runtime configuration, and all harness source inputs in the recorded vector.
+- `RST-004-F02`: addressed in this revision. The complete initial owner-spec,
+  candidate/input, and installed-API identity vector is re-read at the start
+  and end of every repeat and immediately before final success. Every check is
+  persisted; missing or changed input aborts with a nonzero result.
+- `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
+  URL above.
 
 These are programmer changes awaiting fresh independent review; this note does
 not mark any finding accepted or the R2 gate passed.
@@ -206,16 +216,23 @@ mass-weighted world COM, current-contact support polygons, signed support
 margin, invalid/stale/missing sensor failure, malformed data failure, and static
 confirmation that the future smoke harness contains no direct root/joint state
 setter call. Invalid, nonfinite, or nonpositive run arguments are also checked
-through the CPU-safe preflight boundary.
+through the CPU-safe preflight boundary. Regression cases mutate or remove the
+acceptance spec, manifest hash, and installed-API hash and verify that repeat
+and final checks fail closed after persisting the mismatch.
 
 ## Future one-job evidence harness
 
 `robot_spike/production/run_locomotion_smoke.py` is an explicit future heavy-job
 entry point. Importing it does not import Isaac. Before constructing
 `SimulationApp`, it requires a clean worktree and exact expected candidate and
-tree SHAs, then hashes every relevant source/config/URDF input and every local
-Isaac API source file on which the adapter depends. A run uses a fixed physics
-rate, verifies metre stage units, performs one explicit
+tree SHAs. It opens and hashes the actual owner acceptance spec, the production
+manifest, runtime configuration, production and approved-source URDFs, every
+relevant source/test/report input, and every local Isaac API source file on
+which the adapter depends. The preserved initial vector is re-read and compared
+at both boundaries of every repeat and before final success. Checks, including
+failures, are written to the durable status report; a missing or changed byte
+prevents a passing result. A run uses a fixed physics rate, verifies metre stage
+units, performs one explicit
 deterministic reset per repeat, and uses only drive position targets after each
 reset. It writes every controller step to one JSONL measured sample stream per
 repeat plus an incrementally durable status report containing root motion,

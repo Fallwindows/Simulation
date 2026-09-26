@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import ast
 from argparse import Namespace
+import copy
 from dataclasses import dataclass
+import hashlib
+import io
+import json
 import math
 from pathlib import Path
 import unittest
@@ -14,7 +18,14 @@ from robot_spike.production.isaac_feedback import (
     support_polygon_center_and_margin,
 )
 from robot_spike.production.locomotion import LEG_JOINTS
-from robot_spike.production.run_locomotion_smoke import _validate_arguments
+from robot_spike.production.run_locomotion_smoke import (
+    EVIDENCE_FILES,
+    EvidenceIdentityGuard,
+    EvidenceIdentityMismatchError,
+    _record_identity_boundary,
+    _validate_arguments,
+    acceptance_spec_identity,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -236,6 +247,125 @@ class IsaacFeedbackTests(unittest.TestCase):
             with self.subTest(name=name, value=value):
                 with self.assertRaises(ValueError):
                     _validate_arguments(Namespace(**invalid))
+
+    def test_acceptance_spec_bytes_and_consumed_metadata_are_in_identity(self):
+        self.assertIn(
+            "robot_spike/production/production_manifest.json", EVIDENCE_FILES
+        )
+        self.assertIn("robot_spike/production/robot_config.json", EVIDENCE_FILES)
+        self.assertIn(
+            "robot_spike/production/asimov_orcahand_restocking.urdf",
+            EVIDENCE_FILES,
+        )
+        self.assertIn("robot_spike/asimov_orcahand_right.urdf", EVIDENCE_FILES)
+
+        class MemoryPath:
+            def __init__(self, data: bytes):
+                self.data = data
+                self.exists = True
+
+            def resolve(self):
+                return self
+
+            def is_file(self):
+                return self.exists
+
+            def open(self, mode):
+                self.assert_binary_mode = mode
+                return io.BytesIO(self.data)
+
+            def __str__(self):
+                return "memory://acceptance.md"
+
+        original = b"owner acceptance bytes\r\n"
+        expected = hashlib.sha256(original).hexdigest()
+        path = MemoryPath(original)
+        identity = acceptance_spec_identity(path, expected)  # type: ignore[arg-type]
+        self.assertEqual(identity["sha256"], expected)
+        self.assertEqual(identity["path"], str(path))
+        self.assertEqual(path.assert_binary_mode, "rb")
+
+        path.data = b"changed bytes\n"
+        with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
+            acceptance_spec_identity(path, expected)  # type: ignore[arg-type]
+        path.exists = False
+        with self.assertRaisesRegex(RuntimeError, "is missing"):
+            acceptance_spec_identity(path, expected)  # type: ignore[arg-type]
+
+    def test_repeat_and_final_identity_checks_fail_closed_and_persist(self):
+        initial = {
+            "acceptance_spec": {"sha256": "spec"},
+            "source": {
+                "source_files_sha256": {
+                    "robot_spike/production/production_manifest.json": "manifest",
+                    "robot_spike/production/robot_config.json": "config",
+                }
+            },
+            "installed_isaac": {
+                "api_source_files_sha256": {"articulation.py": "api"}
+            },
+        }
+        state = {"identity": copy.deepcopy(initial)}
+        guard = EvidenceIdentityGuard(
+            initial, lambda: copy.deepcopy(state["identity"])
+        )
+        result = {"status": "running", "identity_checks": guard.checks, "repeats": []}
+        repeat = {"repeat_index": 0, "identity_checks": []}
+        result["repeats"].append(repeat)
+
+        class CapturingStatusPath:
+            text = ""
+
+            def write_text(self, text, **_kwargs):
+                self.text = text
+
+        status_path = CapturingStatusPath()
+        _record_identity_boundary(
+            guard, "repeat_0_start", result, status_path, repeat  # type: ignore[arg-type]
+        )
+        del state["identity"]["source"]["source_files_sha256"][
+            "robot_spike/production/production_manifest.json"
+        ]
+        with self.assertRaises(EvidenceIdentityMismatchError):
+            _record_identity_boundary(
+                guard,
+                "repeat_0_end",
+                result,
+                status_path,  # type: ignore[arg-type]
+                repeat,
+            )
+        persisted = json.loads(status_path.text)
+        self.assertEqual(
+            [check["status"] for check in persisted["repeats"][0]["identity_checks"]],
+            ["match", "mismatch"],
+        )
+        self.assertIn(
+            "production_manifest.json",
+            persisted["repeats"][0]["identity_checks"][1]["mismatches"][0],
+        )
+
+        final_state = copy.deepcopy(initial)
+        final_guard = EvidenceIdentityGuard(
+            initial, lambda: copy.deepcopy(final_state)
+        )
+        final_result = {
+            "status": "running",
+            "identity_checks": final_guard.checks,
+            "repeats": [],
+        }
+        final_state["installed_isaac"]["api_source_files_sha256"][
+            "articulation.py"
+        ] = "changed-api"
+        with self.assertRaises(EvidenceIdentityMismatchError):
+            _record_identity_boundary(
+                final_guard,
+                "final_success",
+                final_result,
+                status_path,  # type: ignore[arg-type]
+            )
+        persisted = json.loads(status_path.text)
+        self.assertEqual(persisted["identity_checks"][0]["phase"], "final_success")
+        self.assertEqual(persisted["identity_checks"][0]["status"], "mismatch")
 
 
 if __name__ == "__main__":
