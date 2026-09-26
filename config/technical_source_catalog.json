@@ -2,9 +2,9 @@
   "schema_version": 1,
   "status": "reviewed_source_catalog",
   "current_source_compatibility": {
-    "status": "historical_paired_diagnostic_available",
-    "new_goal_delivery": "blocked_pending_fresh_G02_paired_capture",
-    "reason": "The listed RGB and raw LiDAR are exactly co-captured and support diagnostic selective rendering, but they predate the G02 scene/assets and eased production trajectory. They must not be composited over new G02 RGB or accepted as the final technical delivery."
+    "status": "current_goal_preview_available",
+    "new_goal_delivery": "unaccepted_pending_final_delivery_review",
+    "reason": "The current-goal 20260925-183307101 paired RGB, raw LiDAR, SLAM poses, estimated inventory, and annotations are bound and available for technical preview. Final technical delivery remains unaccepted and delivery_eligible remains false pending review."
   },
   "sources": [
     {
@@ -96,6 +96,100 @@
         "slam_trajectory": "../slam/slam_poses.csv",
         "legacy_capture_id_omitted": false,
         "legacy_capture_manifest_v0": true,
+        "ground_truth_consumed": false
+      }
+    },
+    {
+      "source_id": "production-20260925-183307101-v1",
+      "capture_id": "20260925-183307101",
+      "presentation_classification": {"kind": "reviewed_production"},
+      "presentation_compatibility": {
+        "status": "current_goal_paired_capture",
+        "delivery_eligible": false,
+        "preview_only": true,
+        "scene_generation": "G02",
+        "trajectory_generation": "M1-linear",
+        "delivery_status": "unaccepted_pending_final_delivery_review",
+        "reason": "The current-goal paired source is available for technical preview; final delivery has not been reviewed and accepted."
+      },
+      "sensor_contract": {
+        "lidar_topic": "/sim/lidar/points",
+        "camera_info_topic": "/sim/camera/rgb/camera_info",
+        "lidar_frame_id": "lidar_link",
+        "camera_frame_id": "camera_optical_frame",
+        "configured_lidar_hz": 10.0,
+        "maximum_current_age_periods": 2.0,
+        "maximum_rgb_skew_ns": 17000001
+      },
+      "run_directory_name": "20260925-183307101",
+      "capture_sha256": "a89471e34fb490727c182601c631d4a2ba95bb37499cbdddf03a1829829579b0",
+      "producer_revisions": {
+        "capture": "48de461b42d5e0945b21432cef9f5523cc5b0874",
+        "slam": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+        "perception": "b9ade5b904c8c0cbea959650cc86620957d0de5e"
+      },
+      "producer_manifests": {
+        "capture": {"path": "capture/capture_manifest.json", "sha256": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b"},
+        "slam": {"path": "slam/slam_manifest.json", "sha256": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4"},
+        "perception": {"path": "perception/perception_manifest.json", "sha256": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295"}
+      },
+      "artifacts": {
+        "map": {
+          "path": "slam/slam_map.ply", "sha256": "1a8980c7916a0786e3ae7324e07bcc3de0004e0cb2a6805e58e4c3ea8b68bd15",
+          "size_bytes": 12173346, "version": "offline-slam-map/20260925-183307101/1a8980c7916a0786"
+        },
+        "trajectory": {
+          "path": "slam/slam_map_poses.csv", "sha256": "472853fe1674a009ff0a95d68fadec3b2f1cd8f73e296d20a974eee53668f84d",
+          "size_bytes": 31621, "version": "offline-slam-trajectory/20260925-183307101/472853fe1674a009"
+        },
+        "inventory": {
+          "path": "perception/estimated_inventory.csv", "sha256": "0f33ca766eccc9419fc1f2535f9158f76778d8007948a10ebc6693c7adab68e1",
+          "size_bytes": 899999, "version": "estimated-object-state/20260925-183307101/0f33ca766eccc941"
+        },
+        "raw_lidar_bag": {
+          "path": "capture/sensors_bag/sensors_bag_0.db3", "sha256": "4e060311b69102ca4c94758f150d69455941f95e3e182a46cda2d0b72902ed7a",
+          "size_bytes": 3869081600, "version": "raw-lidar-bag/20260925-183307101/4e060311b69102ca"
+        },
+        "bag_metadata": {
+          "path": "capture/bag_metadata.json", "sha256": "eb467f49675d7e988f70988cae420741228f490548d537500b1224f586c3f317",
+          "size_bytes": 2827, "version": "bag-index/20260925-183307101/eb467f49675d7e98"
+        },
+        "camera_info": {
+          "path": "capture/camera_info.json", "sha256": "ba093bdaa67c76f21645ee84fc69c1dc4f3c971c51f53c216bd2f13f1a320b8c",
+          "size_bytes": 657, "version": "camera-info/20260925-183307101/ba093bdaa67c76f2"
+        },
+        "sensor_transforms": {
+          "path": "capture/sensor_transforms.json", "sha256": "645b0d60959666cc64def5bf9bc4e2dcce0155d18f253763908270f99edebb47",
+          "size_bytes": 1286, "version": "sensor-transforms/20260925-183307101/645b0d60959666cc"
+        },
+        "effective_config": {
+          "path": "capture/effective_config.json", "sha256": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+          "size_bytes": 2973, "version": "capture-config/20260925-183307101/6e8882240a061d28"
+        },
+        "scene_manifest": {
+          "path": "capture/scene_manifest.json", "sha256": "3d50374b91fe95b840b2932aee7f875e12822266c5f626593bab349a0a7ee2bf",
+          "size_bytes": 589630, "version": "scene-manifest/20260925-183307101/3d50374b91fe95b8"
+        },
+        "rgb_video": {
+          "path": "capture/rgb_camera.mp4", "sha256": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+          "size_bytes": 15195142, "version": "rgb-video/20260925-183307101/465cb43619a3ac58"
+        },
+        "rgb_frames": {
+          "path": "capture/rgb_frames.jsonl", "sha256": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+          "size_bytes": 72887, "version": "rgb-frame-index/20260925-183307101/69f171b691d35061"
+        },
+        "frame_annotations": {
+          "path": "perception/frame_annotations.jsonl", "sha256": "4e01fd67f58465dfc9e29ea7b408557fa764818cc7e589cb11b6e843d9a25d4f",
+          "size_bytes": 215740196, "version": "estimated-regions/20260925-183307101/4e01fd67f58465df"
+        }
+      },
+      "simulation_time": {"source": "slam/slam_map_poses.csv:timestamp_s", "start_s": 0.2, "end_s": 20.5},
+      "perception_contract": {
+        "allowed_depth_sources": ["lidar_projected_with_slam_pose"],
+        "estimated_inventory": "estimated_inventory.csv",
+        "slam_trajectory": "../slam/slam_map_poses.csv",
+        "legacy_capture_id_omitted": false,
+        "legacy_capture_manifest_v0": false,
         "ground_truth_consumed": false
       }
     }
