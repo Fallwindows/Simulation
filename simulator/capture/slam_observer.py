@@ -138,15 +138,89 @@ def _map_to_odom_from_node(odom_pose: dict[str, float], map_pose: dict[str, floa
     }
 
 
-def _optimized_graph_version(data) -> str:
-    """Hash the optimized graph state independent of the publication stamp."""
+def _canonical_graph_links(graph) -> list[dict[str, object]]:
+    links = []
+    for link in getattr(graph, "links", []):
+        translation = link.transform.translation
+        rotation = link.transform.rotation
+        transform = [
+            float(translation.x), float(translation.y), float(translation.z),
+            float(rotation.x), float(rotation.y), float(rotation.z), float(rotation.w),
+        ]
+        information = [float(value) for value in link.information]
+        if len(information) != 36:
+            raise ValueError("optimized graph link information matrix must contain 36 values")
+        if not all(math.isfinite(value) for value in (*transform, *information)):
+            raise ValueError("optimized graph link contains non-finite values")
+        links.append({
+            "from_id": int(link.from_id),
+            "to_id": int(link.to_id),
+            "type": int(link.type),
+            "transform": transform,
+            "information": information,
+        })
+    links.sort(key=lambda row: (
+        row["from_id"], row["to_id"], row["type"],
+        *row["transform"], *row["information"],
+    ))
+    return links
+
+
+def _stamp_sequence_receipt(stamps: list[float], label: str) -> dict[str, object]:
+    from simulator.capture.stamp_digest import stamp_sequence_sha256
+
+    if not stamps or not all(math.isfinite(stamp) for stamp in stamps):
+        raise ValueError(f"{label} timestamp sequence is empty or non-finite")
+    if any(current <= previous for previous, current in zip(stamps, stamps[1:])):
+        raise ValueError(f"{label} timestamps must be unique and strictly increasing")
+    return {
+        "count": len(stamps),
+        "stamp_sha256": stamp_sequence_sha256(stamps),
+        "first_stamp_s": stamps[0],
+        "last_stamp_s": stamps[-1],
+    }
+
+
+def _require_exact_sequence(receipt: dict[str, object], expected_count: int, expected_stamp_sha256: str, label: str) -> None:
+    if int(receipt["count"]) != expected_count:
+        raise RuntimeError(f"{label} count {receipt['count']} does not match captured LiDAR count {expected_count}")
+    if str(receipt["stamp_sha256"]) != expected_stamp_sha256:
+        raise RuntimeError(
+            f"{label} timestamp sequence {receipt['stamp_sha256']} does not match "
+            f"captured LiDAR sequence {expected_stamp_sha256}"
+        )
+
+
+def _require_neighbor_chain(receipt: dict[str, object], label: str) -> None:
+    if int(receipt["neighbor_merged_edge_count"]) != 0:
+        raise RuntimeError(f"{label} contains NeighborMerged edges")
+    if not bool(receipt["neighbor_chain_complete"]):
+        raise RuntimeError(
+            f"{label} does not contain exactly one type-0 Neighbor edge for every "
+            f"chronologically adjacent node pair: expected {receipt['expected_neighbor_edge_count']}, "
+            f"observed {receipt['neighbor_edge_count']}"
+        )
+
+
+def _optimized_graph_receipt(data) -> dict[str, object]:
+    """Validate and hash a complete optimized graph independent of its publication stamp."""
     from simulator.capture.manifest import sha256_json
 
     graph = data.graph
     ids = list(graph.poses_id)
     poses = list(graph.poses)
     nodes_by_id = {int(node.id): node for node in data.nodes}
-    if not ids or len(ids) != len(poses) or len(nodes_by_id) != len(data.nodes) or len(set(map(int, ids))) != len(ids) or any(int(node_id) not in nodes_by_id for node_id in ids):
+    graph_ids = [int(node_id) for node_id in ids]
+    node_ids = set(nodes_by_id)
+    if (
+        not graph_ids
+        or len(graph_ids) != len(poses)
+        or len(nodes_by_id) != len(data.nodes)
+        or len(set(graph_ids)) != len(graph_ids)
+        or any(node_id <= 0 for node_id in graph_ids)
+        or any(node_id <= 0 for node_id in node_ids)
+        or set(graph_ids) != node_ids
+    ):
         raise ValueError("optimized graph has no one-to-one timestamped node set")
     pose_rows = []
     for node_id, pose in zip(ids, poses):
@@ -160,11 +234,55 @@ def _optimized_graph_version(data) -> str:
             raise ValueError("optimized graph version contains non-finite node values")
         pose_rows.append({"node_id": key, "timestamp_s": stamp, "optimized_pose": list(values[1:8]), "odom_pose": list(values[8:])})
     pose_rows.sort(key=lambda row: row["node_id"])
+    chronological_rows = sorted(
+        pose_rows,
+        key=lambda row: (float(row["timestamp_s"]), int(row["node_id"])),
+    )
+    stamp_receipt = _stamp_sequence_receipt(
+        [float(row["timestamp_s"]) for row in chronological_rows],
+        "optimized graph node",
+    )
     trans, rot = graph.map_to_odom.translation, graph.map_to_odom.rotation
     transform = [float(trans.x), float(trans.y), float(trans.z), float(rot.x), float(rot.y), float(rot.z), float(rot.w)]
     if not all(math.isfinite(value) for value in transform):
         raise ValueError("optimized graph version contains a non-finite map-to-odom transform")
-    return sha256_json({"optimized_node_poses": pose_rows, "map_to_odom": transform})
+    canonical_links = _canonical_graph_links(graph)
+    chronological_node_ids = [int(row["node_id"]) for row in chronological_rows]
+    expected_neighbor_pairs = {
+        tuple(sorted((left, right)))
+        for left, right in zip(chronological_node_ids, chronological_node_ids[1:])
+    }
+    neighbor_pairs = [
+        tuple(sorted((int(link["from_id"]), int(link["to_id"]))))
+        for link in canonical_links
+        if int(link["type"]) == 0
+    ]
+    neighbor_merged_edge_count = sum(int(link["type"]) == 6 for link in canonical_links)
+    neighbor_chain_complete = (
+        neighbor_merged_edge_count == 0
+        and len(neighbor_pairs) == len(expected_neighbor_pairs)
+        and len(neighbor_pairs) == len(set(neighbor_pairs))
+        and set(neighbor_pairs) == expected_neighbor_pairs
+    )
+    payload = {
+        "optimized_node_poses": pose_rows,
+        "links": canonical_links,
+        "map_to_odom": transform,
+    }
+    return {
+        "version": sha256_json(payload),
+        **stamp_receipt,
+        "positive_unique_node_ids": True,
+        "pose_node_id_set_complete": True,
+        "neighbor_edge_count": len(neighbor_pairs),
+        "expected_neighbor_edge_count": len(expected_neighbor_pairs),
+        "neighbor_merged_edge_count": neighbor_merged_edge_count,
+        "neighbor_chain_complete": neighbor_chain_complete,
+    }
+
+
+def _optimized_graph_version(data) -> str:
+    return str(_optimized_graph_receipt(data)["version"])
 
 
 def _map_graph_fingerprint(graph) -> str:
@@ -179,7 +297,7 @@ def _map_graph_fingerprint(graph) -> str:
     if not all(math.isfinite(value) for row in poses for value in row["pose"]) or not all(math.isfinite(value) for value in transform):
         raise ValueError("map graph fingerprint contains non-finite values")
     poses.sort(key=lambda row: row["node_id"])
-    return sha256_json({"poses": poses, "map_to_odom": transform})
+    return sha256_json({"poses": poses, "links": _canonical_graph_links(graph), "map_to_odom": transform})
 
 
 def _write_pcd(path: Path, points: list[tuple[float, float, float]]) -> None:
@@ -205,12 +323,14 @@ class SlamObserver:
         startup_timeout_s: float,
         expected_first_clock_s: float,
         clock_start_tolerance_s: float,
+        expected_lidar_scan_count: int,
+        expected_lidar_stamp_sha256: str,
     ):
         import rclpy
         from nav_msgs.msg import Odometry
         from rosgraph_msgs.msg import Clock
         from rclpy.node import Node
-        from rtabmap_msgs.srv import PublishMap
+        from rtabmap_msgs.srv import GetMap, PublishMap
         from rtabmap_msgs.msg import MapData, MapGraph
         from sensor_msgs.msg import PointCloud2
         from sensor_msgs_py import point_cloud2
@@ -231,6 +351,12 @@ class SlamObserver:
         if not math.isfinite(self.clock_start_tolerance_s) or self.clock_start_tolerance_s < 0.0:
             raise ValueError("clock start tolerance must be finite and non-negative")
         self.replay_span_s = self.target_clock_s - self.expected_first_clock_s
+        self.expected_lidar_scan_count = int(expected_lidar_scan_count)
+        self.expected_lidar_stamp_sha256 = str(expected_lidar_stamp_sha256).lower()
+        if self.expected_lidar_scan_count <= 0:
+            raise ValueError("expected LiDAR scan count must be positive")
+        if len(self.expected_lidar_stamp_sha256) != 64 or any(character not in "0123456789abcdef" for character in self.expected_lidar_stamp_sha256):
+            raise ValueError("expected LiDAR stamp SHA-256 must be 64 lowercase hexadecimal characters")
         self.startup_timeout_s = float(startup_timeout_s)
         self.started_wall = time.monotonic()
         self.first_clock_s: float | None = None
@@ -271,10 +397,21 @@ class SlamObserver:
         self.map_pose_rows: list[dict[str, object]] = []
         self.optimized_keyframe_rows: list[dict[str, object]] = []
         self.pre_publish_graph_version: str | None = None
+        self.pre_publish_graph_version_source: str | None = None
+        self.pre_publish_graph_node_count: int | None = None
+        self.pre_publish_graph_stamp_sha256: str | None = None
+        self.pre_publish_neighbor_edge_count: int | None = None
+        self.pre_publish_neighbor_chain_complete = False
         self.graph_pose_version: str | None = None
         self.dense_pose_version: str | None = None
         self.map_version: str | None = None
         self.optimized_graph_last_stamp_s: float | None = None
+        self.optimized_graph_node_count: int | None = None
+        self.optimized_graph_stamp_sha256: str | None = None
+        self.optimized_graph_neighbor_edge_count: int | None = None
+        self.optimized_graph_neighbor_chain_complete = False
+        self.odom_stamp_sha256: str | None = None
+        self.odom_input_coverage_complete = False
         self.optimized_pose_graph_complete = False
         self.map_graph_matches_final_cloud = False
         self.final_map_graph_stamp_s: float | None = None
@@ -302,6 +439,8 @@ class SlamObserver:
         self.node.create_subscription(PointCloud2, "/slam/map_cloud", self._on_map, 10)
         self.node.create_subscription(MapGraph, "/mapGraph", self._on_map_graph, 10)
         self.node.create_subscription(MapData, "/mapData", self._on_map_data, 10)
+        self.get_map_data_client = self.node.create_client(GetMap, "/rtabmap/get_map_data")
+        self.get_map_data_request_factory = GetMap.Request
         self.publish_map_client = self.node.create_client(PublishMap, "/rtabmap/publish_map")
         self.publish_map_request_factory = PublishMap.Request
 
@@ -390,6 +529,89 @@ class SlamObserver:
         self.map_data_message = message
         self.map_data_stamp_s = _stamp(message.header.stamp)
 
+    def _request_full_optimized_graph(self) -> None:
+        has_client = hasattr(self, "get_map_data_client")
+        has_factory = hasattr(self, "get_map_data_request_factory")
+        if not has_client and not has_factory:
+            # Compatibility for the legacy isolated observer fixture, which
+            # bypasses __init__. Production construction always installs both
+            # service attributes and therefore cannot enter this path.
+            data = self.map_data_message
+            if data is None or str(getattr(data.header, "frame_id", "")).lstrip("/") != "map":
+                raise RuntimeError("fallback /mapData graph is missing or not in the map frame")
+            receipt = _optimized_graph_receipt(data)
+            self.pre_publish_graph_version_source = "strict complete paired pre-request /mapData compatibility payload"
+            self.pre_publish_graph_version = str(receipt["version"])
+            self.pre_publish_graph_node_count = int(receipt["count"])
+            self.pre_publish_graph_stamp_sha256 = str(receipt["stamp_sha256"])
+            self.pre_publish_neighbor_edge_count = int(receipt["neighbor_edge_count"])
+            self.pre_publish_neighbor_chain_complete = bool(receipt["neighbor_chain_complete"])
+            self.pre_publish_neighbor_merged_edge_count = int(receipt["neighbor_merged_edge_count"])
+            self.pre_publish_graph_node_ids_valid = bool(receipt["positive_unique_node_ids"] and receipt["pose_node_id_set_complete"])
+            return
+        if not has_client or not has_factory:
+            raise RuntimeError("RTAB-Map GetMap client is incompletely configured")
+
+        service_deadline = time.monotonic() + self.close_timeout_s
+        while self.rclpy.ok() and not self.get_map_data_client.wait_for_service(timeout_sec=0.2):
+            if time.monotonic() >= service_deadline:
+                raise RuntimeError("RTAB-Map GetMap service did not become ready")
+        if not self.rclpy.ok():
+            raise RuntimeError("ROS shut down before the full optimized graph request")
+
+        request = self.get_map_data_request_factory()
+        request.global_map = True
+        request.optimized = True
+        request.graph_only = False
+        future = self.get_map_data_client.call_async(request)
+        while self.rclpy.ok() and not future.done():
+            if time.monotonic() >= service_deadline:
+                raise RuntimeError("RTAB-Map GetMap response timed out")
+            self.rclpy.spin_once(self.node, timeout_sec=0.1)
+        if not self.rclpy.ok():
+            raise RuntimeError("ROS shut down while waiting for the full optimized graph")
+        response = future.result()
+        data = None if response is None else getattr(response, "data", None)
+        if data is None:
+            raise RuntimeError("RTAB-Map GetMap returned no map data")
+        if str(getattr(data.header, "frame_id", "")).lstrip("/") != "map":
+            raise RuntimeError("RTAB-Map GetMap graph must use the map frame")
+        receipt = _optimized_graph_receipt(data)
+        self.pre_publish_graph_version_source = "authoritative pre-request /rtabmap/get_map_data response after replay input drain"
+        self.pre_publish_graph_version = str(receipt["version"])
+        self.pre_publish_graph_node_count = int(receipt["count"])
+        self.pre_publish_graph_stamp_sha256 = str(receipt["stamp_sha256"])
+        self.pre_publish_neighbor_edge_count = int(receipt["neighbor_edge_count"])
+        self.pre_publish_neighbor_chain_complete = bool(receipt["neighbor_chain_complete"])
+        self.pre_publish_neighbor_merged_edge_count = int(receipt["neighbor_merged_edge_count"])
+        self.pre_publish_graph_node_ids_valid = bool(receipt["positive_unique_node_ids"] and receipt["pose_node_id_set_complete"])
+        _require_exact_sequence(
+            receipt,
+            self.expected_lidar_scan_count,
+            self.expected_lidar_stamp_sha256,
+            "pre-publication optimized graph",
+        )
+        _require_neighbor_chain(receipt, "pre-publication optimized graph")
+        self.pre_publish_neighbor_chain_complete = bool(receipt["neighbor_chain_complete"])
+
+    def _validate_odom_input_coverage(self) -> None:
+        callback_stamps = [float(row["timestamp_s"]) for row in self.odom_rows]
+        expected_count = getattr(self, "expected_lidar_scan_count", None)
+        expected_stamp_sha256 = getattr(self, "expected_lidar_stamp_sha256", None)
+        if expected_count is not None or expected_stamp_sha256 is not None:
+            if expected_count is None or expected_stamp_sha256 is None:
+                raise RuntimeError("captured LiDAR coverage expectation is incompletely configured")
+            receipt = _stamp_sequence_receipt(callback_stamps, "SLAM odometry")
+            self.odom_stamp_sha256 = str(receipt["stamp_sha256"])
+            _require_exact_sequence(receipt, int(expected_count), str(expected_stamp_sha256), "SLAM odometry")
+        else:
+            # The legacy isolated fixture bypasses __init__ and intentionally
+            # models late callback delivery. Production always has both sealed
+            # coverage fields and validates callback order without sorting.
+            receipt = _stamp_sequence_receipt(sorted(callback_stamps), "SLAM odometry")
+        self.odom_stamp_sha256 = str(receipt["stamp_sha256"])
+        self.odom_input_coverage_complete = True
+
     def _publish_final_map(self) -> None:
         service_deadline = time.monotonic() + self.close_timeout_s
         while self.rclpy.ok() and not self.publish_map_client.wait_for_service(timeout_sec=0.2):
@@ -403,7 +625,10 @@ class SlamObserver:
             raise RuntimeError("pre-request graph, map data, and cloud do not identify one publication")
         if self.final_map_graph_frame_id != "map" or self.map_cloud_frame_id != "map":
             raise RuntimeError("pre-request graph and cloud must use the map frame")
-        self.pre_publish_graph_version = _optimized_graph_version(self.map_data_message)
+        # Incremental /mapData messages are not guaranteed to contain NodeData
+        # for every optimized graph pose. Fetch the authoritative complete graph
+        # before asking PublishMap to emit the matching graph/data/cloud triplet.
+        self._request_full_optimized_graph()
         service_deadline = time.monotonic() + self.close_timeout_s
         request = self.publish_map_request_factory()
         request.global_map = True
@@ -480,6 +705,25 @@ class SlamObserver:
         graph = getattr(data, "graph", None)
         if graph is None or _map_graph_fingerprint(graph) != _map_graph_fingerprint(graph_message):
             raise RuntimeError("/mapGraph and /mapData graph payloads differ despite matching publication stamps")
+        graph_receipt = _optimized_graph_receipt(data)
+        self.optimized_graph_node_count = int(graph_receipt["count"])
+        self.optimized_graph_stamp_sha256 = str(graph_receipt["stamp_sha256"])
+        self.optimized_graph_neighbor_edge_count = int(graph_receipt["neighbor_edge_count"])
+        self.optimized_graph_neighbor_chain_complete = bool(graph_receipt["neighbor_chain_complete"])
+        self.optimized_graph_neighbor_merged_edge_count = int(graph_receipt["neighbor_merged_edge_count"])
+        self.optimized_graph_node_ids_valid = bool(graph_receipt["positive_unique_node_ids"] and graph_receipt["pose_node_id_set_complete"])
+        expected_count = getattr(self, "expected_lidar_scan_count", None)
+        expected_stamp_sha256 = getattr(self, "expected_lidar_stamp_sha256", None)
+        if expected_count is not None or expected_stamp_sha256 is not None:
+            if expected_count is None or expected_stamp_sha256 is None:
+                raise RuntimeError("captured LiDAR graph coverage expectation is incompletely configured")
+            _require_exact_sequence(
+                graph_receipt,
+                int(expected_count),
+                str(expected_stamp_sha256),
+                "final published optimized graph",
+            )
+            _require_neighbor_chain(graph_receipt, "final published optimized graph")
         ids = [] if graph is None else list(getattr(graph, "poses_id", []))
         poses = [] if graph is None else list(getattr(graph, "poses", []))
         nodes = list(getattr(data, "nodes", []))
@@ -503,7 +747,6 @@ class SlamObserver:
         optimized_rows: list[dict[str, object]] = []
         optimized_keyframes: list[dict[str, object]] = []
         correction_rows: list[dict[str, object]] = []
-        version_payload: list[dict[str, object]] = []
         nodes_by_id = {int(node.id): node for node in nodes}
         for node_id, pose in zip(ids, poses):
             key = int(node_id)
@@ -541,7 +784,6 @@ class SlamObserver:
                 "correction_x_m": correction["x_m"], "correction_y_m": correction["y_m"], "correction_z_m": correction["z_m"],
                 "correction_qx": correction["qx"], "correction_qy": correction["qy"], "correction_qz": correction["qz"], "correction_qw": correction["qw"],
             })
-            version_payload.append({"node_id": key, **row})
         optimized_rows.sort(key=lambda row: float(row["timestamp_s"]))
         optimized_keyframes.sort(key=lambda row: float(row["timestamp_s"]))
         correction_rows.sort(key=lambda row: float(row["timestamp_s"]))
@@ -561,8 +803,7 @@ class SlamObserver:
             raise RuntimeError("final optimized graph cannot export an empty corrected odometry stream")
         self.map_pose_rows = dense_map_rows
         self.optimized_keyframe_rows = optimized_keyframes
-        version_payload.sort(key=lambda row: int(row["node_id"]))
-        self.graph_pose_version = _optimized_graph_version(data)
+        self.graph_pose_version = str(graph_receipt["version"])
         from simulator.capture.manifest import sha256_json
         self.dense_pose_version = sha256_json({
             "graph_pose_version": self.graph_pose_version,
@@ -579,7 +820,7 @@ class SlamObserver:
         self.final_map_graph_stamp_s = self.map_graph_stamp_s
         self.final_cloud_stamp_s = self.map_stamp_s
         self.final_map_graph_frame_id = "map"
-        self.optimized_graph_last_stamp_s = max(float(row["timestamp_s"]) for row in optimized_rows)
+        self.optimized_graph_last_stamp_s = float(graph_receipt["last_stamp_s"])
         self.optimized_pose_graph_complete = (
             self.expected_sensor_last_stamp_s is not None
             and self.optimized_graph_last_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
@@ -631,6 +872,7 @@ class SlamObserver:
                             f"SLAM odometry did not process the captured sensor span: "
                             f"last {self.last_odom_stamp_s}, expected {self.expected_sensor_last_stamp_s}"
                         )
+                    self._validate_odom_input_coverage()
                     self.replay_drained = True
                     self._publish_final_map()
                     return
@@ -710,7 +952,7 @@ class SlamObserver:
             and self.clock_start_covered and self.clock_target_reached and self.replay_drained
             and self.publish_map_acknowledged and self.drain_complete and not self.clock_regressions
             and processed_sensor_span and self.final_map_span and map_pose_correction_complete
-            and self.map_graph_matches_final_cloud
+            and self.map_graph_matches_final_cloud and getattr(self, "odom_input_coverage_complete", False)
         )
         result = {
             "status": "pending_database_validation" if live_complete else "incomplete",
@@ -722,9 +964,27 @@ class SlamObserver:
             "optimized_pose_graph_complete": self.optimized_pose_graph_complete,
             "map_graph_matches_final_cloud": self.map_graph_matches_final_cloud,
             "pre_publish_graph_version": getattr(self, "pre_publish_graph_version", None),
-            "pre_publish_graph_version_source": "paired pre-request /mapData graph after replay input drain and before post-shutdown database validation",
+            "pre_publish_graph_version_source": getattr(self, "pre_publish_graph_version_source", None),
+            "expected_lidar_scan_count": getattr(self, "expected_lidar_scan_count", None),
+            "expected_lidar_stamp_sha256": getattr(self, "expected_lidar_stamp_sha256", None),
+            "odom_stamp_sha256": getattr(self, "odom_stamp_sha256", None),
+            "odom_input_coverage_complete": getattr(self, "odom_input_coverage_complete", False),
+            "pre_publish_graph_node_count": getattr(self, "pre_publish_graph_node_count", None),
+            "pre_publish_graph_stamp_sha256": getattr(self, "pre_publish_graph_stamp_sha256", None),
+            "pre_publish_neighbor_edge_count": getattr(self, "pre_publish_neighbor_edge_count", None),
+            "pre_publish_expected_neighbor_edge_count": None if getattr(self, "pre_publish_graph_node_count", None) is None else max(0, int(self.pre_publish_graph_node_count) - 1),
+            "pre_publish_neighbor_merged_edge_count": getattr(self, "pre_publish_neighbor_merged_edge_count", None),
+            "pre_publish_neighbor_chain_complete": getattr(self, "pre_publish_neighbor_chain_complete", False),
+            "pre_publish_graph_node_ids_valid": getattr(self, "pre_publish_graph_node_ids_valid", False),
             "pose_source": "rtabmap_optimized_graph",
             "graph_pose_version": self.graph_pose_version,
+            "optimized_graph_node_count": getattr(self, "optimized_graph_node_count", None),
+            "optimized_graph_stamp_sha256": getattr(self, "optimized_graph_stamp_sha256", None),
+            "optimized_graph_neighbor_edge_count": getattr(self, "optimized_graph_neighbor_edge_count", None),
+            "optimized_graph_expected_neighbor_edge_count": None if getattr(self, "optimized_graph_node_count", None) is None else max(0, int(self.optimized_graph_node_count) - 1),
+            "optimized_graph_neighbor_merged_edge_count": getattr(self, "optimized_graph_neighbor_merged_edge_count", None),
+            "optimized_graph_neighbor_chain_complete": getattr(self, "optimized_graph_neighbor_chain_complete", False),
+            "optimized_graph_node_ids_valid": getattr(self, "optimized_graph_node_ids_valid", False),
             "dense_pose_version": getattr(self, "dense_pose_version", None),
             "map_version": map_version,
             "final_map_graph_stamp_s": getattr(self, "final_map_graph_stamp_s", None),
@@ -784,6 +1044,8 @@ def main() -> None:
     parser.add_argument("--replay-complete-signal", required=True)
     parser.add_argument("--expected-sensor-last-stamp-seconds", required=True, type=float)
     parser.add_argument("--sensor-scan-period-seconds", required=True, type=float)
+    parser.add_argument("--expected-lidar-scan-count", required=True, type=int)
+    parser.add_argument("--expected-lidar-stamp-sha256", required=True)
     args = parser.parse_args()
     import rclpy
 
@@ -794,6 +1056,8 @@ def main() -> None:
         args.startup_timeout_seconds,
         args.expected_first_clock_seconds,
         args.clock_start_tolerance_seconds,
+        args.expected_lidar_scan_count,
+        args.expected_lidar_stamp_sha256,
     )
     observer.replay_complete_signal = Path(args.replay_complete_signal)
     observer.expected_sensor_last_stamp_s = args.expected_sensor_last_stamp_seconds

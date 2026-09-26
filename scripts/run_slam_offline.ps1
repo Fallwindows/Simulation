@@ -291,6 +291,18 @@ if ($LASTEXITCODE -ne 0) { throw "Sensor-only capture validation failed." }
 $bagUri = Join-Path $captureDir ([string]$manifest.bag.uri)
 $duration = [double]$manifest.duration_s
 $bagMetadata = Get-Content -LiteralPath (Join-Path $captureDir "bag_metadata.json") -Raw | ConvertFrom-Json
+$lidarTopic = "/sim/lidar/points"
+$manifestLidarCountProperty = $manifest.bag.counts.PSObject.Properties[$lidarTopic]
+$metadataLidarCountProperty = $bagMetadata.counts.PSObject.Properties[$lidarTopic]
+$lidarStampHashProperty = $bagMetadata.stamp_sha256.PSObject.Properties[$lidarTopic]
+if (-not $manifestLidarCountProperty -or $null -eq $manifestLidarCountProperty.Value) { throw "Capture manifest is missing its LiDAR message count." }
+if (-not $metadataLidarCountProperty -or $null -eq $metadataLidarCountProperty.Value) { throw "Capture bag metadata is missing its LiDAR message count." }
+if (-not $lidarStampHashProperty -or $null -eq $lidarStampHashProperty.Value) { throw "Capture bag metadata is missing its LiDAR stamp-sequence SHA-256." }
+$expectedLidarScanCount = [int]$manifestLidarCountProperty.Value
+$metadataLidarScanCount = [int]$metadataLidarCountProperty.Value
+$expectedLidarStampSha256 = ([string]$lidarStampHashProperty.Value).ToLowerInvariant()
+if ($expectedLidarScanCount -le 0 -or $metadataLidarScanCount -ne $expectedLidarScanCount) { throw "Capture manifest and bag metadata LiDAR counts do not match a positive exact scan count." }
+if ($expectedLidarStampSha256 -notmatch '^[0-9a-f]{64}$') { throw "Capture LiDAR stamp-sequence SHA-256 is invalid." }
 $firstClockProperty = $bagMetadata.PSObject.Properties["first_clock_s"]
 $targetClockProperty = $bagMetadata.PSObject.Properties["target_clock_s"]
 if (-not $firstClockProperty -or $null -eq $firstClockProperty.Value -or -not $targetClockProperty -or $null -eq $targetClockProperty.Value) { throw "Capture bag metadata is missing its replay clock bounds." }
@@ -306,6 +318,21 @@ $clockStartTolerance = $scanPeriod
 $replayDiscoveryDelaySeconds = 5.0
 $database = Join-Path $slamDir "rtabmap.db"
 $mappingPath = (Join-Path $repo "config/mapping/rtabmap/params.yaml").Replace([char]92, "/")
+$mappingParameters = Get-Content -LiteralPath $mappingPath -Raw | ConvertFrom-Json
+$nodeUpdatePolicy = [ordered]@{
+  "Rtabmap/DetectionRate"=0.0
+  "RGBD/LinearUpdate"=0.0
+  "RGBD/AngularUpdate"=0.0
+  "RGBD/LinearSpeedUpdate"=0.0
+  "RGBD/AngularSpeedUpdate"=0.0
+  "Mem/RehearsalSimilarity"=1.0
+  "Mem/ReduceGraph"=$false
+}
+foreach ($entry in $nodeUpdatePolicy.GetEnumerator()) {
+  $actualProperty = $mappingParameters.PSObject.Properties[[string]$entry.Key]
+  if (-not $actualProperty -or $actualProperty.Value -ne $entry.Value) { throw "Mapping parameter does not satisfy the exact per-scan node update policy: $($entry.Key)=$($entry.Value)" }
+}
+$mappingParametersSha256 = (Get-FileHash -LiteralPath $mappingPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $baseArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"ros2")
 
 $env:RMW_IMPLEMENTATION = "rmw_zenoh_cpp"
@@ -459,7 +486,7 @@ try {
     throw "RTAB-Map nodes did not become ready before the absolute deadline after $($mappingReady.attempts) probe(s). Last probe timed_out=$($lastMappingProbe.timed_out), exit_code=$($lastMappingProbe.exit_code), start_error=$($lastMappingProbe.start_error), nodes=$($lastMappingProbe.stdout), stderr=$($lastMappingProbe.stderr)"
   }
 
-  $observerArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.slam_observer","--output-dir",$slamDir,"--target-clock-seconds",([string]$targetClockStamp),"--expected-first-clock-seconds",([string]$firstClockStamp),"--clock-start-tolerance-seconds",([string]$clockStartTolerance),"--startup-timeout-seconds","180","--expected-sensor-last-stamp-seconds",([string]$lastLidarStamp),"--sensor-scan-period-seconds",([string]$scanPeriod))
+  $observerArgs = @("run","--manifest-path",(Join-Path $workspace "pixi.toml"),"python","-m","simulator.capture.slam_observer","--output-dir",$slamDir,"--target-clock-seconds",([string]$targetClockStamp),"--expected-first-clock-seconds",([string]$firstClockStamp),"--clock-start-tolerance-seconds",([string]$clockStartTolerance),"--startup-timeout-seconds","180","--expected-sensor-last-stamp-seconds",([string]$lastLidarStamp),"--sensor-scan-period-seconds",([string]$scanPeriod),"--expected-lidar-scan-count",([string]$expectedLidarScanCount),"--expected-lidar-stamp-sha256",$expectedLidarStampSha256)
   $replaySignal = Join-Path $slamDir "bag_replay.complete"
   Remove-Item -LiteralPath $replaySignal -Force -ErrorAction SilentlyContinue
   $observerArgs += @("--replay-complete-signal",$replaySignal)
@@ -490,6 +517,26 @@ try {
   if (-not $observerMeta.publish_map_acknowledged -or -not $observerMeta.final_map_span -or -not $observerMeta.drain_complete) { throw "RTAB-Map did not acknowledge and publish a settled final optimized map/graph across the captured sensor span." }
   if ($null -ne $observerMeta.mapper_database_span -or $observerMeta.database_verification_stage -ne "pending_post_mapper_shutdown") { throw "Observer incorrectly claimed database persistence before mapper shutdown." }
   if (-not $observerMeta.map_pose_correction_complete -or -not $observerMeta.optimized_pose_graph_complete -or -not $observerMeta.map_graph_matches_final_cloud -or [int]$observerMeta.map_pose_sample_count -le 0 -or $observerMeta.map_pose_frame_id -ne "map" -or $observerMeta.pose_source -ne "rtabmap_optimized_graph" -or [string]::IsNullOrWhiteSpace([string]$observerMeta.graph_pose_version) -or $observerMeta.graph_pose_version -ne $observerMeta.pre_publish_graph_version -or [string]::IsNullOrWhiteSpace([string]$observerMeta.dense_pose_version) -or [string]::IsNullOrWhiteSpace([string]$observerMeta.map_version) -or [double]$observerMeta.final_map_graph_stamp_s -ne [double]$observerMeta.final_cloud_stamp_s -or $observerMeta.final_map_graph_frame_id -ne "map") { throw "RTAB-Map did not provide poses from the same versioned optimized map graph as the final cloud." }
+  $expectedNeighborEdgeCount = [Math]::Max(0, $expectedLidarScanCount - 1)
+  if (
+    -not [bool]$observerMeta.odom_input_coverage_complete -or
+    [int]$observerMeta.expected_lidar_scan_count -ne $expectedLidarScanCount -or
+    [string]$observerMeta.expected_lidar_stamp_sha256 -ne $expectedLidarStampSha256 -or
+    [int]$observerMeta.odom_sample_count -ne $expectedLidarScanCount -or
+    [string]$observerMeta.odom_stamp_sha256 -ne $expectedLidarStampSha256 -or
+    [int]$observerMeta.pre_publish_graph_node_count -ne $expectedLidarScanCount -or
+    [string]$observerMeta.pre_publish_graph_stamp_sha256 -ne $expectedLidarStampSha256 -or
+    -not [bool]$observerMeta.pre_publish_graph_node_ids_valid -or
+    -not [bool]$observerMeta.pre_publish_neighbor_chain_complete -or
+    [int]$observerMeta.pre_publish_neighbor_merged_edge_count -ne 0 -or
+    [int]$observerMeta.pre_publish_neighbor_edge_count -ne $expectedNeighborEdgeCount -or
+    [int]$observerMeta.optimized_graph_node_count -ne $expectedLidarScanCount -or
+    [string]$observerMeta.optimized_graph_stamp_sha256 -ne $expectedLidarStampSha256 -or
+    -not [bool]$observerMeta.optimized_graph_node_ids_valid -or
+    -not [bool]$observerMeta.optimized_graph_neighbor_chain_complete -or
+    [int]$observerMeta.optimized_graph_neighbor_merged_edge_count -ne 0 -or
+    [int]$observerMeta.optimized_graph_neighbor_edge_count -ne $expectedNeighborEdgeCount
+  ) { throw "Offline SLAM odometry and full optimized graphs do not exactly cover the sealed LiDAR scan sequence." }
   foreach ($poseArtifact in @("slam_map_poses.csv","slam_map_keyframes.csv","slam_odom_poses.csv","map_to_odom.csv","slam_poses.csv","slam_map.pcd","slam_map.ply")) {
     $artifactPath = Join-Path $slamDir $poseArtifact
     $artifactRecord = @($observerMeta.files | Where-Object { $_.path -eq $poseArtifact }) | Select-Object -First 1
@@ -519,11 +566,17 @@ try {
   Stop-ProcessTree -RootPid $mappingProcess.Id
   if (-not $mappingProcess.WaitForExit(30000)) { throw "RTAB-Map launcher did not exit before post-shutdown database validation." }
   $mapping = $null
-  $databaseValidationOutput = @(& $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python (Join-Path $repo "scripts/validate_rtabmap_db.py") $attemptDatabase --minimum-node-stamp $lastLidarStamp --scan-period-seconds $scanPeriod)
+  $databaseValidationOutput = @(& $pixi run --manifest-path (Join-Path $workspace "pixi.toml") python (Join-Path $repo "scripts/validate_rtabmap_db.py") $attemptDatabase --minimum-node-stamp $lastLidarStamp --scan-period-seconds $scanPeriod --expected-node-count $expectedLidarScanCount --expected-stamp-sha256 $expectedLidarStampSha256)
   if ($LASTEXITCODE -ne 0) { throw "RTAB-Map database validation failed." }
   $databaseValidationText = ($databaseValidationOutput -join "`n").Trim()
   $databaseValidation = $databaseValidationText | ConvertFrom-Json
-  if ($databaseValidation.integrity_check -ne "ok" -or [int]$databaseValidation.node_count -le 0 -or [double]$databaseValidation.last_node_stamp_s -lt $lastLidarStamp - $scanPeriod - 0.001) { throw "RTAB-Map post-shutdown database receipt did not cover the captured input span." }
+  if (
+    $databaseValidation.integrity_check -ne "ok" -or
+    -not [bool]$databaseValidation.node_timestamps_strictly_increasing -or
+    [int]$databaseValidation.node_count -ne $expectedLidarScanCount -or
+    [string]$databaseValidation.node_stamp_sha256 -ne $expectedLidarStampSha256 -or
+    [double]$databaseValidation.last_node_stamp_s -lt $lastLidarStamp - $scanPeriod - 0.001
+  ) { throw "RTAB-Map post-shutdown database receipt did not exactly cover the sealed LiDAR scan sequence." }
   $databasePublication = Publish-ValidatedDatabase -AttemptDatabasePath $attemptDatabase -CanonicalDatabasePath $database
   $databaseInfo = Get-Item -LiteralPath $database
   $databaseHash = [string]$databasePublication.sha256
@@ -535,6 +588,9 @@ try {
   $observerMeta.status = "complete"
   $observerMeta.mapper_database_span = $true
   $observerMeta.database_node_count = [int]$databaseValidation.node_count
+  $observerMeta.database_node_stamp_sha256 = [string]$databaseValidation.node_stamp_sha256
+  $observerMeta.database_node_timestamps_strictly_increasing = [bool]$databaseValidation.node_timestamps_strictly_increasing
+  $observerMeta.database_scan_coverage_complete = $true
   $observerMeta.database_last_stamp_s = [double]$databaseValidation.last_node_stamp_s
   $observerMeta.database_verification_stage = "post_mapper_shutdown_complete"
   $observerMeta | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $slamDir "slam_observer.json") -Encoding UTF8
@@ -557,6 +613,16 @@ try {
     slam_attempt=[ordered]@{attempt_id=[string]$slamAttempt.attempt_id; mapper_database_relative_path=("attempts/$($slamAttempt.attempt_id)/rtabmap.db"); rotated_prior_artifacts=@($slamAttempt.rotated_prior_artifacts)}
     database_artifact=[ordered]@{path="rtabmap.db"; size_bytes=[long]$databaseInfo.Length; sha256=$databaseHash}
     replay_clock_contract=[ordered]@{expected_first_clock_s=$firstClockStamp; target_clock_s=$targetClockStamp; start_tolerance_s=$clockStartTolerance; playback_rate=$ReplayRate; publisher_discovery_delay_s=$replayDiscoveryDelaySeconds}
+    node_update_policy=[ordered]@{mapping_params_sha256=$mappingParametersSha256; parameters=$nodeUpdatePolicy}
+    scan_coverage=[ordered]@{
+      source_topic=$lidarTopic; expected_scan_count=$expectedLidarScanCount; expected_stamp_sha256=$expectedLidarStampSha256
+      odom_scan_count=[int]$observerMeta.odom_sample_count; odom_stamp_sha256=[string]$observerMeta.odom_stamp_sha256
+      pre_publish_graph_node_count=[int]$observerMeta.pre_publish_graph_node_count; pre_publish_graph_stamp_sha256=[string]$observerMeta.pre_publish_graph_stamp_sha256
+      final_graph_node_count=[int]$observerMeta.optimized_graph_node_count; final_graph_stamp_sha256=[string]$observerMeta.optimized_graph_stamp_sha256
+      database_node_count=[int]$observerMeta.database_node_count; database_node_stamp_sha256=[string]$observerMeta.database_node_stamp_sha256
+      neighbor_edge_count=[int]$observerMeta.optimized_graph_neighbor_edge_count; expected_neighbor_edge_count=$expectedNeighborEdgeCount
+      exact_sequence_coverage=$true
+    }
     pre_publish_graph_version=$observerMeta.pre_publish_graph_version; pre_publish_graph_version_source=$observerMeta.pre_publish_graph_version_source; graph_pose_version=$observerMeta.graph_pose_version
     dense_pose_version=$observerMeta.dense_pose_version; map_version=$observerMeta.map_version
     map_frame_id=$observerMeta.map_pose_frame_id; optimized=$observerMeta.optimized_pose_graph_complete

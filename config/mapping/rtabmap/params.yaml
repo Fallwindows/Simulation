@@ -30,5 +30,12 @@
   "Odom/ScanKeyFrameThr": 0.4,
   "OdomF2M/ScanSubtractRadius": 0.05,
   "OdomF2M/ScanMaxSize": 15000,
-  "OdomF2M/BundleAdjustment": false
+  "OdomF2M/BundleAdjustment": false,
+  "Rtabmap/DetectionRate": 0.0,
+  "RGBD/LinearUpdate": 0.0,
+  "RGBD/AngularUpdate": 0.0,
+  "RGBD/LinearSpeedUpdate": 0.0,
+  "RGBD/AngularSpeedUpdate": 0.0,
+  "Mem/RehearsalSimilarity": 1.0,
+  "Mem/ReduceGraph": false
 }
