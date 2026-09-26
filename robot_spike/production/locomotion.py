@@ -183,7 +183,10 @@ class GaitConfig:
     landing_hip_roll_rad: float = 0.040
     joint_limit_margin_rad: float = 0.005
     maximum_target_error_rad: float = 0.30
-    joint_velocity_damping_s: float = 0.012
+    # The imported force drives use Kp=120 and Kd=12.  Kd/Kp=0.1 s adds one
+    # matching, velocity-aware damping term through the position target while
+    # the measured target-error gate continues to bound every command.
+    joint_velocity_damping_s: float = 0.100
     maximum_balance_correction_rad: float = 0.045
     maximum_root_tilt_rad: float = math.radians(12.0)
     maximum_root_angular_speed_rps: float = 1.0
@@ -256,6 +259,8 @@ class GaitConfig:
             raise LocomotionError("neutral knee flexion must be nonnegative")
         if self.minimum_root_clearance_m >= self.maximum_root_clearance_m:
             raise LocomotionError("root clearance envelope must have increasing bounds")
+        if self.joint_velocity_damping_s > 0.100:
+            raise LocomotionError("joint_velocity_damping_s exceeds the 0.100 s safety cap")
         if self.maximum_plan_steps < 1:
             raise LocomotionError("maximum_plan_steps must be positive")
 

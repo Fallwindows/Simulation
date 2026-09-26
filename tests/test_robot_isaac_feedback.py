@@ -287,6 +287,23 @@ class StartupFeedbackSource:
                 joints=self.controller.commands[-1],
                 support_margin=margin,
             )
+        if self.mode == "sign_fixed_margin_progression" and self.controller.commands:
+            command_count = len(self.controller.commands)
+            if command_count <= 36:
+                fraction = (command_count - 1) / 35.0
+                margin = 0.033125433489515736 + fraction * (
+                    0.015590235551829793 - 0.033125433489515736
+                )
+            else:
+                dwell_step = command_count - 36
+                margin = 0.015590235551829793 + dwell_step / 33.0 * (
+                    -0.015725125791836343 - 0.015590235551829793
+                )
+            return startup_feedback(
+                timestamp=1.0 + 0.1 * self.read_count,
+                joints=self.controller.commands[-1],
+                support_margin=margin,
+            )
         joints = (
             self.controller.commands[-1]
             if self.controller.commands
@@ -1177,6 +1194,51 @@ class IsaacFeedbackTests(unittest.TestCase):
             dwell[-1]["metrics"]["support_margin_m"], -0.016013906163802466
         )
         self.assertEqual(len(controller.commands), 58)
+
+    def test_sign_fixed_progression_fails_after_32_safe_dwell_samples(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "sign_fixed_margin_progression"
+
+        with self.assertRaisesRegex(
+            StartupValidationError, "COM projection left the configured support margin"
+        ) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                reset_hold_targets={name: 0.0 for name in LEG_JOINTS},
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                balanced_crouch_targets=test_balanced_crouch,
+                physics_dt=1.0 / 120.0,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "verified_dwell")
+        ramp = [
+            event
+            for event in raised.exception.report["events"]
+            if event["stage"] == "target_ramp"
+        ]
+        dwell = [
+            event
+            for event in raised.exception.report["events"]
+            if event["stage"] == "verified_dwell"
+        ]
+        self.assertEqual(len(ramp), 36)
+        self.assertEqual(len(dwell), 33)
+        self.assertTrue(all(event["status"] == "accepted" for event in ramp))
+        self.assertTrue(all(event["status"] == "accepted" for event in dwell[:-1]))
+        self.assertEqual(dwell[-1]["status"], "rejected")
+        self.assertAlmostEqual(ramp[-1]["metrics"]["support_margin_m"], 0.015590235551829793)
+        self.assertAlmostEqual(
+            dwell[-2]["metrics"]["support_margin_m"], -0.014453422188215867,
+            delta=4e-4,
+        )
+        self.assertAlmostEqual(
+            dwell[-1]["metrics"]["support_margin_m"], -0.015725125791836343
+        )
+        self.assertEqual(len(controller.commands), 69)
 
     def test_sole_normal_tilt_rejects_thirty_degrees_and_honors_boundary(self):
         config = GaitConfig()

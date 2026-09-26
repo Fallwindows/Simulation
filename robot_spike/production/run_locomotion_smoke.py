@@ -1239,6 +1239,14 @@ def run_isaac(
                         "root_angular_velocity_body_rps": list(
                             feedback.root_angular_velocity_body_rps
                         ),
+                        "leg_joint_position_rad": {
+                            name: float(feedback.joint_position_rad[name])
+                            for name in LEG_JOINTS
+                        },
+                        "leg_joint_velocity_rad_s": {
+                            name: float(feedback.joint_velocity_rad_s[name])
+                            for name in LEG_JOINTS
+                        },
                         "com_offset_body_xy_m": [
                             cosine * dx_world + sine * dy_world,
                             -sine * dx_world + cosine * dy_world,

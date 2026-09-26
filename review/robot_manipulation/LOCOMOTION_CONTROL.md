@@ -332,6 +332,24 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-1794b3b\locomotion_smoke_status.json`;
   the Kit log is
   `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_062729.log`.
+- `RST-004-F12`: exact reviewed integration
+  `ff0ed920113b9b23ce82bb05242a835b750774fd` confirmed the sagittal sign fix
+  helped but exposed insufficient drive tracking. All 36 ramp samples and 32
+  dwell samples passed before margin reached -0.015725126 m at dwell step 33.
+  Both measured planted-leg pitch sums were still about +0.144 rad and moving
+  farther positive at +0.39/+0.34 rad/s, while both issued target sums were
+  about -0.049 rad. The existing target-error gate still passed at 0.08814 rad.
+  The target velocity damping is now 0.100 s, exactly the imported force
+  drive's `Kd/Kp = 12/120` ratio. Through the position target this adds one
+  matching velocity damping term without changing importer gains, effort
+  limits, the 0.045 rad balance cap, or any physical gate. It is capped at
+  0.100 s and every resulting joint target remains bounded by the existing
+  0.30 rad measured target-error gate. Ramp/dwell observations now retain leg
+  q/qd alongside the previously recorded root/COM/correction data. The receipt
+  is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-ff0ed92\locomotion_smoke_status.json`;
+  the Kit log is
+  `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_064457.log`.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 

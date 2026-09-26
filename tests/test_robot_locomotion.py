@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 import math
 from pathlib import Path
 import unittest
@@ -16,7 +17,9 @@ from robot_spike.production.locomotion import (
     Footstep,
     GaitConfig,
     GaitPhase,
+    LEG_JOINTS,
     LocomotionFeedback,
+    LocomotionError,
     LocomotionState,
     PlanarPose,
     WaypointStepPlanner,
@@ -506,6 +509,60 @@ class RobotLocomotionTests(unittest.TestCase):
         # Flat-foot kinematics make pelvis pitch the negative chain sum, so
         # the command is positive and opposes the recorded negative pitch.
         self.assertGreater(-left_chain_pitch, 0.0)
+
+    def test_drive_ratio_damping_opposes_recorded_chain_velocity_within_gate(self):
+        positions = dict(self.spec.reset_joint_positions)
+        velocities = {name: 0.0 for name in positions}
+        recorded = {
+            "left_hip_pitch_joint": (-0.07449323683977127, 0.1399080753326416),
+            "left_knee_joint": (0.2539362907409668, -0.11158437281847),
+            "left_ankle_pitch_joint": (-0.035009998828172684, 0.361137330532074),
+            "right_hip_pitch_joint": (0.07713029533624649, -0.22978147864341736),
+            "right_knee_joint": (-0.25878196954727173, 0.24592140316963196),
+            "right_ankle_pitch_joint": (0.03714081645011902, -0.35391318798065186),
+        }
+        for name, (position, velocity) in recorded.items():
+            positions[name] = position
+            velocities[name] = velocity
+        feedback = replace(
+            self.feedback(
+                0.9833333333333333,
+                tilt=(0.0, -0.144358),
+                linear=(-0.134456, 0.0, 0.0),
+                angular=(0.0, -0.3233670677357086, 0.0),
+            ),
+            joint_position_rad=positions,
+            joint_velocity_rad_s=velocities,
+        )
+        correction = BalanceCorrection(
+            self.config.maximum_balance_correction_rad, 0.0
+        )
+        targets = ConservativeGaitTargetGenerator(self.spec, self.config).targets(
+            feedback, GaitPhase.DOUBLE_SUPPORT, 0.0, correction
+        )
+        legacy_config = GaitConfig(joint_velocity_damping_s=0.012)
+        legacy = ConservativeGaitTargetGenerator(
+            self.spec, legacy_config
+        ).targets(feedback, GaitPhase.DOUBLE_SUPPORT, 0.0, correction)
+
+        for side, sign in (("left", 1.0), ("right", -1.0)):
+            names = tuple(
+                f"{side}_{joint}_joint"
+                for joint in ("hip_pitch", "knee", "ankle_pitch")
+            )
+            measured_chain_velocity = sign * sum(velocities[name] for name in names)
+            target_chain = sign * sum(targets[name] for name in names)
+            legacy_chain = sign * sum(legacy[name] for name in names)
+            self.assertGreater(measured_chain_velocity, 0.0)
+            self.assertLess(target_chain, legacy_chain)
+            self.assertLess(target_chain, 0.0)
+        maximum_error = max(
+            abs(targets[name] - positions[name]) for name in LEG_JOINTS
+        )
+        self.assertLessEqual(maximum_error, self.config.maximum_target_error_rad)
+        self.assertAlmostEqual(self.config.joint_velocity_damping_s, 12.0 / 120.0)
+        with self.assertRaisesRegex(LocomotionError, "damping_s exceeds"):
+            GaitConfig(joint_velocity_damping_s=0.100001)
 
     def test_collapsed_or_invalid_root_height_fails_before_gait_command(self):
         balance = BalanceFeedbackController(self.config)
