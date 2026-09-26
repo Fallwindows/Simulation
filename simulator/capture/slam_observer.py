@@ -138,9 +138,32 @@ def _map_to_odom_from_node(odom_pose: dict[str, float], map_pose: dict[str, floa
     }
 
 
-def _canonical_graph_links(graph) -> list[dict[str, object]]:
+def _canonical_graph_poses(graph, label: str) -> tuple[list[dict[str, object]], set[int]]:
+    ids = [int(node_id) for node_id in getattr(graph, "poses_id", [])]
+    poses = list(getattr(graph, "poses", []))
+    if not ids or len(ids) != len(poses) or len(set(ids)) != len(ids) or any(node_id <= 0 for node_id in ids):
+        raise ValueError(f"{label} must contain one pose for every unique positive pose ID")
+    rows = []
+    for node_id, pose in zip(ids, poses):
+        position, orientation = pose.position, pose.orientation
+        values = [
+            float(position.x), float(position.y), float(position.z),
+            float(orientation.x), float(orientation.y), float(orientation.z), float(orientation.w),
+        ]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError(f"{label} contains a non-finite pose")
+        rows.append({"node_id": node_id, "pose": values})
+    rows.sort(key=lambda row: int(row["node_id"]))
+    return rows, set(ids)
+
+
+def _canonical_graph_links(graph, valid_node_ids: set[int], label: str) -> list[dict[str, object]]:
     links = []
     for link in getattr(graph, "links", []):
+        from_id = int(link.from_id)
+        to_id = int(link.to_id)
+        if from_id not in valid_node_ids or to_id not in valid_node_ids:
+            raise ValueError(f"{label} link endpoint does not reference a validated graph pose ID")
         translation = link.transform.translation
         rotation = link.transform.rotation
         transform = [
@@ -153,8 +176,8 @@ def _canonical_graph_links(graph) -> list[dict[str, object]]:
         if not all(math.isfinite(value) for value in (*transform, *information)):
             raise ValueError("optimized graph link contains non-finite values")
         links.append({
-            "from_id": int(link.from_id),
-            "to_id": int(link.to_id),
+            "from_id": from_id,
+            "to_id": to_id,
             "type": int(link.type),
             "transform": transform,
             "information": information,
@@ -196,8 +219,8 @@ def _require_neighbor_chain(receipt: dict[str, object], label: str) -> None:
         raise RuntimeError(f"{label} contains NeighborMerged edges")
     if not bool(receipt["neighbor_chain_complete"]):
         raise RuntimeError(
-            f"{label} does not contain exactly one type-0 Neighbor edge for every "
-            f"chronologically adjacent node pair: expected {receipt['expected_neighbor_edge_count']}, "
+            f"{label} does not contain exactly one directed older-to-newer type-0 Neighbor edge "
+            f"for every chronologically adjacent node pair: expected {receipt['expected_neighbor_edge_count']}, "
             f"observed {receipt['neighbor_edge_count']}"
         )
 
@@ -246,14 +269,11 @@ def _optimized_graph_receipt(data) -> dict[str, object]:
     transform = [float(trans.x), float(trans.y), float(trans.z), float(rot.x), float(rot.y), float(rot.z), float(rot.w)]
     if not all(math.isfinite(value) for value in transform):
         raise ValueError("optimized graph version contains a non-finite map-to-odom transform")
-    canonical_links = _canonical_graph_links(graph)
+    canonical_links = _canonical_graph_links(graph, node_ids, "optimized graph")
     chronological_node_ids = [int(row["node_id"]) for row in chronological_rows]
-    expected_neighbor_pairs = {
-        tuple(sorted((left, right)))
-        for left, right in zip(chronological_node_ids, chronological_node_ids[1:])
-    }
+    expected_neighbor_pairs = list(zip(chronological_node_ids, chronological_node_ids[1:]))
     neighbor_pairs = [
-        tuple(sorted((int(link["from_id"]), int(link["to_id"]))))
+        (int(link["from_id"]), int(link["to_id"]))
         for link in canonical_links
         if int(link["type"]) == 0
     ]
@@ -262,7 +282,7 @@ def _optimized_graph_receipt(data) -> dict[str, object]:
         neighbor_merged_edge_count == 0
         and len(neighbor_pairs) == len(expected_neighbor_pairs)
         and len(neighbor_pairs) == len(set(neighbor_pairs))
-        and set(neighbor_pairs) == expected_neighbor_pairs
+        and set(neighbor_pairs) == set(expected_neighbor_pairs)
     )
     payload = {
         "optimized_node_poses": pose_rows,
@@ -288,16 +308,16 @@ def _optimized_graph_version(data) -> str:
 def _map_graph_fingerprint(graph) -> str:
     from simulator.capture.manifest import sha256_json
 
-    poses = []
-    for node_id, pose in zip(graph.poses_id, graph.poses):
-        p, q = pose.position, pose.orientation
-        poses.append({"node_id": int(node_id), "pose": [float(p.x), float(p.y), float(p.z), float(q.x), float(q.y), float(q.z), float(q.w)]})
+    poses, pose_ids = _canonical_graph_poses(graph, "map graph fingerprint")
     trans, rot = graph.map_to_odom.translation, graph.map_to_odom.rotation
     transform = [float(trans.x), float(trans.y), float(trans.z), float(rot.x), float(rot.y), float(rot.z), float(rot.w)]
-    if not all(math.isfinite(value) for row in poses for value in row["pose"]) or not all(math.isfinite(value) for value in transform):
+    if not all(math.isfinite(value) for value in transform):
         raise ValueError("map graph fingerprint contains non-finite values")
-    poses.sort(key=lambda row: row["node_id"])
-    return sha256_json({"poses": poses, "links": _canonical_graph_links(graph), "map_to_odom": transform})
+    return sha256_json({
+        "poses": poses,
+        "links": _canonical_graph_links(graph, pose_ids, "map graph fingerprint"),
+        "map_to_odom": transform,
+    })
 
 
 def _write_pcd(path: Path, points: list[tuple[float, float, float]]) -> None:
