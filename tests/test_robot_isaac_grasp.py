@@ -501,6 +501,52 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertEqual(late_result.status, "fail")
         self.assertEqual(late_result.failure, "arm approach deadline expired")
         self.assertEqual(late_result.samples[-1]["approach_confirmations"], 0)
+
+    def test_ec103_measured_plateau_routes_load_to_stronger_shoulder(self):
+        # Exact final command/measurement evidence from R4-grasp-ec103a2.
+        failed_goal = {
+            "right_shoulder_roll_joint": 0.776688702606467,
+            "right_elbow_joint": -1.55832639768996,
+        }
+        failed_measured = {
+            "right_shoulder_roll_joint": 0.47838732600212097,
+            "right_elbow_joint": -0.7201634049415588,
+        }
+        self.assertAlmostEqual(
+            abs(failed_goal["right_elbow_joint"] - failed_measured["right_elbow_joint"]),
+            0.838162992748401,
+        )
+        self.assertAlmostEqual(
+            abs(
+                failed_goal["right_shoulder_roll_joint"]
+                - failed_measured["right_shoulder_roll_joint"]
+            ),
+            0.298301376604346,
+        )
+        # Exact samples 80, 120, 180, 240, 300, and 360 show that more than
+        # two seconds after the final waypoint never brought the tool close.
+        post_waypoint_position_errors_m = (
+            0.348246757190427,
+            0.352876946086211,
+            0.348776551351781,
+            0.354732903565874,
+            0.353710128777883,
+            0.35227260352743,
+        )
+        self.assertGreater(min(post_waypoint_position_errors_m), 0.34)
+        self.assertGreaterEqual(
+            post_waypoint_position_errors_m[-1],
+            post_waypoint_position_errors_m[0],
+        )
+
+        self.assertLessEqual(
+            abs(PREGRASP_ARM_JOINTS_RAD["right_elbow_joint"]), 0.2
+        )
+        self.assertGreater(
+            self.spec.model.joint_limits["right_shoulder_pitch_joint"].effort,
+            self.spec.model.joint_limits["right_elbow_joint"].effort,
+        )
+
     def test_pickup_reset_plan_stages_base_and_preserves_dynamic_product(self):
         from robot_spike.production.arm_reach import RightArmKinematics
 
@@ -523,11 +569,26 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertLess(
             plan.root_position_m[1], self.layout.pickup_support.fixture.minimum_m[1]
         )
+        product_min_z = (
+            product_position[2] - self.layout.product.dimensions_m[2] / 2.0
+        )
+        product_max_z = (
+            product_position[2] + self.layout.product.dimensions_m[2] / 2.0
+        )
+        self.assertGreaterEqual(plan.predicted_palm_position_world_m[2], product_min_z)
+        self.assertLessEqual(plan.predicted_palm_position_world_m[2], product_max_z)
+        self.assertEqual(
+            plan.evidence()["load_distribution"]["primary_support_effort_limit_nm"],
+            self.spec.model.joint_limits["right_shoulder_pitch_joint"].effort,
+        )
         solved = kinematics.solve(
             plan.arm_target, {name: 0.0 for name in ARM_DOF_NAMES}
         )
         self.assertLessEqual(solved.position_error_m, 2.0e-4)
         self.assertLessEqual(solved.orientation_error_rad, 2.0e-3)
+        solved_joints = solved.as_mapping()
+        self.assertGreaterEqual(solved_joints["right_shoulder_pitch_joint"], 1.4)
+        self.assertLessEqual(abs(solved_joints["right_elbow_joint"]), 0.25)
 
     def test_smoke_sequence_requires_contacts_and_measured_lift(self):
         adapter, articulation, palm, product, sensor, clock, _ = self.make_adapter()

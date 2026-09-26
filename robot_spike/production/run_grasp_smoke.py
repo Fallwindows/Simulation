@@ -49,7 +49,9 @@ ROBOT_CONFIG_SHA256 = "b6b2a0a524b65e683a69324debd212f2e91b7e446f8141d2b11f6ab75
 ISAAC_BUILD = "6.1.0-rc.26+release.49347.2d230af4.gl"
 WAIST_ORIGIN_IN_ROOT_M = (-0.052, 0.0, 0.074755)
 PREGRASP_ARM_JOINTS_RAD = dict(
-    zip(ARM_DOF_NAMES, (-0.224, 0.893, 0.790, -1.558, 0.061, -0.463))
+    # Shift the horizontal hold from the 12 Nm elbow to the 30 Nm shoulder
+    # pitch joint. The nearly straight elbow stays inside the same URDF limits.
+    zip(ARM_DOF_NAMES, (1.500, 0.200, 0.000, -0.200, 0.000, 0.000))
 )
 PREGRASP_MAXIMUM_DURATION_S = 3.0
 PREGRASP_CONFIRMATION_SAMPLES = 3
@@ -214,6 +216,15 @@ class PickupResetPlan:
             "arm_target_orientation_xyzw_in_waist": self.arm_target.orientation_xyzw,
             "predicted_palm_position_world_m": self.predicted_palm_position_world_m,
             "product_position_world_m": self.product_position_world_m,
+            "arm_seed_joint_positions_rad": dict(PREGRASP_ARM_JOINTS_RAD),
+            "load_distribution": {
+                "primary_support_joint": "right_shoulder_pitch_joint",
+                "primary_support_effort_limit_nm": 30.0,
+                "elbow_effort_limit_nm": 12.0,
+                "absolute_elbow_flexion_rad": abs(
+                    PREGRASP_ARM_JOINTS_RAD["right_elbow_joint"]
+                ),
+            },
             "source": "layout product pose plus validated URDF/R3 forward kinematics",
             "application": "sole explicit robot reset before smoke physics",
         }
