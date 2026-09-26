@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 import math
+import numbers
 from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, Sequence
 
@@ -189,10 +190,13 @@ class Isaac61GraspFeedbackAdapter:
         return BodyPose(position, orientation)  # type: ignore[arg-type]
 
     def _resolve_body(self, value: object) -> str:
-        if isinstance(value, bool):
-            raise FeedbackUnavailableError("contact body handle cannot be boolean")
+        value = _plain(value)
+        if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+            raise FeedbackUnavailableError(
+                f"contact body handle must be an integer, got {value!r}"
+            )
         try:
-            path = str(self.body_path_resolver(int(value)))
+            path = str(self.body_path_resolver(value))
         except Exception as exc:
             raise FeedbackUnavailableError(f"cannot resolve contact body handle {value!r}") from exc
         if path not in self.bindings.allowed_body_paths:
@@ -226,6 +230,8 @@ class Isaac61GraspFeedbackAdapter:
             try:
                 body0 = self._resolve_body(record["body0"])
                 body1 = self._resolve_body(record["body1"])
+                _xyz(record["position"], f"raw contact {index} position")
+                normal = _xyz(record["normal"], f"raw contact {index} normal")
                 impulse = _xyz(record["impulse"], f"raw contact {index} impulse")
                 record_time = float(record["time"])
                 dt = float(record["dt"])
@@ -233,6 +239,8 @@ class Isaac61GraspFeedbackAdapter:
                 raise FeedbackUnavailableError(f"raw contact {index} lacks {exc.args[0]}") from exc
             if body0 == body1:
                 raise FeedbackUnavailableError("collapsed contact body pair")
+            if math.sqrt(sum(component * component for component in normal)) <= 1.0e-12:
+                raise FeedbackUnavailableError("raw contact normal has zero magnitude")
             product_paths = {self.bindings.product_body_prim_path, self.bindings.product_collider_prim_path}
             if not product_paths.intersection((body0, body1)):
                 raise FeedbackUnavailableError("product sensor returned a contact without the product")

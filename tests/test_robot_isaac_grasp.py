@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import json
+import math
 from pathlib import Path
 import tempfile
 import unittest
@@ -21,7 +23,12 @@ from robot_spike.production.physical_grasp import (
     PhysicalGraspController,
     RobotContactBodyMap,
 )
-from robot_spike.production.run_grasp_smoke import GraspSmokeRunner, exact_contact_bindings
+from robot_spike.production.run_grasp_smoke import (
+    GraspSmokeRunner,
+    exact_contact_bindings,
+    runtime_preflight_evidence,
+    run_isaac,
+)
 from robot_spike.production.runtime import ArticulationController
 from simulator.config.loader import load_scenario
 from simulator.environment.aisle_builder import build_aisle_layout
@@ -81,11 +88,14 @@ class FakeSensor:
         self.clock = clock
         self.records = records
         self.valid = True
+        self.raw_override = None
 
     def get_sensor_reading(self):
         return Reading(self.clock[0], valid=self.valid, in_contact=bool(self.records))
 
     def get_raw_data(self):
+        if self.raw_override is not None:
+            return self.raw_override
         result = []
         for body0, body1, impulse in self.records:
             result.append({
@@ -218,6 +228,51 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(FeedbackUnavailableError, "collapsed"):
             adapter.read_observation()
 
+    def test_fractional_nonfinite_and_boolean_body_handles_fail_closed(self):
+        for malformed in (1.9, math.nan, True, "1"):
+            with self.subTest(handle=malformed):
+                adapter, _, _, _, sensor, clock, _ = self.make_adapter()
+                sensor.raw_override = [{
+                    "body0": malformed,
+                    "body1": 3,
+                    "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "normal": {"x": 1.0, "y": 0.0, "z": 0.0},
+                    "impulse": {"x": 0.01, "y": 0.0, "z": 0.0},
+                    "time": clock[0],
+                    "dt": 0.01,
+                }]
+                with self.assertRaisesRegex(FeedbackUnavailableError, "handle must be an integer"):
+                    adapter.read_observation()
+
+    def test_missing_or_invalid_raw_geometry_fails_closed(self):
+        cases = (
+            ("missing position", None, {"x": 1.0, "y": 0.0, "z": 0.0}),
+            ("missing normal", {"x": 0.0, "y": 0.0, "z": 0.0}, None),
+            ("nonfinite position", {"x": math.inf, "y": 0.0, "z": 0.0},
+             {"x": 1.0, "y": 0.0, "z": 0.0}),
+            ("zero normal", {"x": 0.0, "y": 0.0, "z": 0.0},
+             {"x": 0.0, "y": 0.0, "z": 0.0}),
+            ("nonfinite normal", {"x": 0.0, "y": 0.0, "z": 0.0},
+             {"x": 1.0, "y": math.nan, "z": 0.0}),
+        )
+        for label, position, normal in cases:
+            with self.subTest(case=label):
+                adapter, _, _, _, sensor, clock, _ = self.make_adapter()
+                raw = {
+                    "body0": 1,
+                    "body1": 3,
+                    "impulse": {"x": 0.01, "y": 0.0, "z": 0.0},
+                    "time": clock[0],
+                    "dt": 0.01,
+                }
+                if position is not None:
+                    raw["position"] = position
+                if normal is not None:
+                    raw["normal"] = normal
+                sensor.raw_override = [raw]
+                with self.assertRaises(FeedbackUnavailableError):
+                    adapter.read_observation()
+
     def test_stale_and_invalid_contact_data_fail_closed(self):
         adapter, _, _, _, sensor, clock, _ = self.make_adapter()
         sensor.valid = False
@@ -314,6 +369,127 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertEqual(result.failure, "feedback_unavailable")
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["state_write_policy"]["post_reset_direct_state_writes"], 0)
+
+    def test_preflight_failure_receipt_binds_expected_and_observed_identities(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            args = argparse.Namespace(
+                output=output,
+                acceptance_spec=(
+                    Path.home()
+                    / "Downloads"
+                    / "ROBOT_BACKROOM_RESTOCKING_IMPLEMENTATION_SPEC.md"
+                ),
+                expected_candidate_sha="0" * 40,
+                expected_candidate_tree_sha="1" * 40,
+                isaac_root=Path("C:/isaacsim"),
+            )
+            with self.assertRaisesRegex(RuntimeError, "identity preflight failed"):
+                run_isaac(args, ROOT)
+            report = json.loads(
+                (output / "grasp_smoke_status.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(report["status"], "error")
+        identity = report["identity_preflight"]
+        self.assertEqual(identity["status"], "fail")
+        self.assertEqual(identity["expected"]["candidate_commit"], "0" * 40)
+        self.assertEqual(identity["expected"]["candidate_tree"], "1" * 40)
+        self.assertEqual(
+            identity["expected"]["acceptance_spec_sha256"],
+            "7ea5ca5fa7558aa0a58bf94999adf545a7f6b53232fd155e2cc051cb15bcf0ad",
+        )
+        self.assertEqual(
+            identity["observed"]["isaac_build"],
+            "6.1.0-rc.26+release.49347.2d230af4.gl",
+        )
+        for name in (
+            "candidate_commit",
+            "candidate_tree",
+            "acceptance_spec_sha256",
+            "combined_source_urdf_canonical_sha256",
+            "production_urdf_canonical_sha256",
+            "scenario_sha256",
+            "robot_config_sha256",
+            "isaac_build",
+        ):
+            self.assertIn(name, identity["observed"])
+
+    def test_prepopulated_output_cannot_mix_stale_failure_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            status_path = output / "grasp_smoke_status.json"
+            status_path.write_text(
+                json.dumps({"status": "pass", "stale_success": True}), encoding="utf-8"
+            )
+            (output / "grasp_smoke_status.json.tmp").write_text(
+                json.dumps({"stale_temporary": True}), encoding="utf-8"
+            )
+            args = argparse.Namespace(
+                output=output,
+                acceptance_spec=(
+                    Path.home()
+                    / "Downloads"
+                    / "ROBOT_BACKROOM_RESTOCKING_IMPLEMENTATION_SPEC.md"
+                ),
+                expected_candidate_sha="a" * 40,
+                expected_candidate_tree_sha="b" * 40,
+                isaac_root=Path("C:/isaacsim"),
+            )
+            with self.assertRaisesRegex(RuntimeError, "identity preflight failed"):
+                run_isaac(args, ROOT)
+            report = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertNotIn("stale_success", report)
+        self.assertNotIn("stale_temporary", report)
+        self.assertEqual(report["status"], "error")
+        self.assertEqual(
+            report["identity_preflight"]["expected"]["candidate_commit"], "a" * 40
+        )
+
+    def test_runtime_preflight_binds_exact_build_scenario_config_and_allowlist(self):
+        scenario_path = ROOT / "config" / "scenarios" / "baseline_straight.yaml"
+        robot_config_path = ROOT / "robot_spike" / "production" / "robot_config.json"
+        identity = {
+            "status": "pass",
+            "expected": {},
+            "observed": {
+                "isaac_build": "6.1.0-rc.26+release.49347.2d230af4.gl",
+                "scenario_sha256": "12d41a428dfe0e82da60584da9595b1c74090b33f375cc8be60b237941d8a5d0",
+                "robot_config_sha256": "b6b2a0a524b65e683a69324debd212f2e91b7e446f8141d2b11f6ab75b473fe7",
+                "scenario_path": str(scenario_path.resolve()),
+                "robot_config_path": str(robot_config_path.resolve()),
+                "isaac_root": str(Path("C:/isaacsim").resolve()),
+            },
+            "mismatches": [],
+        }
+        preflight = runtime_preflight_evidence(
+            identity,
+            self.bindings,
+            scenario_path=scenario_path,
+            robot_config_path=robot_config_path,
+            isaac_root=Path("C:/isaacsim"),
+            physics_dt_s=1.0 / 120.0,
+            robot_link_count=len(self.spec.model.link_names),
+            robot_dof_count=len(self.spec.canonical_dof_order),
+            product_contact_sensor_path=(
+                self.layout.product.rigid_body_prim_path + "/grasp_contact_sensor"
+            ),
+        )
+        self.assertEqual(
+            preflight["installed_isaac"]["build"],
+            "6.1.0-rc.26+release.49347.2d230af4.gl",
+        )
+        self.assertEqual(preflight["scenario"]["path"], str(scenario_path.resolve()))
+        self.assertEqual(
+            preflight["robot_config"]["path"], str(robot_config_path.resolve())
+        )
+        self.assertEqual(
+            preflight["contact_bindings"]["robot_link_body_prim_paths"],
+            dict(sorted(self.paths.items())),
+        )
+        self.assertEqual(
+            preflight["contact_bindings"]["complete_allowed_body_paths"],
+            sorted(self.bindings.allowed_body_paths),
+        )
 
 
 if __name__ == "__main__":

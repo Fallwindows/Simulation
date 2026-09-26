@@ -37,6 +37,12 @@ Fixed `*_fingertip` marker paths, unknown bodies, collapsed body pairs, a
 contact with no product side, and a product/product pair raise
 `FeedbackUnavailableError`. The semantic `robot_link_name` is derived from
 the exact resolved body path; no raw label is trusted.
+Raw body handles must be integer objects; booleans, floating point values,
+including integral-looking values, nonfinite values, and strings are rejected
+before the installed path resolver is called. Every raw record must also carry
+a finite world contact position and a finite nonzero contact normal. Missing or
+malformed geometry invalidates the full observation rather than contributing
+contact evidence.
 
 Each raw impulse magnitude is divided by that record's positive measured
 `dt`. Multiple contact points for one exact pair are summed. The aggregate
@@ -84,6 +90,19 @@ adapter contact evidence, and durable error text on failure.
 The command line requires the expected candidate commit and tree, hashes the
 exact owner acceptance specification before SimulationApp starts, and refuses
 a dirty or mismatched checkout.
+The first durable receipt is written before the Isaac import and contains both
+expected and observed commit, tree, acceptance-specification, combined-source
+URDF, and production-URDF identities. A failed preflight preserves that full
+receipt when adding terminal error details.
+It also binds the byte hashes and resolved paths for
+`config/scenarios/baseline_straight.yaml` and production `robot_config.json`,
+and reads the exact installed build string
+`6.1.0-rc.26+release.49347.2d230af4.gl` from `C:\isaacsim\VERSION` before
+SimulationApp starts. After stage binding, the runtime preflight adds all seven
+required link-to-rigid-body mappings and the complete product, collider, support,
+and robot-body allowlist. That receipt is flushed before the explicit reset.
+Each durable write uses a new same-directory temporary file and replaces the
+status atomically; it never reads or merges a prior status or fixed `.tmp` file.
 
 ## Source-only validation limits
 

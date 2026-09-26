@@ -15,6 +15,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 from typing import Callable, Protocol
 
 from robot_spike.production.arm_reach import RightArmKinematics
@@ -23,7 +24,7 @@ from robot_spike.production.isaac_grasp import (
     IsaacArmLiftPort,
     IsaacContactBindings,
 )
-from robot_spike.production.model import load_production_spec
+from robot_spike.production.model import canonical_text_sha256, load_production_spec
 from robot_spike.production.physical_grasp import (
     GraspLimits,
     GraspPhase,
@@ -38,6 +39,11 @@ from simulator.environment.restocking_layout import build_restocking_layout
 
 
 ACCEPTANCE_SPEC_SHA256 = "7ea5ca5fa7558aa0a58bf94999adf545a7f6b53232fd155e2cc051cb15bcf0ad"
+SOURCE_URDF_CANONICAL_SHA256 = "25c62dd8459721ea41e7c3325ab6d4a816e05b34daa89759297151d464be84ea"
+PRODUCTION_URDF_CANONICAL_SHA256 = "b605c9a54f4a8494d333fd7cc5a20de3b4c76ffc83e33bd8027e6bafb7a1f59c"
+BASELINE_SCENARIO_SHA256 = "12d41a428dfe0e82da60584da9595b1c74090b33f375cc8be60b237941d8a5d0"
+ROBOT_CONFIG_SHA256 = "b6b2a0a524b65e683a69324debd212f2e91b7e446f8141d2b11f6ab75b473fe7"
+ISAAC_BUILD = "6.1.0-rc.26+release.49347.2d230af4.gl"
 
 
 class PhysicsStepper(Protocol):
@@ -62,20 +68,80 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def candidate_identity(repo: Path, acceptance_spec: Path) -> dict[str, object]:
-    manifest_path = repo / "robot_spike" / "production" / "production_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    return {
-        "candidate_commit": _git(repo, "rev-parse", "HEAD"),
-        "candidate_tree": _git(repo, "rev-parse", "HEAD^{tree}"),
-        "worktree_clean": not bool(_git(repo, "status", "--porcelain")),
-        "production_urdf_sha256": _sha256(
-            repo / "robot_spike" / "production" / "asimov_orcahand_restocking.urdf"
-        ),
-        "production_urdf_canonical_sha256": manifest["production_urdf_canonical_sha256"],
-        "combined_source_urdf_canonical_sha256": manifest["source_urdf_canonical_sha256"],
+def identity_preflight_receipt(
+    repo: Path,
+    acceptance_spec: Path,
+    expected_candidate_sha: str,
+    expected_candidate_tree_sha: str,
+    isaac_root: Path = Path("C:/isaacsim"),
+) -> dict[str, object]:
+    """Return a complete expected/observed identity receipt without raising."""
+
+    production_root = repo / "robot_spike" / "production"
+    source_path = repo / "robot_spike" / "asimov_orcahand_right.urdf"
+    production_path = production_root / "asimov_orcahand_restocking.urdf"
+    scenario_path = repo / "config" / "scenarios" / "baseline_straight.yaml"
+    robot_config_path = production_root / "robot_config.json"
+    isaac_version_path = isaac_root / "VERSION"
+    expected = {
+        "candidate_commit": expected_candidate_sha,
+        "candidate_tree": expected_candidate_tree_sha,
+        "acceptance_spec_sha256": ACCEPTANCE_SPEC_SHA256,
+        "combined_source_urdf_canonical_sha256": SOURCE_URDF_CANONICAL_SHA256,
+        "production_urdf_canonical_sha256": PRODUCTION_URDF_CANONICAL_SHA256,
+        "scenario_sha256": BASELINE_SCENARIO_SHA256,
+        "robot_config_sha256": ROBOT_CONFIG_SHA256,
+        "isaac_build": ISAAC_BUILD,
+    }
+    observed: dict[str, object] = {
         "acceptance_spec_path": str(acceptance_spec.resolve()),
-        "acceptance_spec_sha256": _sha256(acceptance_spec),
+        "combined_source_urdf_path": str(source_path.resolve()),
+        "production_urdf_path": str(production_path.resolve()),
+        "scenario_path": str(scenario_path.resolve()),
+        "robot_config_path": str(robot_config_path.resolve()),
+        "isaac_root": str(isaac_root.resolve()),
+        "isaac_version_path": str(isaac_version_path.resolve()),
+    }
+    errors: list[str] = []
+
+    def observe(name: str, operation) -> None:
+        try:
+            observed[name] = operation()
+        except Exception as exc:
+            observed[name] = None
+            errors.append(f"{name}: {exc}")
+
+    observe("candidate_commit", lambda: _git(repo, "rev-parse", "HEAD"))
+    observe("candidate_tree", lambda: _git(repo, "rev-parse", "HEAD^{tree}"))
+    observe("worktree_clean", lambda: not bool(_git(repo, "status", "--porcelain")))
+    observe("acceptance_spec_sha256", lambda: _sha256(acceptance_spec))
+    observe(
+        "combined_source_urdf_canonical_sha256",
+        lambda: canonical_text_sha256(source_path),
+    )
+    observe(
+        "production_urdf_canonical_sha256",
+        lambda: canonical_text_sha256(production_path),
+    )
+    observe("production_urdf_byte_sha256", lambda: _sha256(production_path))
+    observe("scenario_sha256", lambda: _sha256(scenario_path))
+    observe("robot_config_sha256", lambda: _sha256(robot_config_path))
+    observe(
+        "isaac_build",
+        lambda: isaac_version_path.read_text(encoding="utf-8").strip(),
+    )
+
+    mismatches = [
+        name for name, value in expected.items() if observed.get(name) != value
+    ]
+    if observed.get("worktree_clean") is not True:
+        mismatches.append("worktree_clean")
+    mismatches.extend(errors)
+    return {
+        "status": "pass" if not mismatches else "fail",
+        "expected": expected,
+        "observed": observed,
+        "mismatches": mismatches,
     }
 
 
@@ -83,13 +149,19 @@ def write_durable_json(path: Path, value: object) -> None:
     """Atomically replace a report and fsync both file and containing directory."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
     payload = json.dumps(value, indent=2, sort_keys=True) + "\n"
-    with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-        stream.write(payload)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
     if os.name == "nt":
         # Windows does not expose a portable directory handle suitable for
         # fsync.  The flushed temporary plus atomic replace is the strongest
@@ -223,25 +295,109 @@ def exact_contact_bindings(
     )
 
 
+def runtime_preflight_evidence(
+    identity_receipt: dict[str, object],
+    bindings: IsaacContactBindings,
+    *,
+    scenario_path: Path,
+    robot_config_path: Path,
+    isaac_root: Path,
+    physics_dt_s: float,
+    robot_link_count: int,
+    robot_dof_count: int,
+    product_contact_sensor_path: str,
+) -> dict[str, object]:
+    """Bind runtime paths and setup to the already validated source identity."""
+
+    if identity_receipt.get("status") != "pass":
+        raise RuntimeError("runtime preflight requires a passing identity receipt")
+    observed = identity_receipt["observed"]
+    expected_paths = {
+        "scenario_path": str(scenario_path.resolve()),
+        "robot_config_path": str(robot_config_path.resolve()),
+        "isaac_root": str(isaac_root.resolve()),
+    }
+    for name, path in expected_paths.items():
+        if observed.get(name) != path:
+            raise RuntimeError(f"runtime preflight {name} differs from identity receipt")
+    robot_map = dict(sorted(bindings.robot_contacts.link_body_prim_paths.items()))
+    return {
+        "identity": identity_receipt,
+        "installed_isaac": {
+            "root": str(isaac_root.resolve()),
+            "build": observed["isaac_build"],
+        },
+        "scenario": {
+            "path": str(scenario_path.resolve()),
+            "sha256": observed["scenario_sha256"],
+        },
+        "robot_config": {
+            "path": str(robot_config_path.resolve()),
+            "sha256": observed["robot_config_sha256"],
+        },
+        "physics_engine": "physx",
+        "physics_dt_s": physics_dt_s,
+        "robot_root": bindings.robot_contacts.robot_root_prim_path,
+        "robot_link_count": robot_link_count,
+        "robot_dof_count": robot_dof_count,
+        "contact_bindings": {
+            "robot_link_body_prim_paths": robot_map,
+            "product_body_prim_path": bindings.product_body_prim_path,
+            "product_collider_prim_path": bindings.product_collider_prim_path,
+            "pickup_support_prim_path": bindings.pickup_support_prim_path,
+            "complete_allowed_body_paths": sorted(bindings.allowed_body_paths),
+        },
+        "product_contact_sensor": product_contact_sensor_path,
+        "sensor_min_threshold_n": 0.0,
+        "sensor_radius": -1.0,
+    }
+
+
 def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
     """Build and execute the real smoke scene; this function starts Isaac."""
 
     app = None
     timeline = None
     status_path = args.output / "grasp_smoke_status.json"
+    identity_receipt: dict[str, object] = {
+        "status": "fail",
+        "expected": {
+            "candidate_commit": args.expected_candidate_sha,
+            "candidate_tree": args.expected_candidate_tree_sha,
+            "acceptance_spec_sha256": ACCEPTANCE_SPEC_SHA256,
+            "combined_source_urdf_canonical_sha256": SOURCE_URDF_CANONICAL_SHA256,
+            "production_urdf_canonical_sha256": PRODUCTION_URDF_CANONICAL_SHA256,
+            "scenario_sha256": BASELINE_SCENARIO_SHA256,
+            "robot_config_sha256": ROBOT_CONFIG_SHA256,
+            "isaac_build": ISAAC_BUILD,
+        },
+        "observed": {},
+        "mismatches": ["identity collection did not complete"],
+    }
+    terminal_receipt: dict[str, object] = {
+        "schema_version": 1,
+        "status": "preflight_fail",
+        "identity_preflight": identity_receipt,
+    }
     try:
-        initial_identity = candidate_identity(repo, args.acceptance_spec)
-        mismatches = []
-        if initial_identity["candidate_commit"] != args.expected_candidate_sha:
-            mismatches.append("candidate commit")
-        if initial_identity["candidate_tree"] != args.expected_candidate_tree_sha:
-            mismatches.append("candidate tree")
-        if initial_identity["acceptance_spec_sha256"] != ACCEPTANCE_SPEC_SHA256:
-            mismatches.append("acceptance specification")
-        if initial_identity["worktree_clean"] is not True:
-            mismatches.append("worktree cleanliness")
-        if mismatches:
-            raise RuntimeError("identity preflight failed: " + ", ".join(mismatches))
+        identity_receipt = identity_preflight_receipt(
+            repo,
+            args.acceptance_spec,
+            args.expected_candidate_sha,
+            args.expected_candidate_tree_sha,
+            args.isaac_root,
+        )
+        terminal_receipt = {
+            "schema_version": 1,
+            "status": "preflight_pass" if identity_receipt["status"] == "pass" else "preflight_fail",
+            "identity_preflight": identity_receipt,
+        }
+        write_durable_json(status_path, terminal_receipt)
+        if identity_receipt["status"] != "pass":
+            raise RuntimeError(
+                "identity preflight failed: "
+                + ", ".join(str(item) for item in identity_receipt["mismatches"])
+            )
         from isaacsim import SimulationApp
 
         app = SimulationApp({"headless": True, "fast_shutdown": False})
@@ -257,7 +413,9 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
         from simulator.environment.isaac_restocking_builder import IsaacRestockingBuilder
 
         spec = load_production_spec(repo / "robot_spike" / "production")
-        scenario = load_scenario(repo / "config" / "scenarios" / "baseline_straight.yaml")
+        scenario_path = repo / "config" / "scenarios" / "baseline_straight.yaml"
+        robot_config_path = repo / "robot_spike" / "production" / "robot_config.json"
+        scenario = load_scenario(scenario_path)
         aisle = build_aisle_layout(scenario.environment)
         layout = build_restocking_layout(aisle)
         usd_path = IsaacRobotLoader(spec).import_urdf(args.output / "derived_usd")
@@ -304,7 +462,7 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
         feedback = Isaac61GraspFeedbackAdapter(
             articulation, palm, product, sensor,
             SimulationManager.get_simulation_time,
-            lambda handle: str(PhysicsSchemaTools.intToSdfPath(int(handle))),
+            lambda handle: str(PhysicsSchemaTools.intToSdfPath(handle)),
             bindings,
             maximum_contact_age_s=2.5 * physics_dt,
         )
@@ -318,27 +476,28 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
             joint_controller, layout, feedback=feedback, arm_lift=lift,
             robot_contacts=bindings.robot_contacts, limits=GraspLimits(),
         )
-        joint_controller.reset()
-
         class _Physics:
             def step(self):
                 SimulationManager.step()
 
-        preflight = {
-            "identity": initial_identity,
-            "isaac_version": "6.1",
-            "physics_engine": "physx",
-            "physics_dt_s": physics_dt,
-            "robot_root": root_path,
-            "robot_link_count": len(link_paths),
-            "robot_dof_count": len(articulation.dof_names),
-            "product_body": handles.product_rigid_body_prim_path,
-            "product_collider": handles.product_collider_prim_path,
-            "pickup_support": handles.pickup_support_prim_path,
-            "product_contact_sensor": sensor_path,
-            "sensor_min_threshold_n": 0.0,
-            "sensor_radius": -1.0,
+        preflight = runtime_preflight_evidence(
+            identity_receipt,
+            bindings,
+            scenario_path=scenario_path,
+            robot_config_path=robot_config_path,
+            isaac_root=args.isaac_root,
+            physics_dt_s=physics_dt,
+            robot_link_count=len(link_paths),
+            robot_dof_count=len(articulation.dof_names),
+            product_contact_sensor_path=sensor_path,
+        )
+        terminal_receipt = {
+            "schema_version": 1,
+            "status": "runtime_preflight_pass",
+            "preflight": preflight,
         }
+        write_durable_json(status_path, terminal_receipt)
+        joint_controller.reset()
         return GraspSmokeRunner(
             _Physics(), grasp, lift, feedback.diagnostics,
             maximum_physics_steps=args.maximum_steps,
@@ -346,12 +505,8 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
             preflight=preflight,
         ).run()
     except Exception as exc:
-        try:
-            diagnostic = json.loads(status_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            diagnostic = {"schema_version": 1}
-        diagnostic.update({"status": "error", "runtime_error": str(exc)})
-        write_durable_json(status_path, diagnostic)
+        terminal_receipt.update({"status": "error", "runtime_error": str(exc)})
+        write_durable_json(status_path, terminal_receipt)
         raise
     finally:
         if timeline is not None:
@@ -372,6 +527,7 @@ def _arguments(argv=None):
     )
     parser.add_argument("--physics-hz", type=float, default=120.0)
     parser.add_argument("--maximum-steps", type=int, default=1800)
+    parser.add_argument("--isaac-root", type=Path, default=Path("C:/isaacsim"))
     return parser.parse_args(argv)
 
 
