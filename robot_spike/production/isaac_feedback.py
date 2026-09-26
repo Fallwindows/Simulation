@@ -299,16 +299,18 @@ class Isaac61LocomotionFeedbackAdapter:
         self.last_contact_point_counts: dict[str, int] = {}
         self.last_contact_diagnostics: dict[str, dict[str, object]] = {}
         self.last_support_diagnostics: dict[str, object] = {}
+        self.last_kinematic_diagnostics: dict[str, object] = {}
 
     @property
     def link_names(self) -> tuple[str, ...]:
         return self._link_names
 
     def diagnostics(self) -> dict[str, object]:
-        """Return a JSON-safe snapshot of the most recent contact/support read."""
+        """Return a JSON-safe snapshot of the most recent measured-state read."""
 
         return copy.deepcopy(
             {
+                "kinematics": self.last_kinematic_diagnostics,
                 "contacts": self.last_contact_diagnostics,
                 "support": self.last_support_diagnostics,
             }
@@ -395,6 +397,7 @@ class Isaac61LocomotionFeedbackAdapter:
     def read_feedback(self) -> LocomotionFeedback:
         self.last_contact_diagnostics = {}
         self.last_support_diagnostics = {}
+        self.last_kinematic_diagnostics = {}
         timestamp_s = float(self.timestamp_source())
         if not math.isfinite(timestamp_s) or timestamp_s < 0.0:
             raise FeedbackUnavailableError("simulation timestamp is invalid")
@@ -406,12 +409,14 @@ class Isaac61LocomotionFeedbackAdapter:
         )
         roll, pitch, yaw = _roll_pitch_yaw_wxyz(root_quaternion)
 
-        linear_world, angular_world = self.articulation.get_velocities()
+        linear_world_raw, angular_world_raw = self.articulation.get_velocities()
+        linear_world = _single_row(linear_world_raw, 3, "root linear velocities")
+        angular_world = _single_row(angular_world_raw, 3, "root angular velocities")
         linear_body = _inverse_rotate_wxyz(
-            root_quaternion, _single_row(linear_world, 3, "root linear velocities")
+            root_quaternion, linear_world
         )
         angular_body = _inverse_rotate_wxyz(
-            root_quaternion, _single_row(angular_world, 3, "root angular velocities")
+            root_quaternion, angular_world
         )
 
         dof_positions = _single_row(
@@ -431,6 +436,32 @@ class Isaac61LocomotionFeedbackAdapter:
                 _matrix(link_orientations_raw, len(self._link_names), 4, "link orientations")
             )
         )
+        self.last_kinematic_diagnostics = {
+            "sample_time_s": timestamp_s,
+            "root": {
+                "position_world_m": list(root_position),
+                "orientation_world_wxyz": list(root_quaternion),
+                "roll_pitch_yaw_rad": [roll, pitch, yaw],
+                "linear_velocity_world_mps": list(linear_world),
+                "angular_velocity_world_rps": list(angular_world),
+                "linear_velocity_body_mps": list(linear_body),
+                "angular_velocity_body_rps": list(angular_body),
+            },
+            "leg_joint_position_rad": {
+                name: joint_position[name] for name in LEG_JOINTS
+            },
+            "leg_joint_velocity_rad_s": {
+                name: joint_velocity[name] for name in LEG_JOINTS
+            },
+            "ankles": {
+                "left": self._ankle_kinematic_diagnostic(
+                    self._left_link_index, link_positions, link_orientations
+                ),
+                "right": self._ankle_kinematic_diagnostic(
+                    self._right_link_index, link_positions, link_orientations
+                ),
+            },
+        }
         masses = self._read_link_masses()
         local_coms = self._read_link_coms()
         total_mass = sum(masses)
@@ -730,6 +761,39 @@ class Isaac61LocomotionFeedbackAdapter:
         sole_position = _transform_point(position, orientation, self.sole_geometry.reference_m)
         yaw = _roll_pitch_yaw_wxyz(orientation)[2]
         return FootPose(sole_position, yaw)
+
+    def _ankle_kinematic_diagnostic(
+        self,
+        link_index: int,
+        link_positions: Sequence[Sequence[float]],
+        link_orientations: Sequence[Sequence[float]],
+    ) -> dict[str, object]:
+        """Describe one measured ankle and all authored sole spheres in world space."""
+
+        position = link_positions[link_index]
+        orientation = link_orientations[link_index]
+        sphere_centers = tuple(
+            _transform_point(position, orientation, center)
+            for center in self.sole_geometry.collision_sphere_centers_m
+        )
+        return {
+            "link_name": self._link_names[link_index],
+            "link_position_world_m": list(position),
+            "link_orientation_world_wxyz": list(orientation),
+            "link_roll_pitch_yaw_rad": list(_roll_pitch_yaw_wxyz(orientation)),
+            "sole_reference_world_m": list(
+                _transform_point(position, orientation, self.sole_geometry.reference_m)
+            ),
+            "sphere_centers_world_m": [list(center) for center in sphere_centers],
+            "sphere_world_lowest_points_m": [
+                [
+                    center[0],
+                    center[1],
+                    center[2] - self.sole_geometry.contact_sphere_radius_m,
+                ]
+                for center in sphere_centers
+            ],
+        }
 
     @staticmethod
     def _raw_contact_position(contact: object, side: str) -> tuple[float, float, float]:

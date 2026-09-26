@@ -27,6 +27,9 @@ from robot_spike.production.isaac_feedback import (
 from robot_spike.production.locomotion import (
     BipedLocomotionController,
     FootSide,
+    GaitConfig,
+    LEG_JOINTS,
+    LocomotionFeedback,
     LocomotionState,
     PlanarPose,
     symmetric_crouch_targets,
@@ -90,6 +93,12 @@ def _validate_arguments(args: argparse.Namespace) -> None:
     durations_and_distance = (args.forward_m, args.settle_s, args.timeout_s)
     if not all(math.isfinite(value) and value > 0.0 for value in durations_and_distance):
         raise ValueError("forward-m, settle-s, and timeout-s must be finite and positive")
+    minimum_startup_s = 2.0 * GaitConfig().double_support_duration_s + 1.0 / args.physics_hz
+    if args.settle_s < minimum_startup_s:
+        raise ValueError(
+            "settle-s must allow one acquisition step plus the configured "
+            "double-support ramp and dwell"
+        )
 
 
 def _sha256(path: Path) -> str:
@@ -284,6 +293,340 @@ class _RecordingFeedbackSource:
     def read_feedback(self):
         self.last = self.adapter.read_feedback()
         return self.last
+
+
+class StartupValidationError(FeedbackUnavailableError):
+    """Raised when measured startup state cannot safely reach double support."""
+
+    def __init__(self, phase: str, reason: str, report: dict[str, Any]):
+        super().__init__(f"staged startup {phase} failed: {reason}")
+        self.phase = phase
+        self.report = report
+
+
+def _interpolate_joint_targets(
+    start: dict[str, float], end: dict[str, float], fraction: float
+) -> dict[str, float]:
+    """Linearly interpolate a name-bound target vector with closed endpoints."""
+
+    if not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+        raise ValueError("joint target interpolation fraction must be in [0, 1]")
+    if start.keys() != end.keys():
+        raise ValueError("joint target interpolation endpoints must have identical names")
+    return {
+        name: start[name] + fraction * (end[name] - start[name])
+        for name in start
+    }
+
+
+def _kinematic_safety_failures(
+    diagnostics: dict[str, Any], config: GaitConfig
+) -> tuple[list[str], dict[str, float]]:
+    """Apply root stability gates even when contact/support construction failed."""
+
+    try:
+        root = diagnostics["kinematics"]["root"]
+        roll, pitch, _yaw = (float(value) for value in root["roll_pitch_yaw_rad"])
+        linear = tuple(float(value) for value in root["linear_velocity_body_mps"])
+        angular = tuple(float(value) for value in root["angular_velocity_body_rps"])
+    except (KeyError, TypeError, ValueError) as exc:
+        return [f"measured root kinematics unavailable: {exc}"], {}
+    values = (roll, pitch, *linear, *angular)
+    if not all(math.isfinite(value) for value in values):
+        return ["measured root kinematics contain a nonfinite value"], {}
+    tilt = max(abs(roll), abs(pitch))
+    linear_speed = math.sqrt(sum(value * value for value in linear))
+    angular_speed = max(abs(value) for value in angular)
+    failures: list[str] = []
+    if tilt > config.maximum_root_tilt_rad:
+        failures.append("root tilt exceeded configured limit")
+    if linear_speed > config.maximum_root_linear_speed_mps:
+        failures.append("root linear speed exceeded configured limit")
+    if angular_speed > config.maximum_root_angular_speed_rps:
+        failures.append("root angular speed exceeded configured limit")
+    return failures, {
+        "root_tilt_rad": tilt,
+        "root_linear_speed_mps": linear_speed,
+        "root_angular_speed_rps": angular_speed,
+    }
+
+
+def _startup_feedback_failures(
+    feedback: LocomotionFeedback,
+    diagnostics: dict[str, Any],
+    targets: dict[str, float] | None,
+    config: GaitConfig,
+) -> tuple[list[str], dict[str, Any]]:
+    """Check true double support, stability, sole flatness, and target tracking."""
+
+    failures, metrics = _kinematic_safety_failures(diagnostics, config)
+    if not (feedback.left_foot.in_contact and feedback.right_foot.in_contact):
+        failures.append("both measured feet are not in contact")
+    contacting_heights = [
+        foot.pose.position_m[2]
+        for foot in (feedback.left_foot, feedback.right_foot)
+        if foot.in_contact
+    ]
+    if contacting_heights:
+        root_clearance = feedback.root_height_m - max(contacting_heights)
+        metrics["root_clearance_m"] = root_clearance
+        if not (
+            config.minimum_root_clearance_m
+            <= root_clearance
+            <= config.maximum_root_clearance_m
+        ):
+            failures.append("root clearance left the configured envelope")
+    else:
+        failures.append("root clearance is unavailable without measured contact")
+    metrics["support_margin_m"] = feedback.support_margin_m
+    if feedback.support_margin_m < config.minimum_support_margin_m:
+        failures.append("COM projection left the configured support margin")
+
+    sole_span = max(
+        math.dist(first, second)
+        for first in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m
+        for second in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m
+    )
+    maximum_height_spread = sole_span * math.sin(config.maximum_root_tilt_rad)
+    metrics["maximum_sole_sphere_height_spread_m"] = maximum_height_spread
+    try:
+        ankle_diagnostics = diagnostics["kinematics"]["ankles"]
+        for side in ("left", "right"):
+            points = ankle_diagnostics[side]["sphere_world_lowest_points_m"]
+            heights = [float(point[2]) for point in points]
+            if len(heights) != len(ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m):
+                raise ValueError(f"{side} sole sphere count is invalid")
+            spread = max(heights) - min(heights)
+            metrics[f"{side}_sole_sphere_height_spread_m"] = spread
+            if not math.isfinite(spread) or spread > maximum_height_spread:
+                failures.append(f"{side} sole flatness exceeded configured tilt envelope")
+    except (KeyError, TypeError, ValueError) as exc:
+        failures.append(f"measured ankle/sole kinematics unavailable: {exc}")
+
+    if targets is not None:
+        try:
+            target_error = max(
+                abs(float(feedback.joint_position_rad[name]) - target)
+                for name, target in targets.items()
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            failures.append(f"measured target tracking is unavailable: {exc}")
+        else:
+            metrics["maximum_joint_target_error_rad"] = target_error
+            if not math.isfinite(target_error) or target_error > config.maximum_target_error_rad:
+                failures.append("joint target tracking exceeded configured limit")
+    return failures, metrics
+
+
+def _staged_double_support_startup(
+    *,
+    feedback_source: _RecordingFeedbackSource,
+    joint_controller: ArticulationController,
+    step_physics: Callable[[], None],
+    crouch_targets: dict[str, float],
+    physics_dt: float,
+    maximum_duration_s: float,
+    config: GaitConfig = GaitConfig(),
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[LocomotionFeedback, dict[str, Any]]:
+    """Acquire double support, ramp drive targets, and prove a stable dwell.
+
+    The caller performs the sole explicit reset.  This routine advances physics,
+    reads measured feedback, and issues only name-bound articulation drive
+    targets.  No pose, velocity, or joint-state setter is used.
+    """
+
+    if not math.isfinite(physics_dt) or physics_dt <= 0.0:
+        raise ValueError("physics timestep must be finite and positive")
+    if not math.isfinite(maximum_duration_s) or maximum_duration_s <= 0.0:
+        raise ValueError("startup duration must be finite and positive")
+    if set(crouch_targets) != set(LEG_JOINTS):
+        raise ValueError("startup crouch targets must name every leg joint exactly once")
+    total_steps = max(1, math.ceil(maximum_duration_s / physics_dt))
+    ramp_steps = max(1, math.ceil(config.double_support_duration_s / physics_dt))
+    dwell_steps = max(1, math.ceil(config.double_support_duration_s / physics_dt))
+    acquisition_steps = min(
+        max(1, math.ceil(config.double_support_timeout_s / physics_dt)),
+        total_steps - ramp_steps - dwell_steps,
+    )
+    if acquisition_steps < 1:
+        raise ValueError("startup duration does not leave a contact acquisition step")
+    report: dict[str, Any] = {
+        "status": "running",
+        "physics_dt_s": physics_dt,
+        "maximum_duration_s": maximum_duration_s,
+        "step_budget": {
+            "contact_acquisition": acquisition_steps,
+            "target_ramp": ramp_steps,
+            "verified_dwell": dwell_steps,
+        },
+        "gates": {
+            "maximum_root_tilt_rad": config.maximum_root_tilt_rad,
+            "maximum_root_linear_speed_mps": config.maximum_root_linear_speed_mps,
+            "maximum_root_angular_speed_rps": config.maximum_root_angular_speed_rps,
+            "maximum_joint_target_error_rad": config.maximum_target_error_rad,
+            "minimum_root_clearance_m": config.minimum_root_clearance_m,
+            "maximum_root_clearance_m": config.maximum_root_clearance_m,
+            "minimum_support_margin_m": config.minimum_support_margin_m,
+            "sole_flatness_source": "sole span times sine(maximum_root_tilt_rad)",
+        },
+        "events": [],
+    }
+
+    def publish() -> None:
+        if progress is not None:
+            progress(report)
+
+    def abort(phase: str, reason: str) -> None:
+        report["status"] = "error"
+        report["failure_phase"] = phase
+        report["failure_reason"] = reason
+        publish()
+        raise StartupValidationError(phase, reason, report)
+
+    acquired: LocomotionFeedback | None = None
+    for step_index in range(1, acquisition_steps + 1):
+        step_physics()
+        try:
+            feedback = feedback_source.read_feedback()
+        except FeedbackUnavailableError as exc:
+            diagnostics = feedback_source.adapter.diagnostics()
+            root_failures, root_metrics = _kinematic_safety_failures(diagnostics, config)
+            report["events"].append(
+                {
+                    "stage": "contact_acquisition",
+                    "step": step_index,
+                    "status": "waiting_for_measured_double_support",
+                    "feedback_error": str(exc),
+                    "root_metrics": root_metrics,
+                    "diagnostics": diagnostics,
+                }
+            )
+            publish()
+            if root_failures:
+                abort("contact_acquisition", "; ".join(root_failures))
+            continue
+        diagnostics = feedback_source.adapter.diagnostics()
+        if not (feedback.left_foot.in_contact and feedback.right_foot.in_contact):
+            root_failures, root_metrics = _kinematic_safety_failures(diagnostics, config)
+            report["events"].append(
+                {
+                    "stage": "contact_acquisition",
+                    "step": step_index,
+                    "status": "waiting_for_measured_double_support",
+                    "root_metrics": root_metrics,
+                    "diagnostics": diagnostics,
+                }
+            )
+            publish()
+            if root_failures:
+                abort("contact_acquisition", "; ".join(root_failures))
+            continue
+        failures, metrics = _startup_feedback_failures(
+            feedback, diagnostics, None, config
+        )
+        report["events"].append(
+            {
+                "stage": "contact_acquisition",
+                "step": step_index,
+                "status": "accepted" if not failures else "rejected",
+                "timestamp_s": feedback.timestamp_s,
+                "metrics": metrics,
+                "diagnostics": diagnostics,
+            }
+        )
+        publish()
+        if failures:
+            abort("contact_acquisition", "; ".join(failures))
+        acquired = feedback
+        report["contact_acquired_step"] = step_index
+        break
+    if acquired is None:
+        abort("contact_acquisition", "bounded window ended without measured bilateral support")
+
+    start_targets = {
+        name: float(acquired.joint_position_rad[name]) for name in LEG_JOINTS
+    }
+    report["ramp_start_joint_position_rad"] = start_targets
+    report["crouch_targets_rad"] = dict(crouch_targets)
+    latest = acquired
+    for step_index in range(1, ramp_steps + 1):
+        targets = _interpolate_joint_targets(
+            start_targets, crouch_targets, step_index / ramp_steps
+        )
+        joint_controller.command_joint_positions(targets)
+        step_physics()
+        try:
+            latest = feedback_source.read_feedback()
+        except FeedbackUnavailableError as exc:
+            report["events"].append(
+                {
+                    "stage": "target_ramp",
+                    "step": step_index,
+                    "status": "rejected",
+                    "feedback_error": str(exc),
+                    "commanded_joint_targets_rad": targets,
+                    "diagnostics": feedback_source.adapter.diagnostics(),
+                }
+            )
+            abort("target_ramp", f"measured contact/support was lost: {exc}")
+        diagnostics = feedback_source.adapter.diagnostics()
+        failures, metrics = _startup_feedback_failures(
+            latest, diagnostics, targets, config
+        )
+        report["events"].append(
+            {
+                "stage": "target_ramp",
+                "step": step_index,
+                "status": "accepted" if not failures else "rejected",
+                "timestamp_s": latest.timestamp_s,
+                "metrics": metrics,
+                "commanded_joint_targets_rad": targets,
+                "diagnostics": diagnostics if failures else None,
+            }
+        )
+        publish()
+        if failures:
+            abort("target_ramp", "; ".join(failures))
+
+    for step_index in range(1, dwell_steps + 1):
+        step_physics()
+        try:
+            latest = feedback_source.read_feedback()
+        except FeedbackUnavailableError as exc:
+            report["events"].append(
+                {
+                    "stage": "verified_dwell",
+                    "step": step_index,
+                    "status": "rejected",
+                    "feedback_error": str(exc),
+                    "commanded_joint_targets_rad": dict(crouch_targets),
+                    "diagnostics": feedback_source.adapter.diagnostics(),
+                }
+            )
+            abort("verified_dwell", f"measured contact/support was lost: {exc}")
+        diagnostics = feedback_source.adapter.diagnostics()
+        failures, metrics = _startup_feedback_failures(
+            latest, diagnostics, crouch_targets, config
+        )
+        report["events"].append(
+            {
+                "stage": "verified_dwell",
+                "step": step_index,
+                "status": "accepted" if not failures else "rejected",
+                "timestamp_s": latest.timestamp_s,
+                "metrics": metrics,
+                "diagnostics": diagnostics if failures else None,
+            }
+        )
+        publish()
+        if failures:
+            abort("verified_dwell", "; ".join(failures))
+
+    report["status"] = "pass"
+    report["final_timestamp_s"] = latest.timestamp_s
+    publish()
+    return latest, report
 
 
 def _sample(step: int, command, feedback, adapter) -> dict[str, Any]:
@@ -675,7 +1018,6 @@ def run_isaac(
         }
         status_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
 
-        settle_steps = max(1, math.ceil(args.settle_s / physics_dt))
         timeout_steps = max(1, math.ceil(args.timeout_s / physics_dt))
         for repeat_index in range(args.repeats):
             sample_path = output / f"repeat_{repeat_index:02d}_samples.jsonl"
@@ -697,19 +1039,33 @@ def run_isaac(
             # This is the only state-writing operation in a repeat.  Every
             # later robot command is a drive target and physics advances state.
             joint_controller.reset()
-            joint_controller.command_joint_positions(symmetric_crouch_targets(spec))
-            SimulationManager.step(steps=settle_steps)
-
             recording_source = _RecordingFeedbackSource(adapter)
+
+            def persist_startup(startup_report: dict[str, Any]) -> None:
+                repeat_result["startup"] = startup_report
+                status_path.write_text(
+                    json.dumps(result, indent=2) + "\n", encoding="utf-8"
+                )
+
             try:
-                initial = recording_source.read_feedback()
-            except FeedbackUnavailableError as exc:
+                initial, startup_report = _staged_double_support_startup(
+                    feedback_source=recording_source,
+                    joint_controller=joint_controller,
+                    step_physics=SimulationManager.step,
+                    crouch_targets=symmetric_crouch_targets(spec),
+                    physics_dt=physics_dt,
+                    maximum_duration_s=args.settle_s,
+                    progress=persist_startup,
+                )
+                repeat_result["startup"] = startup_report
+            except StartupValidationError as exc:
+                repeat_result["startup"] = exc.report
                 _persist_feedback_failure(
                     adapter=adapter,
                     repeat_result=repeat_result,
                     result=result,
                     status_path=status_path,
-                    phase="initial_post_settle_feedback",
+                    phase=f"staged_startup_{exc.phase}",
                     error=exc,
                 )
                 raise
