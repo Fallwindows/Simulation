@@ -33,6 +33,14 @@ is `b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec`. The packe
 inputs, both exact capture manifests, both RGB videos and timestamp indices, and all
 packet outputs.
 
+Before labeling, the builder decodes all 613 frames of the raw comparison and both
+hash-bound RGB sources as RGB24. Every left panel frame must match Current and every
+right panel frame must match R7 at least 38.0 dB PSNR; the three artifact hashes and
+the exact per-frame SSE receipt digest are pinned. Missing, extra, truncated,
+substituted, or lower-PSNR frames fail the rebuild. `manifest.json` records the decoder command,
+FFmpeg version, artifact hashes, observed minima/averages, and an exact per-frame SSE
+receipt digest.
+
 The exact producer capture, SLAM, and perception receipts remain in the local logical
 run paths recorded by `manifest.json`. They are referenced by raw-byte SHA-256 and
 size but omitted from this portable packet because their otherwise valid provenance

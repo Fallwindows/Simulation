@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import os
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -37,6 +39,16 @@ FONT_REGULAR = Path(os.environ.get("EVIDENCE_FONT_REGULAR", r"C:\Windows\Fonts\s
 
 CURRENT_LABEL = "Current | capture 20260925-183307101 | source 48de461"
 R7_LABEL = "R7 | capture 20260925-041644489 | source 3dc5107"
+FRAME_WIDTH = 1920
+FRAME_HEIGHT = 1080
+EXPECTED_FRAME_COUNT = 613
+MIN_PANEL_PSNR_DB = 38.0
+EXPECTED_PANEL_SSE_RECEIPT_SHA256 = "4726e227de7b57197871f0536566cb4e6650d827ff526d74a2b8b1c9df5a1efe"
+EXPECTED_VERIFICATION_ARTIFACT_SHA256 = {
+    "comparison": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+    "current": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+    "r7": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+}
 
 
 def validate_runtime() -> None:
@@ -88,6 +100,181 @@ def file_record(
 
 def load_timestamps() -> list[float]:
     return [json.loads(line)["stamp_s"] for line in CURRENT_INDEX.read_text(encoding="utf-8").splitlines()]
+
+
+def _read_exact(stream: object, byte_count: int) -> bytes:
+    payload = bytearray()
+    while len(payload) < byte_count:
+        chunk = stream.read(byte_count - len(payload))  # type: ignore[attr-defined]
+        if not chunk:
+            break
+        payload.extend(chunk)
+    return bytes(payload)
+
+
+def verify_raw_comparison_sources() -> dict[str, object]:
+    """Verify every comparison panel frame against its exact declared RGB source."""
+    sources = {
+        "comparison": RAW_VIDEO,
+        "current": CURRENT_CAPTURE / "rgb_camera.mp4",
+        "r7": R7_CAPTURE / "rgb_camera.mp4",
+    }
+    actual_artifact_sha256 = {name: sha256(path) for name, path in sources.items()}
+    if actual_artifact_sha256 != EXPECTED_VERIFICATION_ARTIFACT_SHA256:
+        raise RuntimeError(
+            "panel-source verification artifact hash mismatch: "
+            f"expected={EXPECTED_VERIFICATION_ARTIFACT_SHA256}, "
+            f"actual={actual_artifact_sha256}"
+        )
+    commands = {
+        name: [
+            str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(path),
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+        ]
+        for name, path in sources.items()
+    }
+    processes = {
+        name: subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for name, command in commands.items()
+    }
+    for name, process in processes.items():
+        if process.stdout is None or process.stderr is None:
+            for candidate in processes.values():
+                candidate.kill()
+            raise RuntimeError(f"could not open FFmpeg verification stream: {name}")
+
+    panel_bytes = FRAME_WIDTH * FRAME_HEIGHT * 3
+    comparison_bytes = panel_bytes * 2
+    pixel_values = panel_bytes
+    max_sse = math.floor(pixel_values * (255.0 ** 2) / (10.0 ** (MIN_PANEL_PSNR_DB / 10.0)))
+    receipt_digest = hashlib.sha256()
+    psnr_values: dict[str, list[float]] = {"current": [], "r7": []}
+    try:
+        for frame_index in range(EXPECTED_FRAME_COUNT):
+            comparison_payload = _read_exact(processes["comparison"].stdout, comparison_bytes)
+            current_payload = _read_exact(processes["current"].stdout, panel_bytes)
+            r7_payload = _read_exact(processes["r7"].stdout, panel_bytes)
+            sizes = {
+                "comparison": len(comparison_payload),
+                "current": len(current_payload),
+                "r7": len(r7_payload),
+            }
+            expected_sizes = {
+                "comparison": comparison_bytes,
+                "current": panel_bytes,
+                "r7": panel_bytes,
+            }
+            if sizes != expected_sizes:
+                raise RuntimeError(
+                    f"truncated panel-source verification at frame {frame_index}: {sizes}"
+                )
+
+            comparison = np.frombuffer(comparison_payload, dtype=np.uint8).reshape(
+                FRAME_HEIGHT, FRAME_WIDTH * 2, 3
+            )
+            current = np.frombuffer(current_payload, dtype=np.uint8).reshape(
+                FRAME_HEIGHT, FRAME_WIDTH, 3
+            )
+            r7 = np.frombuffer(r7_payload, dtype=np.uint8).reshape(
+                FRAME_HEIGHT, FRAME_WIDTH, 3
+            )
+            panel_sse: dict[str, int] = {}
+            for panel_name, panel, source in (
+                ("current", comparison[:, :FRAME_WIDTH, :], current),
+                ("r7", comparison[:, FRAME_WIDTH:, :], r7),
+            ):
+                delta = panel.astype(np.int16) - source.astype(np.int16)
+                sse = int(np.sum(delta.astype(np.int32) ** 2, dtype=np.int64))
+                if sse > max_sse:
+                    mse = sse / pixel_values
+                    psnr = 10.0 * math.log10((255.0 ** 2) / mse)
+                    raise RuntimeError(
+                        f"{panel_name} panel source mismatch at frame {frame_index}: "
+                        f"PSNR {psnr:.6f} dB is below {MIN_PANEL_PSNR_DB:.1f} dB"
+                    )
+                panel_sse[panel_name] = sse
+                psnr_values[panel_name].append(
+                    float("inf") if sse == 0 else 10.0 * math.log10(
+                        (255.0 ** 2) / (sse / pixel_values)
+                    )
+                )
+            receipt_digest.update(struct.pack(
+                "<IQQ", frame_index, panel_sse["current"], panel_sse["r7"]
+            ))
+
+        trailing = {
+            name: len(_read_exact(process.stdout, 1))
+            for name, process in processes.items()
+        }
+        if any(trailing.values()):
+            raise RuntimeError(
+                f"panel-source verification found frames beyond {EXPECTED_FRAME_COUNT}: {trailing}"
+            )
+    except BaseException:
+        for process in processes.values():
+            if process.poll() is None:
+                process.kill()
+        raise
+
+    failures: list[str] = []
+    for name, process in processes.items():
+        stderr = process.stderr.read().decode("utf-8", errors="replace")
+        return_code = process.wait()
+        if return_code != 0:
+            failures.append(f"{name} decoder exited {return_code}: {stderr}")
+    if failures:
+        raise RuntimeError("; ".join(failures))
+
+    logical_inputs = {
+        "comparison": "runs/20260925-183307101/outputs/rgb-vs-r7/current-left_r7-right_3840x1080.mp4",
+        "current": "runs/20260925-183307101/capture/rgb_camera.mp4",
+        "r7": f"{R7_CAPTURE_LOGICAL.as_posix()}/rgb_camera.mp4",
+    }
+    receipt_sha256 = receipt_digest.hexdigest()
+    if receipt_sha256 != EXPECTED_PANEL_SSE_RECEIPT_SHA256:
+        raise RuntimeError(
+            "panel-source verification SSE receipt mismatch: "
+            f"{receipt_sha256} != {EXPECTED_PANEL_SSE_RECEIPT_SHA256}"
+        )
+
+    return {
+        "status": "passed",
+        "rule": (
+            "Every one of 613 synchronized decoded frames is compared at 1920x1080 RGB24; "
+            "the comparison left half must match Current and the right half must match R7 "
+            "with per-frame PSNR >= 38.0 dB. The three artifact hashes and exact "
+            "per-frame SSE receipt digest must match their pinned values. Missing, extra, "
+            "truncated, substituted, or lower-PSNR frames fail the rebuild."
+        ),
+        "decoder_argv": {
+            name: [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", logical_inputs[name],
+                "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+            ]
+            for name in sources
+        },
+        "ffmpeg_version": subprocess.run(
+            [str(FFMPEG), "-version"], check=True, capture_output=True, text=True
+        ).stdout.splitlines()[0],
+        "frame_count": EXPECTED_FRAME_COUNT,
+        "frame_width": FRAME_WIDTH,
+        "frame_height": FRAME_HEIGHT,
+        "minimum_allowed_psnr_db": MIN_PANEL_PSNR_DB,
+        "observed_psnr_db": {
+            name: {
+                "minimum": min(values),
+                "average": sum(values) / len(values),
+            }
+            for name, values in psnr_values.items()
+        },
+        "per_frame_sse_receipt_sha256": receipt_sha256,
+        "expected_per_frame_sse_receipt_sha256": EXPECTED_PANEL_SSE_RECEIPT_SHA256,
+        "artifact_sha256": {
+            "raw_comparison_output": actual_artifact_sha256["comparison"],
+            "current_rgb_source": actual_artifact_sha256["current"],
+            "r7_rgb_source": actual_artifact_sha256["r7"],
+        },
+    }
 
 
 def match_sheet_frames(sheet: Image.Image) -> list[int]:
@@ -202,6 +389,11 @@ def build_video(timestamps: list[float]) -> None:
 def main() -> None:
     validate_runtime()
     timestamps = load_timestamps()
+    if len(timestamps) != EXPECTED_FRAME_COUNT:
+        raise RuntimeError(
+            f"unexpected RGB timestamp count: {len(timestamps)} != {EXPECTED_FRAME_COUNT}"
+        )
+    source_verification = verify_raw_comparison_sources()
     samples = build_sheet(timestamps)
     build_video(timestamps)
     (PACKET / "sample-times.json").write_text(
@@ -271,6 +463,14 @@ is `{raw_inputs['raw_six_sample_sheet']['sha256']}`. The packet manifest binds t
 inputs, both exact capture manifests, both RGB videos and timestamp indices, and all
 packet outputs.
 
+Before labeling, the builder decodes all 613 frames of the raw comparison and both
+hash-bound RGB sources as RGB24. Every left panel frame must match Current and every
+right panel frame must match R7 at least 38.0 dB PSNR; the three artifact hashes and
+the exact per-frame SSE receipt digest are pinned. Missing, extra, truncated,
+substituted, or lower-PSNR frames fail the rebuild. `manifest.json` records the decoder command,
+FFmpeg version, artifact hashes, observed minima/averages, and an exact per-frame SSE
+receipt digest.
+
 The exact producer capture, SLAM, and perception receipts remain in the local logical
 run paths recorded by `manifest.json`. They are referenced by raw-byte SHA-256 and
 size but omitted from this portable packet because their otherwise valid provenance
@@ -298,7 +498,7 @@ coverage, 203 directed Neighbor links, ground-truth subscription false), and a c
 perception manifest (613 RGB frames, 204 raw/valid/usable LiDAR scans, 82,097 projected
 points, 604 localized inventory rows, ground-truth consumption false). The original
 manifests are bound by hash in `manifest.json`. RGB and perception are complete; the technical
-LiDAR preview and review remain pending. This packet does not claim final production
+preview is independently reviewed (see `technical-lidar-preview/README.md`); it remains preview-only. This packet does not claim final production
 completion.
 
 ## Rebuild requirements
@@ -316,11 +516,9 @@ That directory must contain `capture_manifest.json`, `rgb_camera.mp4`,
 `rgb_frames.jsonl`, and `effective_config.json`. The script's default checks the same
 logical path below its checkout and fails with a prerequisite list when it is absent.
 """
-    (PACKET / "README.md").write_text(readme, encoding="utf-8")
+    (PACKET / "README.md").write_text(readme, encoding="utf-8", newline="\n")
 
-    ffmpeg_version = subprocess.run(
-        [str(FFMPEG), "-version"], check=True, capture_output=True, text=True
-    ).stdout.splitlines()[0]
+    ffmpeg_version = source_verification["ffmpeg_version"]
     outputs = {
         name: file_record(PACKET / name, PACKET)
         for name in [
@@ -374,6 +572,7 @@ logical path below its checkout and fails with a prerequisite list when it is ab
             "current_and_r7_index_bytes_identical": sha256(CURRENT_INDEX) == sha256(R7_CAPTURE / "rgb_frames.jsonl"),
             "samples": samples,
         },
+        "panel_source_verification": source_verification,
         "inputs": raw_inputs,
         "outputs": outputs,
         "current_pipeline_checkpoint": {
@@ -417,7 +616,7 @@ logical path below its checkout and fails with a prerequisite list when it is ab
                 "dense_pose_version": perception_receipt["dense_pose_version"],
                 "map_version": perception_receipt["map_version"],
             },
-            "technical_lidar_preview_review": "pending",
+            "technical_lidar_preview_review": "preview independently reviewed; see technical-lidar-preview packet",
         },
         "source_receipt_policy": {
             "included_in_portable_packet": False,
@@ -433,11 +632,13 @@ logical path below its checkout and fails with a prerequisite list when it is ab
         "limitations": [
             "Current and R7 use different horizontal FOV values (75 and 90 degrees).",
             "Visible appearance remains synthetic, with procedural assets, repeated facings, simplified materials, and flat lighting.",
-            "Technical LiDAR preview and review remain pending.",
+            "The separate LiDAR preview is preview-only and does not claim final technical delivery.",
             "This packet makes no LiDAR, SLAM-accuracy, perception-accuracy, or final-film claim.",
         ],
     }
-    (PACKET / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (PACKET / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 if __name__ == "__main__":

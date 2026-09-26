@@ -15,7 +15,7 @@ This packet contains a review preview from simulated capture `20260925-183307101
 
 The original producer receipt remains unchanged locally at the logical path in `evidence-manifest.json`; its exact raw-byte SHA-256 and size are recorded there. It is omitted from this portable packet because it contains three absolute paths into the user's profile and disposable worktree. The portable receipt preserves the remaining fields and source/output hashes. The capture, SLAM, perception, source-catalog, and artifact hashes are in `evidence-manifest.json` and the portable receipt.
 
-The receipt marks this source `preview_only` and `delivery_eligible: false`. RGB and LiDAR are synchronized to the same simulated capture; ground-truth, future returns, storyboard pixels, and scene/asset metadata are not consumed in the technical render. The raw scan source is actual recorded PointCloud2 output from the simulator, not a physical-world LiDAR recording.
+The rendered output uses the receipt's `profile: preview`. Its catalog-pinned source is classified as `reviewed_production` and marked `delivery_eligible: false`, so this source is not eligible for final delivery. RGB and LiDAR are synchronized to the same simulated capture; ground-truth, future returns, storyboard pixels, and scene/asset metadata are not consumed in the technical render. The raw scan source is actual recorded PointCloud2 output from the simulator, not a physical-world LiDAR recording.
 
 ## How to read the imagery
 
