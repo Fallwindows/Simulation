@@ -1084,6 +1084,8 @@ $global:LASTEXITCODE = 0
             "height": message(height=2),
             "width": message(width=2),
             "field_order": message(field_specs=list(reversed(default_fields))),
+            "field_name": message(field_specs=[("u", 0, 7, 1), *default_fields[1:]]),
+            "field_cardinality": message(field_specs=default_fields[:-1]),
             "field_offset": message(field_specs=[("x", 1, 7, 1), *default_fields[1:]]),
             "field_datatype": message(field_specs=[("x", 0, 8, 1), *default_fields[1:]]),
             "field_count": message(field_specs=[("x", 0, 7, 2), *default_fields[1:]]),
@@ -1092,6 +1094,7 @@ $global:LASTEXITCODE = 0
             "row_step": message(row_step=16),
             "density": message(is_dense=False),
             "raw_data": message(data=bytes(range(11))),
+            "raw_data_same_length": message(data=bytes(reversed(range(12)))),
         }
         for label, mutated in mutations.items():
             with self.subTest(metadata=label):
@@ -1109,9 +1112,12 @@ $global:LASTEXITCODE = 0
                 def result(self): return type("PublishMapResponse", (), {})()
 
             class FakeClient:
-                def __init__(self): self.future = None; self.request = None; self.requests = []
+                def __init__(self):
+                    self.future = None; self.request = None; self.requests = []; self.call_error = None
                 def wait_for_service(self, timeout_sec): return True
                 def call_async(self, request):
+                    if self.call_error is not None:
+                        raise self.call_error
                     self.request = request; self.requests.append(request); self.future = Future(); return self.future
 
             class GraphFuture:
@@ -1188,6 +1194,7 @@ $global:LASTEXITCODE = 0
             class Node:
                 def __init__(self):
                     self.subscriptions = []; self.publisher_count = 1
+                    self.publisher_durability = "volatile"
                     self.create_failure_topic = None; self.destroy_failure_topics = set()
                 def create_subscription(self, message_type, topic, callback, depth):
                     if topic == self.create_failure_topic:
@@ -1202,13 +1209,13 @@ $global:LASTEXITCODE = 0
                     return True
                 def get_publishers_info_by_topic(self, topic):
                     return [
-                        types.SimpleNamespace(qos_profile=types.SimpleNamespace(durability="volatile"))
+                        types.SimpleNamespace(qos_profile=types.SimpleNamespace(durability=self.publisher_durability))
                         for _ in range(self.publisher_count)
                     ]
                 def destroy_node(self): pass
 
             class FakeRos:
-                def __init__(self): self.observer = None; self.spin_count = 0
+                def __init__(self): self.observer = None; self.spin_count = 0; self.invalid_post_ack_stamp = False
                 def ok(self): return True
                 def spin_once(self, node, timeout_sec):
                     self.spin_count += 1
@@ -1243,6 +1250,11 @@ $global:LASTEXITCODE = 0
                             ))
                             old_graph.callback(late_graph)
                             old_data.callback(late_data)
+                            if self.invalid_post_ack_stamp:
+                                data.header = type("Header", (), {
+                                    "stamp": type("Stamp", (), {"sec": 11, "nanosec": 0})(),
+                                    "frame_id": "map",
+                                })()
                             self.observer.map_data_subscription.callback(data)
                             self.observer.map_graph_subscription.callback(graph_message)
                         future.is_done = True
@@ -1516,6 +1528,39 @@ $global:LASTEXITCODE = 0
             with self.assertRaisesRegex(RuntimeError, "stamps do not identify one publication"):
                 observer._capture_final_optimized_graph()
 
+            def restore_publish_baseline():
+                baseline_data, baseline_graph = optimized_graph_response(4.0)
+                observer._on_map(cloud_message(
+                    b"restored-pre-publish-map-cloud-payload", [(4.0, 0.0, 0.0)]
+                ))
+                observer._on_map_data(baseline_data)
+                observer._on_map_graph(baseline_graph)
+
+            restore_publish_baseline()
+            observer.publish_map_client.call_error = RuntimeError("fixture PublishMap call failed")
+            with self.assertRaisesRegex(RuntimeError, "fixture PublishMap call failed"):
+                observer._publish_final_map()
+            call_failure_receipt = observer.publish_map_attempt_receipts[-1]
+            self.assertIn("fixture PublishMap call failed", call_failure_receipt["primary_failure"])
+            self.assertTrue(call_failure_receipt["subscriptions_retired"])
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+            observer.publish_map_client.call_error = None
+
+            restore_publish_baseline()
+            ros.invalid_post_ack_stamp = True
+            with self.assertRaisesRegex(RuntimeError, "do not share one map-frame stamp"):
+                observer._publish_final_map()
+            validation_failure_receipt = observer.publish_map_attempt_receipts[-1]
+            self.assertTrue(validation_failure_receipt["acknowledged"])
+            self.assertIn("do not share one map-frame stamp", validation_failure_receipt["primary_failure"])
+            self.assertTrue(validation_failure_receipt["subscriptions_retired"])
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+            ros.invalid_post_ack_stamp = False
+
             observer.node.publisher_count = 2
             with self.assertRaisesRegex(RuntimeError, "unexpected publisher count"):
                 observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
@@ -1525,18 +1570,36 @@ $global:LASTEXITCODE = 0
 
             observer.node.publisher_count = 1
             timeout_generation, _ = observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
-            timeout_receipt = {"subscriptions_retired": False}
+            observer.node.destroy_failure_topics = {"/mapGraph"}
+            timeout_receipt = {
+                "subscription_generation": timeout_generation,
+                "subscriptions_retired": False,
+                "subscription_retirement_error": None,
+                "primary_failure": None,
+            }
+            observer.publish_map_attempt_receipts.append(timeout_receipt)
             request_count = len(observer.publish_map_client.requests)
-            with self.assertRaisesRegex(RuntimeError, "response timed out"):
+            with self.assertRaisesRegex(RuntimeError, "response timed out") as timeout_error:
                 observer._wait_for_publish_map_response(
                     Future(), __import__("time").monotonic(), 1, 3,
                     timeout_generation, timeout_receipt,
                 )
-            self.assertTrue(timeout_receipt["subscriptions_retired"])
+            self.assertFalse(timeout_receipt["subscriptions_retired"])
+            self.assertIn("response timed out", timeout_receipt["primary_failure"])
+            self.assertIn("map_graph_subscription", timeout_receipt["subscription_retirement_error"])
+            self.assertTrue(any(
+                "subscription retirement also failed" in note
+                for note in getattr(timeout_error.exception, "__notes__", [])
+            ))
             self.assertEqual(len(observer.publish_map_client.requests), request_count)
             self.assertIsNone(observer.map_cloud_subscription)
-            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNotNone(observer.map_graph_subscription)
             self.assertIsNone(observer.map_data_subscription)
+            observer.node.destroy_failure_topics = set()
+            observer._retire_deferred_map_subscriptions()
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertTrue(timeout_receipt["subscriptions_retired"])
+            self.assertTrue(timeout_receipt["subscription_retirement_recovered_on_close"])
 
             destroy_generation, _ = observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
             observer.node.destroy_failure_topics = {"/mapGraph"}
@@ -1558,6 +1621,15 @@ $global:LASTEXITCODE = 0
             self.assertIsNone(observer.map_graph_subscription)
             self.assertIsNone(observer.map_data_subscription)
             observer.node.create_failure_topic = None
+
+            observer.node.publisher_durability = "transient_local"
+            with self.assertRaisesRegex(RuntimeError, "publisher is not volatile"):
+                observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+            self.assertIsNone(observer.active_map_subscription_generation)
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+            observer.node.publisher_durability = "volatile"
 
             observer.node.publisher_count = 0
             with self.assertRaisesRegex(RuntimeError, "did not match all three publishers"):

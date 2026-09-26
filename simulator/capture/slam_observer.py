@@ -740,6 +740,22 @@ class SlamObserver:
         self.map_cloud_frame_id = None
         self.map_cloud_payload_fingerprint = None
 
+    def _retire_deferred_map_subscriptions(self) -> None:
+        subscription_attributes = (
+            "map_cloud_subscription", "map_graph_subscription", "map_data_subscription",
+        )
+        if not any(getattr(self, attribute, None) is not None for attribute in subscription_attributes):
+            return
+        generation = int(getattr(self, "map_subscription_generation", 0))
+        self._retire_map_subscriptions(generation)
+        for receipt in reversed(getattr(self, "publish_map_attempt_receipts", [])):
+            if int(receipt.get("subscription_generation", -1)) != generation:
+                continue
+            if not bool(receipt.get("subscriptions_retired", False)):
+                receipt["subscriptions_retired"] = True
+                receipt["subscription_retirement_recovered_on_close"] = True
+            break
+
     def _wait_for_publish_map_response(
         self,
         future,
@@ -751,25 +767,52 @@ class SlamObserver:
     ):
         while self.rclpy.ok() and not future.done():
             if time.monotonic() >= deadline:
-                self._retire_map_subscriptions(subscription_generation)
-                attempt_receipt["subscriptions_retired"] = True
-                raise RuntimeError(f"RTAB-Map PublishMap response timed out on attempt {attempt}/{max_attempts}")
+                self._raise_publish_map_failure_after_retirement(
+                    RuntimeError(f"RTAB-Map PublishMap response timed out on attempt {attempt}/{max_attempts}"),
+                    subscription_generation,
+                    attempt_receipt,
+                )
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
         if not self.rclpy.ok():
-            self._retire_map_subscriptions(subscription_generation)
-            attempt_receipt["subscriptions_retired"] = True
-            raise RuntimeError("ROS shut down while waiting for final map publication")
+            self._raise_publish_map_failure_after_retirement(
+                RuntimeError("ROS shut down while waiting for final map publication"),
+                subscription_generation,
+                attempt_receipt,
+            )
         try:
             response = future.result()
-        except BaseException:
-            self._retire_map_subscriptions(subscription_generation)
-            attempt_receipt["subscriptions_retired"] = True
-            raise
+        except BaseException as exc:
+            self._raise_publish_map_failure_after_retirement(
+                exc,
+                subscription_generation,
+                attempt_receipt,
+            )
         if response is None:
-            self._retire_map_subscriptions(subscription_generation)
-            attempt_receipt["subscriptions_retired"] = True
-            raise RuntimeError(f"RTAB-Map PublishMap returned no response on attempt {attempt}/{max_attempts}")
+            self._raise_publish_map_failure_after_retirement(
+                RuntimeError(f"RTAB-Map PublishMap returned no response on attempt {attempt}/{max_attempts}"),
+                subscription_generation,
+                attempt_receipt,
+            )
         return response
+
+    def _raise_publish_map_failure_after_retirement(
+        self,
+        primary_error: BaseException,
+        subscription_generation: int,
+        attempt_receipt: dict[str, object],
+    ) -> None:
+        attempt_receipt["primary_failure"] = str(primary_error)
+        try:
+            self._retire_map_subscriptions(subscription_generation)
+        except BaseException as cleanup_error:
+            attempt_receipt["subscriptions_retired"] = False
+            attempt_receipt["subscription_retirement_error"] = str(cleanup_error)
+            if hasattr(primary_error, "add_note"):
+                primary_error.add_note(f"map subscription retirement also failed: {cleanup_error}")
+        else:
+            attempt_receipt["subscriptions_retired"] = True
+            attempt_receipt["subscription_retirement_error"] = None
+        raise primary_error
 
     def _rebind_map_subscriptions(self, deadline: float) -> tuple[int, dict[str, int]]:
         prior_generation = int(getattr(self, "map_subscription_generation", 0))
@@ -935,6 +978,33 @@ class SlamObserver:
         self.odom_input_coverage_complete = True
 
     def _publish_final_map(self) -> None:
+        try:
+            self._publish_final_map_impl()
+        except BaseException as primary_error:
+            subscription_attributes = (
+                "map_cloud_subscription", "map_graph_subscription", "map_data_subscription",
+            )
+            if any(getattr(self, attribute, None) is not None for attribute in subscription_attributes):
+                generation = int(getattr(self, "map_subscription_generation", 0))
+                receipt = next((
+                    item for item in reversed(getattr(self, "publish_map_attempt_receipts", []))
+                    if int(item.get("subscription_generation", -1)) == generation
+                ), None)
+                if receipt is not None and receipt.get("primary_failure") is None:
+                    self._raise_publish_map_failure_after_retirement(
+                        primary_error,
+                        generation,
+                        receipt,
+                    )
+                if receipt is None:
+                    try:
+                        self._retire_map_subscriptions(generation)
+                    except BaseException as cleanup_error:
+                        if hasattr(primary_error, "add_note"):
+                            primary_error.add_note(f"map subscription retirement also failed: {cleanup_error}")
+            raise
+
+    def _publish_final_map_impl(self) -> None:
         service_deadline = time.monotonic() + self.close_timeout_s
         while self.rclpy.ok() and not self.publish_map_client.wait_for_service(timeout_sec=0.2):
             if time.monotonic() >= service_deadline:
@@ -998,6 +1068,8 @@ class SlamObserver:
                 "subscription_qos": dict(self.map_subscription_qos_contract),
                 "callback_executor_model": self.callback_executor_model,
                 "subscriptions_retired": False,
+                "subscription_retirement_error": None,
+                "primary_failure": None,
                 "acknowledged": False,
                 "map_cloud_callbacks_before": self.map_cloud_callbacks_before_publish,
                 "map_cloud_callbacks_after": self.map_cloud_callbacks,
@@ -1153,8 +1225,6 @@ class SlamObserver:
                     break
                 self.rclpy.spin_once(self.node, timeout_sec=0.1)
             if not self.rclpy.ok():
-                self._retire_map_subscriptions(subscription_generation)
-                attempt_receipt["subscriptions_retired"] = True
                 raise RuntimeError("ROS shut down while waiting for final map publication")
 
             self._retire_map_subscriptions(subscription_generation)
@@ -1408,11 +1478,7 @@ class SlamObserver:
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def close(self) -> dict[str, object]:
-        map_subscription_attributes = (
-            "map_cloud_subscription", "map_graph_subscription", "map_data_subscription",
-        )
-        if any(getattr(self, attribute, None) is not None for attribute in map_subscription_attributes):
-            self._retire_map_subscriptions(int(getattr(self, "map_subscription_generation", 0)))
+        self._retire_deferred_map_subscriptions()
         odom_fields = ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "quaternion_valid", "frame_id"]
         raw_rows = [{**row, "frame_id": "odom"} for row in sorted(self.odom_rows, key=lambda row: float(row["timestamp_s"]))]
         with (self.output_dir / "slam_odom_poses.csv").open("w", newline="", encoding="utf-8") as handle:
