@@ -1057,9 +1057,10 @@ $global:LASTEXITCODE = 0
                 def result(self): return type("PublishMapResponse", (), {})()
 
             class FakeClient:
-                def __init__(self): self.future = None; self.request = None
+                def __init__(self): self.future = None; self.request = None; self.requests = []
                 def wait_for_service(self, timeout_sec): return True
-                def call_async(self, request): self.request = request; self.future = Future(); return self.future
+                def call_async(self, request):
+                    self.request = request; self.requests.append(request); self.future = Future(); return self.future
 
             class GraphFuture:
                 def __init__(self, response): self.response = response
@@ -1120,10 +1121,15 @@ $global:LASTEXITCODE = 0
                         message = type("Message", (), {
                             "fields": [type("Field", (), {"name": name})() for name in ("x", "y", "z")],
                             "header": type("Header", (), {"stamp": type("Stamp", (), {"sec": 12, "nanosec": 0})(), "frame_id": "map"})(),
+                            "data": b"identical-map-cloud-payload",
                         })()
                         self.observer._on_map(message)
                         data, graph_message = optimized_graph_response(4.0)
-                        self.observer._on_map_data(data)
+                        # The first PublishMap delivery intentionally omits the
+                        # volatile KEEP_LAST(1) /mapData sample. The identical
+                        # bounded retry must deliver a wholly fresh triplet.
+                        if len(self.observer.publish_map_client.requests) > 1:
+                            self.observer._on_map_data(data)
                         self.observer._on_map_graph(graph_message)
                         future.is_done = True
                     else:
@@ -1188,6 +1194,7 @@ $global:LASTEXITCODE = 0
             pre_cloud = type("Message", (), {
                 "fields": [type("Field", (), {"name": name})() for name in ("x", "y", "z")],
                 "header": type("Header", (), {"stamp": type("Stamp", (), {"sec": 12, "nanosec": 0})(), "frame_id": "map"})(),
+                "data": b"identical-map-cloud-payload",
             })()
             observer._on_map(pre_cloud); observer._on_map_data(pre_data); observer._on_map_graph(pre_graph)
             observer.spin_until_done()
@@ -1199,8 +1206,30 @@ $global:LASTEXITCODE = 0
             self.assertGreater(observer.callback_generation, observer.map_publication_generation)
             self.assertIsNone(observer.mapper_database_span)
             self.assertTrue(observer.final_map_span)
-            self.assertEqual(observer.map_messages_before_publish, 1)
-            self.assertEqual(observer.map_messages, 2)
+            self.assertEqual(observer.publish_map_attempts, 2)
+            self.assertEqual(observer.map_messages_before_publish, 2)
+            self.assertEqual(observer.map_messages, 3)
+            self.assertEqual(len(observer.publish_map_client.requests), 2)
+            self.assertFalse(observer.publish_map_attempt_receipts[0]["fresh_map_data"])
+            self.assertFalse(observer.publish_map_attempt_receipts[0]["accepted"])
+            self.assertTrue(observer.publish_map_attempt_receipts[1]["fresh_map_data"])
+            self.assertTrue(observer.publish_map_attempt_receipts[1]["accepted"])
+            self.assertEqual(
+                observer.publish_map_attempt_receipts[0]["map_data_messages_before"],
+                observer.publish_map_attempt_receipts[0]["map_data_messages_after"],
+            )
+            self.assertGreater(
+                observer.publish_map_attempt_receipts[1]["map_data_messages_after"],
+                observer.publish_map_attempt_receipts[1]["map_data_messages_before"],
+            )
+            self.assertEqual(
+                observer.publish_map_attempt_receipts[0]["graph_fingerprints"],
+                observer.publish_map_attempt_receipts[1]["graph_fingerprints"],
+            )
+            self.assertEqual(
+                observer.publish_map_attempt_receipts[0]["cloud_payload_fingerprints"],
+                observer.publish_map_attempt_receipts[1]["cloud_payload_fingerprints"],
+            )
             self.assertEqual(observer.final_map_graph_stamp_s, observer.final_cloud_stamp_s)
             self.assertTrue(observer.publish_map_client.request.global_map)
             self.assertTrue(observer.publish_map_client.request.optimized)
@@ -1227,6 +1256,9 @@ $global:LASTEXITCODE = 0
             self.assertTrue(result["map_pose_correction_complete"])
             self.assertEqual(result["pose_source"], "rtabmap_optimized_graph")
             self.assertTrue(result["map_graph_matches_final_cloud"])
+            self.assertEqual(result["publish_map_attempts"], 2)
+            self.assertEqual(len(result["publish_map_attempt_receipts"]), 2)
+            self.assertTrue(result["final_cloud_payload_fingerprint"])
             self.assertTrue(result["graph_pose_version"])
             self.assertEqual(result["final_map_graph_stamp_s"], result["final_cloud_stamp_s"])
             self.assertEqual(result["final_map_graph_frame_id"], "map")

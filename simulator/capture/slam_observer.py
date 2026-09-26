@@ -345,6 +345,17 @@ def _map_graph_fingerprint(graph) -> str:
     })
 
 
+def _cloud_payload_fingerprint(message) -> str:
+    data = getattr(message, "data", None)
+    if data is None:
+        raise ValueError("map cloud message omitted its raw payload")
+    try:
+        payload = bytes(data)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("map cloud raw payload is not byte-addressable") from exc
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _write_pcd(path: Path, points: list[tuple[float, float, float]]) -> None:
     with path.open("w", encoding="ascii", newline="\n") as handle:
         handle.write("# .PCD v0.7 - Point Cloud Data file format\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\n")
@@ -483,6 +494,11 @@ class SlamObserver:
         self.final_map_graph_stamp_s: float | None = None
         self.final_cloud_stamp_s: float | None = None
         self.final_map_graph_frame_id: str | None = None
+        self.map_cloud_payload_fingerprint: str | None = None
+        self.final_cloud_payload_fingerprint: str | None = None
+        self.publish_map_attempts = 0
+        self.publish_map_max_attempts = 3
+        self.publish_map_attempt_receipts: list[dict[str, object]] = []
         self.latest_map: list[tuple[float, float, float]] = []
         self.map_stamp_s: float | None = None
         self.map_messages = 0
@@ -575,6 +591,7 @@ class SlamObserver:
         self.callback_generation += 1
         self.map_publication_generation += 1
         self.map_cloud_callbacks = getattr(self, "map_cloud_callbacks", 0) + 1
+        self.map_cloud_payload_fingerprint = _cloud_payload_fingerprint(message)
         fields = {"x", "y", "z"}
         names = {field.name for field in message.fields}
         if not fields.issubset(names):
@@ -726,79 +743,169 @@ class SlamObserver:
         # for every optimized graph pose. Fetch the authoritative complete graph
         # before asking PublishMap to emit the matching graph/data/cloud triplet.
         self._request_full_optimized_graph()
-        service_deadline = time.monotonic() + self.close_timeout_s
-        request = self.publish_map_request_factory()
-        request.global_map = True
-        request.optimized = True
-        request.graph_only = False
-        self.map_messages_before_publish = self.map_messages
-        self.map_cloud_callbacks_before_publish = self.map_cloud_callbacks
-        self.map_graph_before_publish = self.map_graph_messages
-        self.map_data_before_publish = self.map_data_messages
-        future = self.publish_map_client.call_async(request)
-        while self.rclpy.ok() and not future.done():
-            if time.monotonic() >= service_deadline:
-                raise RuntimeError("RTAB-Map PublishMap response timed out")
-            self.rclpy.spin_once(self.node, timeout_sec=0.1)
-        if not self.rclpy.ok():
-            raise RuntimeError("ROS shut down while waiting for final map publication")
-        response = future.result()
-        # PublishMap.srv has an empty response. A completed, exception-free
-        # future is its acknowledgement; the generated response has no success field.
-        if response is None:
-            raise RuntimeError("RTAB-Map PublishMap returned no response")
-        self.publish_map_acknowledged = True
+        self.publish_map_attempts = 0
+        self.publish_map_attempt_receipts = []
+        max_attempts = int(getattr(self, "publish_map_max_attempts", 3))
+        if max_attempts <= 0:
+            raise RuntimeError("PublishMap retry count must be positive")
+        overall_deadline = time.monotonic() + self.close_timeout_s
+        observed_graph_fingerprints: set[str] = set()
+        observed_cloud_payload_fingerprints: set[str] = set()
 
-        post_ack_deadline = time.monotonic() + self.close_timeout_s
-        quiet_since: float | None = None
-        last_generation = self.map_publication_generation
-        while self.rclpy.ok():
+        for attempt in range(1, max_attempts + 1):
             now = time.monotonic()
-            fresh_cloud_emitted = self.map_cloud_callbacks > self.map_cloud_callbacks_before_publish
-            graph_cohort_ready = (
-                self.map_graph_messages > self.map_graph_before_publish
-                and self.map_data_messages > self.map_data_before_publish
-                and self.map_graph_stamp_s is not None
-                and self.map_data_stamp_s is not None
-                and self.map_graph_stamp_s == self.map_data_stamp_s
-                and self.final_map_graph_frame_id == "map"
-                and self.map_data_frame_id == "map"
-            )
-            if fresh_cloud_emitted:
-                cloud_cohort_ready = (
-                    self.map_messages > self.map_messages_before_publish
-                    and self.map_stamp_s is not None
-                    and self.map_graph_stamp_s == self.map_stamp_s
-                    and self.map_cloud_frame_id == "map"
+            if now >= overall_deadline:
+                break
+            remaining_attempts = max_attempts - attempt + 1
+            attempt_deadline = now + (overall_deadline - now) / remaining_attempts
+            self.publish_map_attempts = attempt
+            self.final_map_span = False
+            self.map_messages_before_publish = self.map_messages
+            self.map_cloud_callbacks_before_publish = self.map_cloud_callbacks
+            self.map_graph_before_publish = self.map_graph_messages
+            self.map_data_before_publish = self.map_data_messages
+            attempt_receipt = {
+                "attempt": attempt,
+                "acknowledged": False,
+                "map_cloud_callbacks_before": self.map_cloud_callbacks_before_publish,
+                "map_cloud_callbacks_after": self.map_cloud_callbacks,
+                "map_messages_before": self.map_messages_before_publish,
+                "map_messages_after": self.map_messages,
+                "map_graph_messages_before": self.map_graph_before_publish,
+                "map_graph_messages_after": self.map_graph_messages,
+                "map_data_messages_before": self.map_data_before_publish,
+                "map_data_messages_after": self.map_data_messages,
+                "fresh_cloud": False,
+                "fresh_map_graph": False,
+                "fresh_map_data": False,
+                "map_cloud_stamp_s": None,
+                "map_graph_stamp_s": None,
+                "map_data_stamp_s": None,
+                "map_cloud_frame_id": None,
+                "map_graph_frame_id": None,
+                "map_data_frame_id": None,
+                "graph_fingerprints": [],
+                "cloud_payload_fingerprints": [],
+                "source_graph_identity": None,
+                "accepted": False,
+            }
+            self.publish_map_attempt_receipts.append(attempt_receipt)
+            request = self.publish_map_request_factory()
+            request.global_map = True
+            request.optimized = True
+            request.graph_only = False
+            future = self.publish_map_client.call_async(request)
+            while self.rclpy.ok() and not future.done():
+                if time.monotonic() >= attempt_deadline:
+                    raise RuntimeError(f"RTAB-Map PublishMap response timed out on attempt {attempt}/{max_attempts}")
+                self.rclpy.spin_once(self.node, timeout_sec=0.1)
+            if not self.rclpy.ok():
+                raise RuntimeError("ROS shut down while waiting for final map publication")
+            response = future.result()
+            # PublishMap.srv has an empty response. A completed, exception-free
+            # future is its acknowledgement; the generated response has no success field.
+            if response is None:
+                raise RuntimeError(f"RTAB-Map PublishMap returned no response on attempt {attempt}/{max_attempts}")
+            self.publish_map_acknowledged = True
+            attempt_receipt["acknowledged"] = True
+
+            attempt_graph_fingerprints: set[str] = set()
+            attempt_cloud_payload_fingerprints: set[str] = set()
+            quiet_since: float | None = None
+            last_generation = self.map_publication_generation
+            accepted = False
+            while self.rclpy.ok():
+                now = time.monotonic()
+                fresh_cloud = (
+                    self.map_cloud_callbacks > self.map_cloud_callbacks_before_publish
+                    and self.map_messages > self.map_messages_before_publish
                 )
-                cloud_span_stamp = self.map_stamp_s
-            else:
-                cloud_cohort_ready = (
-                    self.cached_cloud_points is not None
-                    and self.cached_cloud_stamp_s is not None
-                    and self.cached_cloud_frame_id == "map"
-                    and self.cached_cloud_graph_fingerprint is not None
-                )
-                cloud_span_stamp = self.cached_cloud_stamp_s
-            self.final_map_span = (
-                cloud_cohort_ready
-                and cloud_span_stamp is not None
-                and self.expected_sensor_last_stamp_s is not None
-                and cloud_span_stamp >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
-            )
-            if self.map_publication_generation != last_generation:
-                quiet_since = None
-                last_generation = self.map_publication_generation
-            elif self.publish_map_acknowledged and self.final_map_span and graph_cohort_ready and cloud_cohort_ready:
-                if quiet_since is None:
-                    quiet_since = now
-                elif now - quiet_since >= 1.0:
-                    self.drain_complete = True
-                    self._capture_final_optimized_graph()
-                    return
-            if now >= post_ack_deadline:
-                raise RuntimeError("final optimized map/graph span did not settle within the bounded wait")
-            self.rclpy.spin_once(self.node, timeout_sec=0.1)
+                fresh_graph = self.map_graph_messages > self.map_graph_before_publish
+                fresh_data = self.map_data_messages > self.map_data_before_publish
+                attempt_receipt.update({
+                    "map_cloud_callbacks_after": self.map_cloud_callbacks,
+                    "map_messages_after": self.map_messages,
+                    "map_graph_messages_after": self.map_graph_messages,
+                    "map_data_messages_after": self.map_data_messages,
+                    "fresh_cloud": fresh_cloud,
+                    "fresh_map_graph": fresh_graph,
+                    "fresh_map_data": fresh_data,
+                    "map_cloud_stamp_s": self.map_stamp_s if fresh_cloud else None,
+                    "map_graph_stamp_s": self.map_graph_stamp_s if fresh_graph else None,
+                    "map_data_stamp_s": self.map_data_stamp_s if fresh_data else None,
+                    "map_cloud_frame_id": self.map_cloud_frame_id if fresh_cloud else None,
+                    "map_graph_frame_id": self.final_map_graph_frame_id if fresh_graph else None,
+                    "map_data_frame_id": self.map_data_frame_id if fresh_data else None,
+                })
+                data_fingerprint: str | None = None
+                graph_fingerprint: str | None = None
+                if fresh_graph:
+                    graph_fingerprint = _map_graph_fingerprint(self.map_graph_message)
+                    attempt_graph_fingerprints.add(graph_fingerprint)
+                    observed_graph_fingerprints.add(graph_fingerprint)
+                if fresh_data:
+                    data_graph = getattr(self.map_data_message, "graph", None)
+                    if data_graph is None:
+                        raise RuntimeError("fresh post-request /mapData omitted its graph payload")
+                    data_fingerprint = _map_graph_fingerprint(data_graph)
+                    attempt_graph_fingerprints.add(data_fingerprint)
+                    observed_graph_fingerprints.add(data_fingerprint)
+                if fresh_cloud:
+                    cloud_payload_fingerprint = self.map_cloud_payload_fingerprint
+                    if cloud_payload_fingerprint is None:
+                        raise RuntimeError("fresh post-request cloud omitted its raw payload fingerprint")
+                    attempt_cloud_payload_fingerprints.add(cloud_payload_fingerprint)
+                    observed_cloud_payload_fingerprints.add(cloud_payload_fingerprint)
+                attempt_receipt["graph_fingerprints"] = sorted(attempt_graph_fingerprints)
+                attempt_receipt["cloud_payload_fingerprints"] = sorted(attempt_cloud_payload_fingerprints)
+                if len(observed_graph_fingerprints) > 1 or len(observed_cloud_payload_fingerprints) > 1:
+                    raise RuntimeError(
+                        "PublishMap retries emitted inconsistent graph or raw cloud payload fingerprints"
+                    )
+
+                exact_triplet = fresh_cloud and fresh_graph and fresh_data
+                if exact_triplet:
+                    if not (
+                        self.map_graph_stamp_s == self.map_data_stamp_s == self.map_stamp_s
+                        and self.final_map_graph_frame_id == self.map_data_frame_id == self.map_cloud_frame_id == "map"
+                    ):
+                        raise RuntimeError("fresh PublishMap graph/data/cloud triplet does not share one map-frame stamp")
+                    if data_fingerprint != graph_fingerprint:
+                        raise RuntimeError("fresh PublishMap /mapData and /mapGraph fingerprints differ")
+                    source_receipt = _optimized_graph_receipt(self.map_data_message)
+                    attempt_receipt["source_graph_identity"] = str(source_receipt["source_graph_identity"])
+                    if str(source_receipt["source_graph_identity"]) != self.pre_publish_source_graph_identity:
+                        raise RuntimeError("immutable RTAB-Map source graph changed between GetMap and PublishMap")
+                    self.final_map_span = (
+                        self.map_stamp_s is not None
+                        and self.expected_sensor_last_stamp_s is not None
+                        and self.map_stamp_s >= self.expected_sensor_last_stamp_s - self.sensor_scan_period_s - 1e-3
+                    )
+                if self.map_publication_generation != last_generation:
+                    quiet_since = None
+                    last_generation = self.map_publication_generation
+                elif exact_triplet and self.final_map_span:
+                    if quiet_since is None:
+                        quiet_since = now
+                    elif now - quiet_since >= 1.0:
+                        accepted = True
+                        attempt_receipt["accepted"] = True
+                        break
+                if now >= attempt_deadline:
+                    break
+                self.rclpy.spin_once(self.node, timeout_sec=0.1)
+            if not self.rclpy.ok():
+                raise RuntimeError("ROS shut down while waiting for final map publication")
+
+            if accepted:
+                self.drain_complete = True
+                self._capture_final_optimized_graph()
+                return
+
+        raise RuntimeError(
+            f"final optimized map/graph/data triplet did not settle after "
+            f"{self.publish_map_attempts}/{max_attempts} bounded PublishMap attempts"
+        )
 
     def _capture_final_optimized_graph(self) -> None:
         data = self.map_data_message
@@ -817,29 +924,17 @@ class SlamObserver:
         self.map_data_matches_map_graph = self.map_data_graph_fingerprint == self.map_graph_fingerprint
         if not self.map_data_matches_map_graph:
             raise RuntimeError("/mapGraph and /mapData graph payloads differ despite matching publication stamps")
-        fresh_cloud_emitted = self.map_cloud_callbacks > self.map_cloud_callbacks_before_publish
-        if fresh_cloud_emitted:
-            if (
-                self.map_messages <= self.map_messages_before_publish
-                or self.map_stamp_s != self.map_graph_stamp_s
-                or self.map_cloud_frame_id != "map"
-            ):
-                raise RuntimeError("fresh post-request cloud does not share the settled graph stamp and map frame")
-            self.final_cloud_origin = "fresh_post_publish"
-            self.map_cloud_identity_state = "fresh_shared_publication"
-        else:
-            if (
-                self.cached_cloud_points is None
-                or self.cached_cloud_stamp_s is None
-                or self.cached_cloud_frame_id != "map"
-                or self.cached_cloud_graph_fingerprint != self.map_graph_fingerprint
-            ):
-                raise RuntimeError("cached cloud cannot be reused for a different final graph fingerprint")
-            self.latest_map = list(self.cached_cloud_points)
-            self.map_stamp_s = self.cached_cloud_stamp_s
-            self.map_cloud_frame_id = self.cached_cloud_frame_id
-            self.final_cloud_origin = "cached_pre_publish"
-            self.map_cloud_identity_state = "cached_exact_graph_reuse"
+        if (
+            self.map_cloud_callbacks <= self.map_cloud_callbacks_before_publish
+            or self.map_messages <= self.map_messages_before_publish
+            or self.map_stamp_s != self.map_graph_stamp_s
+            or self.map_cloud_frame_id != "map"
+            or self.map_cloud_payload_fingerprint is None
+        ):
+            raise RuntimeError("fresh post-request cloud does not share the settled graph stamp and map frame")
+        self.final_cloud_origin = "fresh_post_publish"
+        self.map_cloud_identity_state = "fresh_shared_publication"
+        self.final_cloud_payload_fingerprint = self.map_cloud_payload_fingerprint
         if not self.latest_map or self.map_stamp_s is None or not math.isfinite(float(self.map_stamp_s)) or any(not all(math.isfinite(float(value)) for value in point) for point in self.latest_map):
             raise RuntimeError("RTAB-Map final cloud is empty or contains non-finite points")
         self.final_cloud_graph_fingerprint = self.map_graph_fingerprint
@@ -1156,6 +1251,7 @@ class SlamObserver:
             "map_data_matches_map_graph": getattr(self, "map_data_matches_map_graph", False),
             "cached_cloud_graph_fingerprint": getattr(self, "cached_cloud_graph_fingerprint", None),
             "final_cloud_graph_fingerprint": getattr(self, "final_cloud_graph_fingerprint", None),
+            "final_cloud_payload_fingerprint": getattr(self, "final_cloud_payload_fingerprint", None),
             "map_cloud_identity_state": getattr(self, "map_cloud_identity_state", None),
             "final_cloud_origin": getattr(self, "final_cloud_origin", None),
             "final_map_graph_stamp_s": getattr(self, "final_map_graph_stamp_s", None),
@@ -1192,6 +1288,9 @@ class SlamObserver:
             "post_publish_drain_basis": ["/slam/map_cloud", "/mapGraph", "/mapData"],
             "replay_drained": self.replay_drained,
             "publish_map_acknowledged": self.publish_map_acknowledged,
+            "publish_map_attempts": getattr(self, "publish_map_attempts", 0),
+            "publish_map_max_attempts": getattr(self, "publish_map_max_attempts", 3),
+            "publish_map_attempt_receipts": getattr(self, "publish_map_attempt_receipts", []),
             "map_messages_before_publish": self.map_messages_before_publish,
             "final_map_span": self.final_map_span,
             "mapper_database_span": self.mapper_database_span,
