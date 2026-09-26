@@ -1,0 +1,656 @@
+{
+  "schema_version": 1,
+  "generated_on": "2026-09-26",
+  "purpose": "Local feasibility spike; not a production G02 asset or license determination.",
+  "sources": {
+    "asimov_1": {
+      "repository": "https://github.com/menloresearch/asimov-1",
+      "commit": "ccf5326f0adffd65edf930cbbac052454cdd82be",
+      "tree": "dccddbbd164db4e516ec655597cebd5e9b6d482e",
+      "commit_timestamp": "2026-09-21T16:10:31+08:00",
+      "commit_subject": "updated speaker wiring (#23)",
+      "source_urdf": "sim-model/urdf/asimov_1.urdf",
+      "source_urdf_git_blob": "887050863f708f6da6bfc21065a7019172c258c9",
+      "source_urdf_sha256": "ac681a57789c12ba6fafe5101ea6790b7e8c97da8523b83373defea42633bb6f",
+      "mesh_root": "sim-model/assets/meshes/",
+      "license_notices": [
+        "SOFTWARE-LICENSE.txt",
+        "HARDWARE-LICENSE.txt"
+      ],
+      "license_scope_note": "The upstream README labels repository software GPL-2.0 and hardware CERN-OHL-S-2.0, but the selected sim-model files have no path-level SPDX markers. Both notices are preserved; redistribution needs separate review."
+    },
+    "orcahand_description": {
+      "repository": "https://github.com/orcahand/orcahand_description",
+      "commit": "b9b349a21ee0238c62b6cf92ae7597027867adf8",
+      "tree": "694a70bec9d960eecb05ae5b6746259b2e43d6f6",
+      "commit_timestamp": "2026-07-31T17:36:42+08:00",
+      "commit_subject": "Remove the spurious -35 deg roll from the v2 wrist joint origins",
+      "source_urdf": "v1/models/urdf/orcahand_right_extended.urdf",
+      "source_urdf_git_blob": "834da18481aa01d52ad9d4e6185bf447d040ec7c",
+      "source_urdf_sha256": "4ca4f81ba73038abcf1b989f164077d0a0b88bf446e19386d888028eee78e2e2",
+      "mesh_root": "v1/assets/urdf/right/",
+      "license_notice": "LICENSE",
+      "license": "MIT"
+    }
+  },
+  "derivation": {
+    "output_urdf": "asimov_orcahand_right.urdf",
+    "output_urdf_sha256": "d1937042c8d98eaa4b86884012df0956349092bf8ed35546f19db56f9b460e97",
+    "mount_joint": "asimov_to_orcahand_mount",
+    "mount_parent": "right_wrist_yaw_link",
+    "mount_child": "right_tower",
+    "mount_xyz_m": [
+      0.0459626666,
+      0.0,
+      -0.0385672566
+    ],
+    "mount_rpy_rad": [
+      0.0,
+      2.2689280276,
+      0.0
+    ],
+    "adapter_radius_m": 0.022,
+    "adapter_length_m": 0.07,
+    "removed_orca_links": [
+      "world",
+      "world2right_tower_fixed_jointbody"
+    ],
+    "removed_orca_joints": [
+      "world2right_tower_fixed",
+      "world2right_tower_fixed_offset"
+    ],
+    "preserved_subtree_root": "right_tower"
+  },
+  "copied_assets": [
+    {
+      "upstream_path": "sim-model/assets/meshes/ANKLE_B_NEW.STL",
+      "derived_path": "assets/asimov/ANKLE_B_NEW.STL",
+      "sha256": "5379b4e0a89e67dfe862f50ef22e3b091588d9c21542ef199b5a65ef6614262b",
+      "size_bytes": 4629584
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/IMU_ORIGIN.STL",
+      "derived_path": "assets/asimov/IMU_ORIGIN.STL",
+      "sha256": "4103db420f4b511026f9967711366852243e80904909ff491300117e796194de",
+      "size_bytes": 3030084
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_ANKLE_A.STL",
+      "derived_path": "assets/asimov/LEFT_ANKLE_A.STL",
+      "sha256": "00dd23a465b135d15ef991b46bb314bf801c0b03c7aada1db8d1f9e17d9568a2",
+      "size_bytes": 221184
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_ELBOW.STL",
+      "derived_path": "assets/asimov/LEFT_ELBOW.STL",
+      "sha256": "fc697105abe95a3a3b23356527f7180113055d6168f40e66472c834eab485375",
+      "size_bytes": 621484
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_HIP_PITCH.STL",
+      "derived_path": "assets/asimov/LEFT_HIP_PITCH.STL",
+      "sha256": "b63a1752cbae0cc09b140052df32c8ea45e14c0ebaea5d53ad317c8c90246d9a",
+      "size_bytes": 1110384
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_HIP_ROLL.STL",
+      "derived_path": "assets/asimov/LEFT_HIP_ROLL.STL",
+      "sha256": "7bd909211765b2a133354677bc6ee09a38f290d8afab0e325b419ff9db79a12c",
+      "size_bytes": 332684
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_HIP_YAW.STL",
+      "derived_path": "assets/asimov/LEFT_HIP_YAW.STL",
+      "sha256": "ef18971b3c0aae2e06ad66a1e4c3a98440163d337e3ffa3750a1c3969e40a422",
+      "size_bytes": 1833784
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_KNEE.STL",
+      "derived_path": "assets/asimov/LEFT_KNEE.STL",
+      "sha256": "c1429554f677ad70f0d1c26969079ad19add24c08c2c0ce29ed2c31c1a1c41f1",
+      "size_bytes": 3627284
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_SHOULDER_PITCH.STL",
+      "derived_path": "assets/asimov/LEFT_SHOULDER_PITCH.STL",
+      "sha256": "5e7c93c3f5f7e60f7cc139da16237507915db84fa3a6d67bc6b07158b77e7e23",
+      "size_bytes": 714084
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_SHOULDER_ROLL.STL",
+      "derived_path": "assets/asimov/LEFT_SHOULDER_ROLL.STL",
+      "sha256": "539c9175e7b60d0df3ffd6d9620825244ae684967a63aec05d3da7aac7879237",
+      "size_bytes": 2651384
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_SHOULDER_YAW.STL",
+      "derived_path": "assets/asimov/LEFT_SHOULDER_YAW.STL",
+      "sha256": "82df3e536649a1d4bb218c157de154de4a94736ae195dc974e4ab97b8e86caa5",
+      "size_bytes": 685184
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/LEFT_WRIST_YAW.STL",
+      "derived_path": "assets/asimov/LEFT_WRIST_YAW.STL",
+      "sha256": "966dd01e04b12fb5f5d46720d8fd82a094f3f8a8404f643c9b9c5b0c01018c38",
+      "size_bytes": 160484
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/NECK_PITCH.STL",
+      "derived_path": "assets/asimov/NECK_PITCH.STL",
+      "sha256": "6467104a3890738a7dd4f946c1533d0f136d75ad6566e9627f57f64cda874798",
+      "size_bytes": 837984
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/NECK_YAW.STL",
+      "derived_path": "assets/asimov/NECK_YAW.STL",
+      "sha256": "47b311a7138ebae9326216e5b79d85cf2750f0283a133188eaf5b9a14670a7c7",
+      "size_bytes": 346484
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_ANKLE_A.STL",
+      "derived_path": "assets/asimov/RIGHT_ANKLE_A.STL",
+      "sha256": "351c68c81211de8ff1bb0dbeea7e933335ec3a1a9035446f48829c4029a42d5f",
+      "size_bytes": 221284
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_ELBOW.STL",
+      "derived_path": "assets/asimov/RIGHT_ELBOW.STL",
+      "sha256": "aa3df244f5dbe2404911005d288f658814709f0ff64b8c03d0a5af3079f5e6c6",
+      "size_bytes": 622584
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_HIP_PITCH.STL",
+      "derived_path": "assets/asimov/RIGHT_HIP_PITCH.STL",
+      "sha256": "3d7b4b69b2e5f13baaf2c822a3965c9e1db16a444b375f66813be57c6d1800a4",
+      "size_bytes": 1105884
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_HIP_ROLL.STL",
+      "derived_path": "assets/asimov/RIGHT_HIP_ROLL.STL",
+      "sha256": "c4b84b8450d8e2830217f69b22999d10795c15fd72a7f99382fd1abcccda65b1",
+      "size_bytes": 344284
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_HIP_YAW.STL",
+      "derived_path": "assets/asimov/RIGHT_HIP_YAW.STL",
+      "sha256": "664a399f5b9a15cd11567cf08cf20e6fb386ff48f3ac741cd1f25848e237276e",
+      "size_bytes": 1833684
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_KNEE.STL",
+      "derived_path": "assets/asimov/RIGHT_KNEE.STL",
+      "sha256": "64d35ef5e9cb1d1a57e2232d670cb798d2aa7a6985bdafdaed7b3dd125aba7fe",
+      "size_bytes": 3623984
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_SHOULDER_PITCH.STL",
+      "derived_path": "assets/asimov/RIGHT_SHOULDER_PITCH.STL",
+      "sha256": "325c6cf9b79c09f53ec05cf5fd7c89e2d430d85f4fa2fe2ae5827879437d9531",
+      "size_bytes": 715784
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_SHOULDER_ROLL.STL",
+      "derived_path": "assets/asimov/RIGHT_SHOULDER_ROLL.STL",
+      "sha256": "7ea6c316d2292a5e929f91963fde0a72e378343758575c7652a40cbf8d3b51b3",
+      "size_bytes": 2654584
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_SHOULDER_YAW.STL",
+      "derived_path": "assets/asimov/RIGHT_SHOULDER_YAW.STL",
+      "sha256": "3bf54ab880e06c09f841d640374e9a91a99d3146cd2c5df98a79487c0c357f25",
+      "size_bytes": 2499884
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/RIGHT_WRIST_YAW.STL",
+      "derived_path": "assets/asimov/RIGHT_WRIST_YAW.STL",
+      "sha256": "f71c5a4e4b762bd141477ac6b46af9598300630ce923f67f6c02bf98d4a67586",
+      "size_bytes": 160384
+    },
+    {
+      "upstream_path": "sim-model/assets/meshes/WAIST_YAW.STL",
+      "derived_path": "assets/asimov/WAIST_YAW.STL",
+      "sha256": "24d5000c0a90bc5b053c6734ce517d8d23e9957d3ee59994e1b65d3a1db52a7d",
+      "size_bytes": 8739984
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_index_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_index_ip_mesh.stl",
+      "sha256": "e0d50f6d64577fcd5dd83545c9fb700ec92ff44af0970519fc5250c1883090fd",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_index_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_index_ip_skin_mesh.stl",
+      "sha256": "9057f053358e4b38c6f3e495a19ac7949023f21771a356c12f56eb7390e46cbe",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_index_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_index_mp_mesh.stl",
+      "sha256": "c32f0d0517cef39ed8583131cbb263f868f002a8c0f4bfb4f703314f170b52d9",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_index_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_index_pp_mesh.stl",
+      "sha256": "485b35a6977c7f56ad01c5f2ba3ea73ee4fb767ce6ec063c79afe85d1eebcd0a",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_index_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_index_pp_skin_mesh.stl",
+      "sha256": "427f68ad1f74186f3d73de0cf559fcc89fe16301f8c1336822497a7850bc5bff",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_middle_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_middle_ip_mesh.stl",
+      "sha256": "e1b14b247083bfbcd81006757ee81830b2268160cfbd496d079ea22a8e950b2f",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_middle_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_middle_ip_skin_mesh.stl",
+      "sha256": "b79fdeec81754f2b956b9f9aab3b1099904cb3665fd5a8f107f5edc1ad07c7e2",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_middle_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_middle_mp_mesh.stl",
+      "sha256": "b93f74581edff45105ffc979a4f43aede2079fd3b60ef5dde7b53e7fd200f0c3",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_middle_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_middle_pp_mesh.stl",
+      "sha256": "dcf9ddb58e6fce2f91cf3160c0addc2643f15695e0975c5d62f2eb4e50b7c203",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_middle_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_middle_pp_skin_mesh.stl",
+      "sha256": "0d52d5a4c09b0838f8cee63c86809c4b3c6ec9e274ea2cbe1dbc4ba489eeeac4",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_palm_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_palm_mesh.stl",
+      "sha256": "f900c43457814d75cec639d7b0e08721ae2534de6de72b458d7b424a5c8c98e9",
+      "size_bytes": 50084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_palm_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_palm_skin_mesh.stl",
+      "sha256": "d1d6778c4c1cfe8df79ce4aa46e8e11d0c98867ab4eabb8d19f3bd00cf9e7113",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_pinky_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_pinky_ip_mesh.stl",
+      "sha256": "3aac7fc08520a796dee79afba30c79bf3c65247c1fe2a5b486b95c7319fe5fb6",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_pinky_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_pinky_ip_skin_mesh.stl",
+      "sha256": "3470ad21114b3b4dabb599d7c5b47622775d5079d4843a9c2ea86f4826805ff0",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_pinky_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_pinky_mp_mesh.stl",
+      "sha256": "b2a01be194f69f2fdcef9c3302a8ec796a4062b7411ddd2d9e22ab22cc84c0a0",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_pinky_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_pinky_pp_mesh.stl",
+      "sha256": "11f8d2c6dcfc4016aa5b977ff9b3658497608eeaaba3b9dc11b60f68da3485dd",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_pinky_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_pinky_pp_skin_mesh.stl",
+      "sha256": "747638279b1ae3aaf1ce2273e311b3c778516e48e2bff0d1ff3b6e743d6d4a72",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_ring_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_ring_ip_mesh.stl",
+      "sha256": "122b9d1a824e5f90d4bccd7a8e0a1a9adf6d43d75232cf56bdce61d05c448181",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_ring_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_ring_ip_skin_mesh.stl",
+      "sha256": "73795561874b19a61fdd782a9b21dd8fc68c58b113908551f6f635f9fb28abc2",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_ring_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_ring_mp_mesh.stl",
+      "sha256": "b6736e7fd49dee5ea34a9fe79f20569a01f1d54692d6a483df4aae29109fa115",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_ring_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_ring_pp_mesh.stl",
+      "sha256": "7af854da21f8efd24fa570b89eddec0ddd52a1b5fe5e2904003a2fc5dfd12105",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_ring_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_ring_pp_skin_mesh.stl",
+      "sha256": "0530572e589bb09f14bab0aa957b8559d0528e5f37cd60820b9ba2b0c93789f4",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_thumb_dp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_thumb_dp_mesh.stl",
+      "sha256": "e48fddb45c0aefb2b51965b2073982f0266ebdcef78977511aea43e24e81013a",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_thumb_dp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_thumb_dp_skin_mesh.stl",
+      "sha256": "957b3127099d0ceda9be7a3fac9f1ee0e7e6574d73b92b0f013d1f86a944b5ae",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_thumb_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_thumb_ip_mesh.stl",
+      "sha256": "d61b4041074bbffaffc3e226fd87ed8b0cab39d967f66d91dd852c877ba66068",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_thumb_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_thumb_ip_skin_mesh.stl",
+      "sha256": "fd80090e191c869954f842a89f79c6737cc193a1b79949f509b939847347bbdc",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_thumb_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_thumb_mp_mesh.stl",
+      "sha256": "47c3ae3ac3bf6b8ac01af5f789c029cef59f830447becc0b70ba4e5e432aa7c2",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_thumb_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_thumb_pp_mesh.stl",
+      "sha256": "74d1ff69367a231a77eb76f0dc2953c388b40975e2c04fa3a4bce31299654638",
+      "size_bytes": 12584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_tower_camera_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_tower_camera_mesh.stl",
+      "sha256": "f15b5fe820c417ece609e56972d2e3d0c980339ee6b23a68ca530935e313650c",
+      "size_bytes": 125084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_tower_fans_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_tower_fans_mesh.stl",
+      "sha256": "1ea3d473987ad669b9874090ddca4916fd347ac0e1fd3368806c8eb74844c0f1",
+      "size_bytes": 375084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_tower_hull_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_tower_hull_mesh.stl",
+      "sha256": "808c9ed2a65159fc619724a58c3975499a5ea690b02229b3273204c3f7a1c514",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_tower_main_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_tower_main_mesh.stl",
+      "sha256": "a411235a6964a96ff91f830e29b5871a0325c5e9ee9d451cf88f9571b3f16765",
+      "size_bytes": 346584
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_tower_text_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_tower_text_mesh.stl",
+      "sha256": "0844f1bd911cba2c8a970224abb031acc97f475868a2e9811cdbe0933b3f193a",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/collision/right_collision_tower_u2d2_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/collision/right_collision_tower_u2d2_mesh.stl",
+      "sha256": "a63105343ce386d9edea5d15ea91845013729be37735be02f190cc28b14e9569",
+      "size_bytes": 50084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_index_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_index_ip_mesh.stl",
+      "sha256": "248364a92f98fd7412849ea7adf4964cbb5e064cbca480d08c7ed5f808abfd78",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_index_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_index_ip_skin_mesh.stl",
+      "sha256": "9b93ecd03de9debb6996c8109db68c9ea84f36af76844ad3c206089b9cad1c46",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_index_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_index_mp_mesh.stl",
+      "sha256": "369056591c7a493a5153cd81b1d4fb98ae710a2a64d64d52eca5187714da4860",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_index_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_index_pp_mesh.stl",
+      "sha256": "e798c951c9aaf3985a7907114860e264cbad0a17aff562ffb50f15260a650718",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_index_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_index_pp_skin_mesh.stl",
+      "sha256": "91e8da51efeb3d22591c62830a0b5d8b8e5adabebfd5e5d70249a1e0d4e40ff8",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_middle_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_middle_ip_mesh.stl",
+      "sha256": "650518b56095d6ab0a5ec431d779b308356c5e8aee93d238d0a6ce830f3933c0",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_middle_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_middle_ip_skin_mesh.stl",
+      "sha256": "2cddbf78e427986109d5b12636268dba87ea028885ee0e2b1ca9230e999082fe",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_middle_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_middle_mp_mesh.stl",
+      "sha256": "15048298d47fcb61b4d4f7b69bfc7327f5bd1358bf345825b3d969da320628fa",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_middle_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_middle_pp_mesh.stl",
+      "sha256": "8b37c31c219f743528cb6d7c04c6b7566bfcad19a8e19f3c7de00d8698716479",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_middle_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_middle_pp_skin_mesh.stl",
+      "sha256": "986cafc443433900c1f0d2b6bc31463a611526f647af6cae0cc607a4b8f207f2",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_palm_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_palm_mesh.stl",
+      "sha256": "4bcadf705a92ce02431721674832d8709fc0ab8f625339ec1c4cad1ab1c0e1f7",
+      "size_bytes": 100084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_palm_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_palm_skin_mesh.stl",
+      "sha256": "bbb577d6283ee4c67eddedba4a4f9c6e4d6b67c642a0fa1d0cd94a753562cf22",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_pinky_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_pinky_ip_mesh.stl",
+      "sha256": "671d5ffcc1f4121cfce0f55ef325e46e16c6ec7d4c3a2278f1a89c375ef4950b",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_pinky_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_pinky_ip_skin_mesh.stl",
+      "sha256": "64ca55e78a2f43586a20f066459ab84454934aee698a1e381d2394f81139e985",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_pinky_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_pinky_mp_mesh.stl",
+      "sha256": "ddbcc71fd968f3c478edc5bddcfd9f91f525ad543b4970952e39b21aa266e084",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_pinky_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_pinky_pp_mesh.stl",
+      "sha256": "3af49f453fef2d09b80d7cecd37d959ac99b54a64432a419d5d1cff656f67185",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_pinky_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_pinky_pp_skin_mesh.stl",
+      "sha256": "fc61d53f760fb37ba8bcb84f36fa671cda5eedcab2599b9bce935dfad113f9dc",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_ring_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_ring_ip_mesh.stl",
+      "sha256": "3cdedbc7ec3a714f761e76b709da4402507b130dde6eec01180dac2ed279399b",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_ring_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_ring_ip_skin_mesh.stl",
+      "sha256": "6e6bc606df8da278f64007dcca7a8340632825b8249e8a89131dc92b1409a0a8",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_ring_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_ring_mp_mesh.stl",
+      "sha256": "cd9a53d3026c8831f584afab51384925a5a28ae7880545fd450b5d77c8050803",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_ring_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_ring_pp_mesh.stl",
+      "sha256": "5958972291a77b89af433bf7faf73c12f359e822ced05cea3bf4558fdcb5c09d",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_ring_pp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_ring_pp_skin_mesh.stl",
+      "sha256": "8cc48cd653ccfa679dda72d28fc6a2ec852e4fee118aebf3e8f3092d35d13d62",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_thumb_dp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_thumb_dp_mesh.stl",
+      "sha256": "591a8909a46e8ce5cd38f41fac2b1f4606da2c903432492360fe66b177349805",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_thumb_dp_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_thumb_dp_skin_mesh.stl",
+      "sha256": "1dc38d45ffaa551fece96ce029e6746cd545808a5200348b387195cffb6a810b",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_thumb_ip_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_thumb_ip_mesh.stl",
+      "sha256": "57675e02d25360ffc2bd9d160199d3066795804789a72d89cb623724cbb74b5c",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_thumb_ip_skin_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_thumb_ip_skin_mesh.stl",
+      "sha256": "b05e1be011dd5c5bfa92d42fc6fc05bc2e6b58a2ed9bf76cc25826ff5597c155",
+      "size_bytes": 250084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_thumb_mp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_thumb_mp_mesh.stl",
+      "sha256": "da24c6c48c04c31b724185aa815e5427c70df6bcc15e8160539986f79bd85bc9",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_thumb_pp_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_thumb_pp_mesh.stl",
+      "sha256": "f8b1d8ef66e3d49d5299788dafc4c891210930c4de1d55bbe138e427a38de08e",
+      "size_bytes": 25084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_tower_camera_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_tower_camera_mesh.stl",
+      "sha256": "7d9805f2bd663aba837e5e630c12f5d1f696bf76957b0ecc150b10b5ff198cbc",
+      "size_bytes": 750084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_tower_fans_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_tower_fans_mesh.stl",
+      "sha256": "74fd83e1ec515dd04aa734098ed73b1f667f77e3a903ed171bd8539ddff5287b",
+      "size_bytes": 750084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_tower_hull_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_tower_hull_mesh.stl",
+      "sha256": "713df0aa4f9ac3e9ffb3f1e33c6e42e0c806a97e6205d438c3329386d6f444b6",
+      "size_bytes": 50084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_tower_main_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_tower_main_mesh.stl",
+      "sha256": "a046340df8bfba533ddef896346f2a3edbcc50984164419db841e7874cb5c759",
+      "size_bytes": 749984
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_tower_text_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_tower_text_mesh.stl",
+      "sha256": "82a0b4ee672db29ac0b9bb0628cae66748007eee5a24201220f1dd49d73d6a06",
+      "size_bytes": 50084
+    },
+    {
+      "upstream_path": "v1/assets/urdf/right/visual/right_visual_tower_u2d2_mesh.stl",
+      "derived_path": "assets/orcahand_v1/right/visual/right_visual_tower_u2d2_mesh.stl",
+      "sha256": "9ae0debfcd4803d79767320b3e3a40ea448d3820069777522e5b8ac38c4fe5d2",
+      "size_bytes": 100084
+    }
+  ],
+  "copied_license_notices": [
+    {
+      "upstream_path": "README.md",
+      "derived_path": "licenses/asimov/UPSTREAM_README.md",
+      "sha256": "c92ee8231aa4a5330a204c97f7a53cb25633c713861c6904699062efed39be35",
+      "size_bytes": 3979
+    },
+    {
+      "upstream_path": "SOFTWARE-LICENSE.txt",
+      "derived_path": "licenses/asimov/SOFTWARE-LICENSE.txt",
+      "sha256": "27f82f30bd12bffb7e09bd2c049a4063c2d506fef30da0ce053aac3f80ec3219",
+      "size_bytes": 18324
+    },
+    {
+      "upstream_path": "HARDWARE-LICENSE.txt",
+      "derived_path": "licenses/asimov/HARDWARE-LICENSE.txt",
+      "sha256": "830bd5a61c579317156e889e98314c0585958854f2ff3c227256697385431c80",
+      "size_bytes": 13708
+    },
+    {
+      "upstream_path": "README.md",
+      "derived_path": "licenses/orcahand/UPSTREAM_README.md",
+      "sha256": "b80b691aa12f75426c497a42698f5ca16ad4b7859225d23df63c77290bdbeae0",
+      "size_bytes": 1991
+    },
+    {
+      "upstream_path": "LICENSE",
+      "derived_path": "licenses/orcahand/LICENSE",
+      "sha256": "7a28e1630cdcaa267ba69b17a19b7248359af166a2ffa82effd8dbdc3a2ab8e6",
+      "size_bytes": 1082
+    }
+  ]
+}

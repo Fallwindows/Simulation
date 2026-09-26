@@ -1,0 +1,1384 @@
+{
+  "status": "pass",
+  "urdf": "asimov_orcahand_right.urdf",
+  "urdf_sha256": "d1937042c8d98eaa4b86884012df0956349092bf8ed35546f19db56f9b460e97",
+  "root_link": "pelvis_link",
+  "link_count": 66,
+  "joint_count": 65,
+  "revolute_joint_count": 40,
+  "fixed_joint_count": 25,
+  "mesh_reference_count": 94,
+  "unique_mesh_file_count": 93,
+  "collision_mesh_count": 34,
+  "collision_meshes": [
+    {
+      "link": "right_tower",
+      "path": "assets/orcahand_v1/right/collision/right_collision_tower_main_mesh.stl",
+      "vertices": 20790,
+      "extents_m": [
+        0.115601312,
+        0.116554949,
+        0.157717854
+      ]
+    },
+    {
+      "link": "right_tower",
+      "path": "assets/orcahand_v1/right/collision/right_collision_tower_hull_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.08242679,
+        0.108617786,
+        0.096489396
+      ]
+    },
+    {
+      "link": "right_tower",
+      "path": "assets/orcahand_v1/right/collision/right_collision_tower_text_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.024092902,
+        0.031191989,
+        0.09880662
+      ]
+    },
+    {
+      "link": "right_tower",
+      "path": "assets/orcahand_v1/right/collision/right_collision_tower_fans_mesh.stl",
+      "vertices": 22500,
+      "extents_m": [
+        0.026754497,
+        0.058545073,
+        0.102265425
+      ]
+    },
+    {
+      "link": "right_tower",
+      "path": "assets/orcahand_v1/right/collision/right_collision_tower_u2d2_mesh.stl",
+      "vertices": 3000,
+      "extents_m": [
+        0.025989221,
+        0.064804029,
+        0.070847472
+      ]
+    },
+    {
+      "link": "right_tower",
+      "path": "assets/orcahand_v1/right/collision/right_collision_tower_camera_mesh.stl",
+      "vertices": 7500,
+      "extents_m": [
+        0.027851336,
+        0.038806887,
+        0.053329356
+      ]
+    },
+    {
+      "link": "right_palm",
+      "path": "assets/orcahand_v1/right/collision/right_collision_palm_mesh.stl",
+      "vertices": 3000,
+      "extents_m": [
+        0.034817612,
+        0.089287877,
+        0.100097969
+      ]
+    },
+    {
+      "link": "right_palm",
+      "path": "assets/orcahand_v1/right/collision/right_collision_palm_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.033262553,
+        0.061803039,
+        0.078301005
+      ]
+    },
+    {
+      "link": "right_thumb_mp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_thumb_mp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.013655773,
+        0.025154294,
+        0.038314018
+      ]
+    },
+    {
+      "link": "right_thumb_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_thumb_pp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.021121019,
+        0.021504774,
+        0.036106423
+      ]
+    },
+    {
+      "link": "right_thumb_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_thumb_ip_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017633653,
+        0.018999205,
+        0.047377788
+      ]
+    },
+    {
+      "link": "right_thumb_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_thumb_ip_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.021500463,
+        0.020155424,
+        0.024333365
+      ]
+    },
+    {
+      "link": "right_thumb_dp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_thumb_dp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.01503066,
+        0.018102977,
+        0.039685642
+      ]
+    },
+    {
+      "link": "right_thumb_dp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_thumb_dp_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.017617551,
+        0.01921689,
+        0.029057405
+      ]
+    },
+    {
+      "link": "right_index_mp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_index_mp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017542279,
+        0.019364418,
+        0.025357634
+      ]
+    },
+    {
+      "link": "right_index_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_index_pp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017701431,
+        0.019008487,
+        0.052140834
+      ]
+    },
+    {
+      "link": "right_index_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_index_pp_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.026320492,
+        0.020655672,
+        0.030035404
+      ]
+    },
+    {
+      "link": "right_index_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_index_ip_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.01513717,
+        0.016246964,
+        0.051311594
+      ]
+    },
+    {
+      "link": "right_index_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_index_ip_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.017549052,
+        0.019859632,
+        0.038039505
+      ]
+    },
+    {
+      "link": "right_middle_mp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_middle_mp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017542279,
+        0.019364418,
+        0.025357634
+      ]
+    },
+    {
+      "link": "right_middle_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_middle_pp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017164118,
+        0.019055932,
+        0.059840273
+      ]
+    },
+    {
+      "link": "right_middle_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_middle_pp_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.0221628,
+        0.020949428,
+        0.036330156
+      ]
+    },
+    {
+      "link": "right_middle_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_middle_ip_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.01513717,
+        0.016246964,
+        0.051311594
+      ]
+    },
+    {
+      "link": "right_middle_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_middle_ip_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.017549052,
+        0.019859632,
+        0.038039505
+      ]
+    },
+    {
+      "link": "right_ring_mp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_ring_mp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017542279,
+        0.019364418,
+        0.025357634
+      ]
+    },
+    {
+      "link": "right_ring_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_ring_pp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017164118,
+        0.019055932,
+        0.059840273
+      ]
+    },
+    {
+      "link": "right_ring_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_ring_pp_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.0221628,
+        0.020949428,
+        0.036330156
+      ]
+    },
+    {
+      "link": "right_ring_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_ring_ip_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.01513717,
+        0.016246964,
+        0.051311594
+      ]
+    },
+    {
+      "link": "right_ring_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_ring_ip_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.017549052,
+        0.019859632,
+        0.038039505
+      ]
+    },
+    {
+      "link": "right_pinky_mp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_pinky_mp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017542279,
+        0.019364418,
+        0.025357634
+      ]
+    },
+    {
+      "link": "right_pinky_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_pinky_pp_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.017633653,
+        0.018999205,
+        0.047377788
+      ]
+    },
+    {
+      "link": "right_pinky_pp",
+      "path": "assets/orcahand_v1/right/collision/right_collision_pinky_pp_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.021500463,
+        0.020155424,
+        0.024333365
+      ]
+    },
+    {
+      "link": "right_pinky_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_pinky_ip_mesh.stl",
+      "vertices": 750,
+      "extents_m": [
+        0.01513717,
+        0.016246964,
+        0.051311594
+      ]
+    },
+    {
+      "link": "right_pinky_ip",
+      "path": "assets/orcahand_v1/right/collision/right_collision_pinky_ip_skin_mesh.stl",
+      "vertices": 1500,
+      "extents_m": [
+        0.017549052,
+        0.019859632,
+        0.038039505
+      ]
+    }
+  ],
+  "potential_nonadjacent_collision_aabb_overlaps": [
+    {
+      "first": "left_hip_pitch_link/",
+      "second": "left_elbow_link/",
+      "aabb_overlap_m": [
+        0.057797664,
+        0.005646777,
+        0.002217696
+      ]
+    },
+    {
+      "first": "left_hip_pitch_link/",
+      "second": "left_elbow_link/",
+      "aabb_overlap_m": [
+        0.070455736,
+        0.005646777,
+        0.040923056
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_camera_mesh",
+      "aabb_overlap_m": [
+        0.011804376,
+        0.016416189,
+        0.030365101
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_main_mesh",
+      "aabb_overlap_m": [
+        0.035919791,
+        0.013166274,
+        0.059312825
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_hull_mesh",
+      "aabb_overlap_m": [
+        0.034965273,
+        0.013878329,
+        0.066491367
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_text_mesh",
+      "aabb_overlap_m": [
+        0.006859164,
+        0.014646779,
+        0.005737871
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_camera_mesh",
+      "aabb_overlap_m": [
+        0.011804376,
+        0.035865616,
+        0.030365101
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_elbow_link/",
+      "aabb_overlap_m": [
+        0.057697664,
+        0.005646777,
+        0.002581038
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_elbow_link/",
+      "aabb_overlap_m": [
+        0.070355736,
+        0.005646777,
+        0.041286398
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_main_mesh",
+      "aabb_overlap_m": [
+        0.035919791,
+        0.033166274,
+        0.059312825
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_hull_mesh",
+      "aabb_overlap_m": [
+        0.034965273,
+        0.033878329,
+        0.066491367
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_text_mesh",
+      "aabb_overlap_m": [
+        0.006859164,
+        0.034646779,
+        0.005737871
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_u2d2_mesh",
+      "aabb_overlap_m": [
+        0.027300176,
+        0.015146777,
+        0.053122758
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/right_collision_tower_camera_mesh",
+      "aabb_overlap_m": [
+        0.011804376,
+        0.035865616,
+        0.030365101
+      ]
+    },
+    {
+      "first": "right_hip_pitch_link/",
+      "second": "right_tower/asimov_orca_adapter_collision",
+      "aabb_overlap_m": [
+        0.049933479,
+        0.007646777,
+        0.059982018
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_tower/right_collision_tower_main_mesh",
+      "aabb_overlap_m": [
+        0.035919791,
+        0.039593374,
+        0.0360028
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_palm/right_collision_palm_mesh",
+      "aabb_overlap_m": [
+        0.053928784,
+        0.01588168,
+        0.057314431
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_palm/right_collision_palm_skin_mesh",
+      "aabb_overlap_m": [
+        0.034921255,
+        0.009395279,
+        0.034474007
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_mp/right_collision_thumb_mp_mesh",
+      "aabb_overlap_m": [
+        0.038648913,
+        0.018244645,
+        0.040218435
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "aabb_overlap_m": [
+        0.031309399,
+        0.040090706,
+        0.025109581
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_ip/right_collision_thumb_ip_mesh",
+      "aabb_overlap_m": [
+        0.029998905,
+        0.0479833,
+        0.023464463
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_ip/right_collision_thumb_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.026514563,
+        0.027042215,
+        0.024726041
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_dp/right_collision_thumb_dp_mesh",
+      "aabb_overlap_m": [
+        0.024987357,
+        0.019050968,
+        0.021752489
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_dp/right_collision_thumb_dp_skin_mesh",
+      "aabb_overlap_m": [
+        0.02121325,
+        0.009355107,
+        0.020477113
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_tower/right_collision_tower_main_mesh",
+      "aabb_overlap_m": [
+        0.035919791,
+        0.039593374,
+        0.0760028
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_tower/right_collision_tower_hull_mesh",
+      "aabb_overlap_m": [
+        0.034965273,
+        0.040305429,
+        0.027219117
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_palm/right_collision_palm_mesh",
+      "aabb_overlap_m": [
+        0.053928784,
+        0.01588168,
+        0.027314431
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_palm/right_collision_palm_skin_mesh",
+      "aabb_overlap_m": [
+        0.034921255,
+        0.009395279,
+        0.004474007
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_mp/right_collision_thumb_mp_mesh",
+      "aabb_overlap_m": [
+        0.038648913,
+        0.018244645,
+        0.010218435
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "aabb_overlap_m": [
+        0.031309399,
+        0.040090706,
+        0.007088983
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_ip/right_collision_thumb_ip_mesh",
+      "aabb_overlap_m": [
+        0.029998905,
+        0.0479833,
+        0.009856539
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_ip/right_collision_thumb_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.026514563,
+        0.027042215,
+        0.009877794
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_dp/right_collision_thumb_dp_mesh",
+      "aabb_overlap_m": [
+        0.024987357,
+        0.019050968,
+        0.010682769
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_dp/right_collision_thumb_dp_skin_mesh",
+      "aabb_overlap_m": [
+        0.02121325,
+        0.009355107,
+        0.012590724
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_tower/right_collision_tower_main_mesh",
+      "aabb_overlap_m": [
+        0.035919791,
+        0.039593374,
+        0.0060028
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_palm/right_collision_palm_mesh",
+      "aabb_overlap_m": [
+        0.053928784,
+        0.01588168,
+        0.067228374
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_palm/right_collision_palm_skin_mesh",
+      "aabb_overlap_m": [
+        0.034921255,
+        0.009395279,
+        0.05356325
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_mp/right_collision_thumb_mp_mesh",
+      "aabb_overlap_m": [
+        0.038648913,
+        0.018244645,
+        0.040290078
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "aabb_overlap_m": [
+        0.031309399,
+        0.040090706,
+        0.025109581
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_ip/right_collision_thumb_ip_mesh",
+      "aabb_overlap_m": [
+        0.029998905,
+        0.0479833,
+        0.023464463
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_ip/right_collision_thumb_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.026514563,
+        0.027042215,
+        0.024726041
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_dp/right_collision_thumb_dp_mesh",
+      "aabb_overlap_m": [
+        0.024987357,
+        0.019050968,
+        0.02106972
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_thumb_dp/right_collision_thumb_dp_skin_mesh",
+      "aabb_overlap_m": [
+        0.02121325,
+        0.009355107,
+        0.017886389
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_index_mp/right_collision_index_mp_mesh",
+      "aabb_overlap_m": [
+        0.027977983,
+        0.004832402,
+        0.029545084
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_index_pp/right_collision_index_pp_mesh",
+      "aabb_overlap_m": [
+        0.038688829,
+        0.004582532,
+        0.016033921
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_index_pp/right_collision_index_pp_skin_mesh",
+      "aabb_overlap_m": [
+        0.028326535,
+        0.00557492,
+        0.007658084
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_middle_mp/right_collision_middle_mp_mesh",
+      "aabb_overlap_m": [
+        0.016721325,
+        0.001966181,
+        0.020222395
+      ]
+    },
+    {
+      "first": "right_hip_yaw_link/",
+      "second": "right_middle_pp/right_collision_middle_pp_mesh",
+      "aabb_overlap_m": [
+        0.020925389,
+        0.001900327,
+        0.005996468
+      ]
+    },
+    {
+      "first": "right_knee_link/",
+      "second": "right_index_ip/right_collision_index_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.0270952,
+        0.00342548,
+        0.005926731
+      ]
+    },
+    {
+      "first": "right_elbow_link/",
+      "second": "right_tower/asimov_orca_adapter_collision",
+      "aabb_overlap_m": [
+        0.049933479,
+        0.042,
+        0.016167507
+      ]
+    },
+    {
+      "first": "right_elbow_link/",
+      "second": "right_tower/right_collision_tower_main_mesh",
+      "aabb_overlap_m": [
+        0.050416869,
+        0.06,
+        0.020599222
+      ]
+    },
+    {
+      "first": "right_elbow_link/",
+      "second": "right_tower/right_collision_tower_hull_mesh",
+      "aabb_overlap_m": [
+        0.049462351,
+        0.06,
+        0.027777765
+      ]
+    },
+    {
+      "first": "right_elbow_link/",
+      "second": "right_tower/right_collision_tower_u2d2_mesh",
+      "aabb_overlap_m": [
+        0.027300176,
+        0.050425528,
+        0.026486164
+      ]
+    },
+    {
+      "first": "right_elbow_link/",
+      "second": "right_tower/asimov_orca_adapter_collision",
+      "aabb_overlap_m": [
+        0.049933479,
+        0.042,
+        0.054872867
+      ]
+    },
+    {
+      "first": "right_tower/right_collision_tower_main_mesh",
+      "second": "right_palm/right_collision_palm_mesh",
+      "aabb_overlap_m": [
+        0.085024341,
+        0.036919382,
+        0.023317232
+      ]
+    },
+    {
+      "first": "right_tower/right_collision_tower_main_mesh",
+      "second": "right_palm/right_collision_palm_skin_mesh",
+      "aabb_overlap_m": [
+        0.077574504,
+        0.029634397,
+        0.000476808
+      ]
+    },
+    {
+      "first": "right_tower/right_collision_tower_main_mesh",
+      "second": "right_thumb_mp/right_collision_thumb_mp_mesh",
+      "aabb_overlap_m": [
+        0.023609654,
+        0.020046489,
+        0.006221236
+      ]
+    },
+    {
+      "first": "right_tower/right_collision_tower_main_mesh",
+      "second": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "aabb_overlap_m": [
+        0.016603664,
+        0.034163681,
+        0.003091783
+      ]
+    },
+    {
+      "first": "right_tower/right_collision_tower_main_mesh",
+      "second": "right_thumb_ip/right_collision_thumb_ip_mesh",
+      "aabb_overlap_m": [
+        0.005562817,
+        0.010196504,
+        0.005859339
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_thumb_mp/right_collision_thumb_mp_mesh",
+      "aabb_overlap_m": [
+        0.038648913,
+        0.017683524,
+        0.040508514
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "aabb_overlap_m": [
+        0.031309399,
+        0.010451987,
+        0.025109581
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_index_mp/right_collision_index_mp_mesh",
+      "aabb_overlap_m": [
+        0.027977983,
+        0.018093419,
+        0.017046299
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_index_pp/right_collision_index_pp_mesh",
+      "aabb_overlap_m": [
+        0.023342828,
+        0.017268862,
+        0.003262294
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_middle_mp/right_collision_middle_mp_mesh",
+      "aabb_overlap_m": [
+        0.019400548,
+        0.0172173,
+        0.007450769
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_ring_mp/right_collision_ring_mp_mesh",
+      "aabb_overlap_m": [
+        0.021693718,
+        0.017435145,
+        0.014986992
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_ring_pp/right_collision_ring_pp_mesh",
+      "aabb_overlap_m": [
+        0.026085094,
+        0.01739869,
+        0.000698101
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_pinky_mp/right_collision_pinky_mp_mesh",
+      "aabb_overlap_m": [
+        0.018461132,
+        0.020765818,
+        0.029855505
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_pinky_pp/right_collision_pinky_pp_mesh",
+      "aabb_overlap_m": [
+        0.007230777,
+        0.023582673,
+        0.016156899
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_mesh",
+      "second": "right_pinky_pp/right_collision_pinky_pp_skin_mesh",
+      "aabb_overlap_m": [
+        0.002209826,
+        0.02348998,
+        0.008102499
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_skin_mesh",
+      "second": "right_thumb_mp/right_collision_thumb_mp_mesh",
+      "aabb_overlap_m": [
+        0.022611119,
+        0.011197124,
+        0.034764086
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_skin_mesh",
+      "second": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "aabb_overlap_m": [
+        0.015605128,
+        0.003965586,
+        0.022494606
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_skin_mesh",
+      "second": "right_index_mp/right_collision_index_mp_mesh",
+      "aabb_overlap_m": [
+        0.014035925,
+        0.018093419,
+        0.008907168
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_skin_mesh",
+      "second": "right_ring_mp/right_collision_ring_mp_mesh",
+      "aabb_overlap_m": [
+        0.021693718,
+        0.017435145,
+        0.006847861
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_skin_mesh",
+      "second": "right_pinky_mp/right_collision_pinky_mp_mesh",
+      "aabb_overlap_m": [
+        0.012009831,
+        0.018973937,
+        0.021716374
+      ]
+    },
+    {
+      "first": "right_palm/right_collision_palm_skin_mesh",
+      "second": "right_pinky_pp/right_collision_pinky_pp_mesh",
+      "aabb_overlap_m": [
+        0.000779477,
+        0.0174678,
+        0.008017768
+      ]
+    },
+    {
+      "first": "right_thumb_mp/right_collision_thumb_mp_mesh",
+      "second": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "aabb_overlap_m": [
+        0.031309399,
+        0.012814952,
+        0.025109581
+      ]
+    },
+    {
+      "first": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "second": "right_thumb_ip/right_collision_thumb_ip_mesh",
+      "aabb_overlap_m": [
+        0.020268552,
+        0.01612353,
+        0.020696907
+      ]
+    },
+    {
+      "first": "right_thumb_pp/right_collision_thumb_pp_mesh",
+      "second": "right_thumb_ip/right_collision_thumb_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.019508865,
+        0.005568362,
+        0.02193723
+      ]
+    },
+    {
+      "first": "right_thumb_ip/right_collision_thumb_ip_mesh",
+      "second": "right_thumb_dp/right_collision_thumb_dp_mesh",
+      "aabb_overlap_m": [
+        0.020036739,
+        0.016431138,
+        0.020926259
+      ]
+    },
+    {
+      "first": "right_thumb_ip/right_collision_thumb_ip_mesh",
+      "second": "right_thumb_dp/right_collision_thumb_dp_skin_mesh",
+      "aabb_overlap_m": [
+        0.016784618,
+        0.006735277,
+        0.017742927
+      ]
+    },
+    {
+      "first": "right_thumb_ip/right_collision_thumb_ip_skin_mesh",
+      "second": "right_thumb_dp/right_collision_thumb_dp_mesh",
+      "aabb_overlap_m": [
+        0.017312084,
+        0.00604522,
+        0.020947514
+      ]
+    },
+    {
+      "first": "right_index_mp/right_collision_index_mp_mesh",
+      "second": "right_index_pp/right_collision_index_pp_mesh",
+      "aabb_overlap_m": [
+        0.018277357,
+        0.017268862,
+        0.015761079
+      ]
+    },
+    {
+      "first": "right_index_mp/right_collision_index_mp_mesh",
+      "second": "right_index_pp/right_collision_index_pp_skin_mesh",
+      "aabb_overlap_m": [
+        0.014499907,
+        0.018093419,
+        0.007385242
+      ]
+    },
+    {
+      "first": "right_index_mp/right_collision_index_mp_mesh",
+      "second": "right_middle_pp/right_collision_middle_pp_mesh",
+      "aabb_overlap_m": [
+        4.0059e-05,
+        0.015161344,
+        0.005723626
+      ]
+    },
+    {
+      "first": "right_index_pp/right_collision_index_pp_mesh",
+      "second": "right_index_ip/right_collision_index_ip_mesh",
+      "aabb_overlap_m": [
+        0.019217305,
+        0.016654916,
+        0.018056464
+      ]
+    },
+    {
+      "first": "right_index_pp/right_collision_index_pp_mesh",
+      "second": "right_index_ip/right_collision_index_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.014854284,
+        0.017268862,
+        0.00736686
+      ]
+    },
+    {
+      "first": "right_index_pp/right_collision_index_pp_skin_mesh",
+      "second": "right_index_ip/right_collision_index_ip_mesh",
+      "aabb_overlap_m": [
+        0.012632462,
+        0.016864348,
+        0.006255701
+      ]
+    },
+    {
+      "first": "right_middle_mp/right_collision_middle_mp_mesh",
+      "second": "right_middle_pp/right_collision_middle_pp_mesh",
+      "aabb_overlap_m": [
+        0.017186884,
+        0.016880456,
+        0.011620303
+      ]
+    },
+    {
+      "first": "right_middle_pp/right_collision_middle_pp_mesh",
+      "second": "right_middle_ip/right_collision_middle_ip_mesh",
+      "aabb_overlap_m": [
+        0.016876645,
+        0.016283734,
+        0.014095503
+      ]
+    },
+    {
+      "first": "right_middle_pp/right_collision_middle_pp_mesh",
+      "second": "right_middle_ip/right_collision_middle_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.018660911,
+        0.016880456,
+        0.000346119
+      ]
+    },
+    {
+      "first": "right_middle_pp/right_collision_middle_pp_skin_mesh",
+      "second": "right_middle_ip/right_collision_middle_ip_mesh",
+      "aabb_overlap_m": [
+        0.016876645,
+        0.016289459,
+        0.001576682
+      ]
+    },
+    {
+      "first": "right_ring_mp/right_collision_ring_mp_mesh",
+      "second": "right_ring_pp/right_collision_ring_pp_mesh",
+      "aabb_overlap_m": [
+        0.017735633,
+        0.017271464,
+        0.012590771
+      ]
+    },
+    {
+      "first": "right_ring_mp/right_collision_ring_mp_mesh",
+      "second": "right_ring_pp/right_collision_ring_pp_skin_mesh",
+      "aabb_overlap_m": [
+        0.017705533,
+        0.017435145,
+        0.001202464
+      ]
+    },
+    {
+      "first": "right_ring_pp/right_collision_ring_pp_mesh",
+      "second": "right_ring_ip/right_collision_ring_ip_mesh",
+      "aabb_overlap_m": [
+        0.018116638,
+        0.016270353,
+        0.015286722
+      ]
+    },
+    {
+      "first": "right_ring_pp/right_collision_ring_pp_mesh",
+      "second": "right_ring_ip/right_collision_ring_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.017890061,
+        0.01739869,
+        0.002030012
+      ]
+    },
+    {
+      "first": "right_ring_pp/right_collision_ring_pp_mesh",
+      "second": "right_pinky_mp/right_collision_pinky_mp_mesh",
+      "aabb_overlap_m": [
+        0.007722995,
+        0.013921079,
+        0.00122889
+      ]
+    },
+    {
+      "first": "right_ring_pp/right_collision_ring_pp_skin_mesh",
+      "second": "right_ring_ip/right_collision_ring_ip_mesh",
+      "aabb_overlap_m": [
+        0.016783979,
+        0.016307232,
+        0.002697302
+      ]
+    },
+    {
+      "first": "right_pinky_mp/right_collision_pinky_mp_mesh",
+      "second": "right_pinky_pp/right_collision_pinky_pp_mesh",
+      "aabb_overlap_m": [
+        0.018415831,
+        0.019259682,
+        0.016687688
+      ]
+    },
+    {
+      "first": "right_pinky_mp/right_collision_pinky_mp_mesh",
+      "second": "right_pinky_pp/right_collision_pinky_pp_skin_mesh",
+      "aabb_overlap_m": [
+        0.013394879,
+        0.019684,
+        0.008633289
+      ]
+    },
+    {
+      "first": "right_pinky_pp/right_collision_pinky_pp_mesh",
+      "second": "right_pinky_ip/right_collision_pinky_ip_mesh",
+      "aabb_overlap_m": [
+        0.019944729,
+        0.01790181,
+        0.01865964
+      ]
+    },
+    {
+      "first": "right_pinky_pp/right_collision_pinky_pp_mesh",
+      "second": "right_pinky_ip/right_collision_pinky_ip_skin_mesh",
+      "aabb_overlap_m": [
+        0.013633246,
+        0.016972471,
+        0.009116453
+      ]
+    },
+    {
+      "first": "right_pinky_pp/right_collision_pinky_pp_skin_mesh",
+      "second": "right_pinky_ip/right_collision_pinky_ip_mesh",
+      "aabb_overlap_m": [
+        0.012340498,
+        0.017384798,
+        0.007469665
+      ]
+    }
+  ],
+  "kinematic_motion": {
+    "right_wrist_yaw_rad": 0.25,
+    "orca_wrist_rad": 0.3,
+    "tower_rotation_matrix_delta_norm": 0.3526333976772774,
+    "palm_rotation_matrix_delta_norm": 0.42267486735974236,
+    "fingertip_displacement_m": {
+      "right_index_fingertip": 0.07160700836180386,
+      "right_middle_fingertip": 0.06894055354285474,
+      "right_pinky_fingertip": 0.053639225785272505,
+      "right_ring_fingertip": 0.06435413468490969,
+      "right_thumb_fingertip": 0.0633622626260061
+    },
+    "neutral_tower_pose": {
+      "position_m": [
+        -0.063134854,
+        -0.161853223,
+        -0.062109588
+      ],
+      "rotation_matrix": [
+        [
+          -0.996194684,
+          0.0,
+          0.087155906
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.087155906,
+          0.0,
+          -0.996194684
+        ]
+      ]
+    },
+    "moved_tower_pose": {
+      "position_m": [
+        -0.063134854,
+        -0.161853223,
+        -0.062109588
+      ],
+      "rotation_matrix": [
+        [
+          -0.965225404,
+          0.246462509,
+          0.087155906
+        ],
+        [
+          0.247403959,
+          0.968912422,
+          -0.0
+        ],
+        [
+          -0.084446439,
+          0.021562716,
+          -0.996194684
+        ]
+      ]
+    },
+    "neutral_palm_pose": {
+      "position_m": [
+        -0.089103138,
+        -0.160413223,
+        -0.208520016
+      ],
+      "rotation_matrix": [
+        [
+          -0.996194684,
+          0.0,
+          0.087155906
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.087155906,
+          0.0,
+          -0.996194684
+        ]
+      ]
+    },
+    "moved_palm_pose": {
+      "position_m": [
+        -0.090501533,
+        -0.162049912,
+        -0.207333557
+      ],
+      "rotation_matrix": [
+        [
+          -0.965225404,
+          0.261210959,
+          0.010428565
+        ],
+        [
+          0.247403959,
+          0.925637391,
+          -0.286333199
+        ],
+        [
+          -0.084446439,
+          -0.273796009,
+          -0.95807335
+        ]
+      ]
+    }
+  }
+}

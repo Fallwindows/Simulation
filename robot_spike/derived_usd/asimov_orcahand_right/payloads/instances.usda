@@ -1,0 +1,1434 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.3.2"
+    }
+    endTimeCode = 1000000
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    upAxis = "Z"
+)
+
+def Scope "Instances"
+{
+    def Xform "right_visual_tower_main_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_tower_main_mesh>
+    )
+    {
+        over "right_visual_tower_main_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_tower_main_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_tower_main_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_tower_hull_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_tower_hull_mesh>
+    )
+    {
+        over "right_visual_tower_hull_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_tower_hull_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_tower_hull_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_tower_text_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_tower_text_mesh>
+    )
+    {
+        over "right_visual_tower_text_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_tower_text_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_tower_text_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_tower_fans_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_tower_fans_mesh>
+    )
+    {
+        over "right_visual_tower_fans_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_tower_fans_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_tower_fans_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_tower_u2d2_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_tower_u2d2_mesh>
+    )
+    {
+        over "right_visual_tower_u2d2_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_tower_u2d2_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_tower_u2d2_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_tower_camera_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_tower_camera_mesh>
+    )
+    {
+        over "right_visual_tower_camera_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_tower_camera_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_tower_camera_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_palm_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_palm_mesh>
+    )
+    {
+        over "right_visual_palm_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_palm_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_palm_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_palm_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_palm_skin_mesh>
+    )
+    {
+        over "right_visual_palm_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_palm_skin_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_palm_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_mp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_mp_mesh>
+    )
+    {
+        over "right_visual_thumb_mp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_mp_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_thumb_mp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_pp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_pp_mesh>
+    )
+    {
+        over "right_visual_thumb_pp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_pp_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_thumb_pp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_ip_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_ip_mesh>
+    )
+    {
+        over "right_visual_thumb_ip_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_ip_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_thumb_ip_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_ip_mesh_1" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_ip_mesh>
+    )
+    {
+        over "right_visual_thumb_ip_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_ip_mesh_1/VisualMaterials/white>
+            custom string urdf:name = "right_visual_pinky_pp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_ip_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_ip_skin_mesh>
+    )
+    {
+        over "right_visual_thumb_ip_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_ip_skin_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_thumb_ip_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_ip_skin_mesh_1" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_ip_skin_mesh>
+    )
+    {
+        over "right_visual_thumb_ip_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_ip_skin_mesh_1/VisualMaterials/white>
+            custom string urdf:name = "right_visual_pinky_pp_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_dp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_dp_mesh>
+    )
+    {
+        over "right_visual_thumb_dp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_dp_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_thumb_dp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_thumb_dp_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_thumb_dp_skin_mesh>
+    )
+    {
+        over "right_visual_thumb_dp_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_thumb_dp_skin_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_thumb_dp_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_collision_thumb_dp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_thumb_dp_mesh>
+    )
+    {
+        over "right_collision_thumb_dp_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_thumb_dp_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_thumb_dp_skin_mesh>
+    )
+    {
+        over "right_collision_thumb_dp_skin_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_thumb_ip_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_thumb_ip_mesh>
+    )
+    {
+        over "right_collision_thumb_ip_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_thumb_ip_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_thumb_ip_skin_mesh>
+    )
+    {
+        over "right_collision_thumb_ip_skin_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_thumb_pp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_thumb_pp_mesh>
+    )
+    {
+        over "right_collision_thumb_pp_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_thumb_mp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_thumb_mp_mesh>
+    )
+    {
+        over "right_collision_thumb_mp_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_visual_index_mp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_mp_mesh>
+    )
+    {
+        over "right_visual_index_mp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_mp_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_index_mp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_mp_mesh_1" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_mp_mesh>
+    )
+    {
+        over "right_visual_index_mp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_mp_mesh_1/VisualMaterials/white>
+            custom string urdf:name = "right_visual_middle_mp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_mp_mesh_2" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_mp_mesh>
+    )
+    {
+        over "right_visual_index_mp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_mp_mesh_2/VisualMaterials/white>
+            custom string urdf:name = "right_visual_ring_mp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_mp_mesh_3" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_mp_mesh>
+    )
+    {
+        over "right_visual_index_mp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_mp_mesh_3/VisualMaterials/white>
+            custom string urdf:name = "right_visual_pinky_mp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_pp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_pp_mesh>
+    )
+    {
+        over "right_visual_index_pp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_pp_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_index_pp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_pp_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_pp_skin_mesh>
+    )
+    {
+        over "right_visual_index_pp_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_pp_skin_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_index_pp_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_mesh>
+    )
+    {
+        over "right_visual_index_ip_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_index_ip_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_mesh_1" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_mesh>
+    )
+    {
+        over "right_visual_index_ip_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_mesh_1/VisualMaterials/white>
+            custom string urdf:name = "right_visual_middle_ip_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_mesh_2" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_mesh>
+    )
+    {
+        over "right_visual_index_ip_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_mesh_2/VisualMaterials/white>
+            custom string urdf:name = "right_visual_ring_ip_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_mesh_3" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_mesh>
+    )
+    {
+        over "right_visual_index_ip_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_mesh_3/VisualMaterials/white>
+            custom string urdf:name = "right_visual_pinky_ip_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_skin_mesh>
+    )
+    {
+        over "right_visual_index_ip_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_skin_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_index_ip_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_skin_mesh_1" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_skin_mesh>
+    )
+    {
+        over "right_visual_index_ip_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_skin_mesh_1/VisualMaterials/white>
+            custom string urdf:name = "right_visual_middle_ip_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_skin_mesh_2" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_skin_mesh>
+    )
+    {
+        over "right_visual_index_ip_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_skin_mesh_2/VisualMaterials/white>
+            custom string urdf:name = "right_visual_ring_ip_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_index_ip_skin_mesh_3" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_index_ip_skin_mesh>
+    )
+    {
+        over "right_visual_index_ip_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_index_ip_skin_mesh_3/VisualMaterials/white>
+            custom string urdf:name = "right_visual_pinky_ip_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_collision_index_ip_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_index_ip_mesh>
+    )
+    {
+        over "right_collision_index_ip_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_index_ip_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_index_ip_skin_mesh>
+    )
+    {
+        over "right_collision_index_ip_skin_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_index_pp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_index_pp_mesh>
+    )
+    {
+        over "right_collision_index_pp_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_index_pp_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_index_pp_skin_mesh>
+    )
+    {
+        over "right_collision_index_pp_skin_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_index_mp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_index_mp_mesh>
+    )
+    {
+        over "right_collision_index_mp_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_visual_middle_pp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_middle_pp_mesh>
+    )
+    {
+        over "right_visual_middle_pp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_middle_pp_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_middle_pp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_middle_pp_mesh_1" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_middle_pp_mesh>
+    )
+    {
+        over "right_visual_middle_pp_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_middle_pp_mesh_1/VisualMaterials/white>
+            custom string urdf:name = "right_visual_ring_pp_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_middle_pp_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_middle_pp_skin_mesh>
+    )
+    {
+        over "right_visual_middle_pp_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_middle_pp_skin_mesh/VisualMaterials/white>
+            custom string urdf:name = "right_visual_middle_pp_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_visual_middle_pp_skin_mesh_1" (
+        prepend references = @./geometries.usd@</Geometries/right_visual_middle_pp_skin_mesh>
+    )
+    {
+        over "right_visual_middle_pp_skin_mesh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_visual_middle_pp_skin_mesh_1/VisualMaterials/white>
+            custom string urdf:name = "right_visual_ring_pp_skin_mesh"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "white" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/white>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_collision_middle_pp_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_middle_pp_mesh>
+    )
+    {
+        over "right_collision_middle_pp_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_middle_pp_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_middle_pp_skin_mesh>
+    )
+    {
+        over "right_collision_middle_pp_skin_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_palm_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_palm_mesh>
+    )
+    {
+        over "right_collision_palm_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_palm_skin_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_palm_skin_mesh>
+    )
+    {
+        over "right_collision_palm_skin_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_tower_main_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_tower_main_mesh>
+    )
+    {
+        over "right_collision_tower_main_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_tower_hull_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_tower_hull_mesh>
+    )
+    {
+        over "right_collision_tower_hull_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_tower_text_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_tower_text_mesh>
+    )
+    {
+        over "right_collision_tower_text_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_tower_fans_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_tower_fans_mesh>
+    )
+    {
+        over "right_collision_tower_fans_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_tower_u2d2_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_tower_u2d2_mesh>
+    )
+    {
+        over "right_collision_tower_u2d2_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "right_collision_tower_camera_mesh" (
+        prepend references = @./geometries.usd@</Geometries/right_collision_tower_camera_mesh>
+    )
+    {
+        over "right_collision_tower_camera_mesh" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+
+            def Scope "material"
+            {
+                custom string urdf:name = "white"
+            }
+        }
+    }
+
+    def Xform "RIGHT_WRIST_YAW" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_WRIST_YAW>
+    )
+    {
+        over "RIGHT_WRIST_YAW"
+        {
+        }
+    }
+
+    def Xform "RIGHT_ELBOW" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_ELBOW>
+    )
+    {
+        over "RIGHT_ELBOW"
+        {
+        }
+    }
+
+    def Xform "RIGHT_SHOULDER_YAW" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_SHOULDER_YAW>
+    )
+    {
+        over "RIGHT_SHOULDER_YAW"
+        {
+        }
+    }
+
+    def Xform "RIGHT_SHOULDER_ROLL" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_SHOULDER_ROLL>
+    )
+    {
+        over "RIGHT_SHOULDER_ROLL"
+        {
+        }
+    }
+
+    def Xform "RIGHT_SHOULDER_PITCH" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_SHOULDER_PITCH>
+    )
+    {
+        over "RIGHT_SHOULDER_PITCH"
+        {
+        }
+    }
+
+    def Xform "WAIST_YAW" (
+        prepend references = @./geometries.usd@</Geometries/WAIST_YAW>
+    )
+    {
+        over "WAIST_YAW"
+        {
+        }
+    }
+
+    def Xform "NECK_YAW" (
+        prepend references = @./geometries.usd@</Geometries/NECK_YAW>
+    )
+    {
+        over "NECK_YAW"
+        {
+        }
+    }
+
+    def Xform "NECK_PITCH" (
+        prepend references = @./geometries.usd@</Geometries/NECK_PITCH>
+    )
+    {
+        over "NECK_PITCH"
+        {
+        }
+    }
+
+    def Xform "LEFT_SHOULDER_PITCH" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_SHOULDER_PITCH>
+    )
+    {
+        over "LEFT_SHOULDER_PITCH"
+        {
+        }
+    }
+
+    def Xform "LEFT_SHOULDER_ROLL" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_SHOULDER_ROLL>
+    )
+    {
+        over "LEFT_SHOULDER_ROLL"
+        {
+        }
+    }
+
+    def Xform "LEFT_SHOULDER_YAW" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_SHOULDER_YAW>
+    )
+    {
+        over "LEFT_SHOULDER_YAW"
+        {
+        }
+    }
+
+    def Xform "LEFT_ELBOW" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_ELBOW>
+    )
+    {
+        over "LEFT_ELBOW"
+        {
+        }
+    }
+
+    def Xform "LEFT_WRIST_YAW" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_WRIST_YAW>
+    )
+    {
+        over "LEFT_WRIST_YAW"
+        {
+        }
+    }
+
+    def Xform "IMU_ORIGIN" (
+        prepend references = @./geometries.usd@</Geometries/IMU_ORIGIN>
+    )
+    {
+        over "IMU_ORIGIN"
+        {
+        }
+    }
+
+    def Xform "LEFT_HIP_PITCH" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_HIP_PITCH>
+    )
+    {
+        over "LEFT_HIP_PITCH"
+        {
+        }
+    }
+
+    def Xform "LEFT_HIP_ROLL" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_HIP_ROLL>
+    )
+    {
+        over "LEFT_HIP_ROLL"
+        {
+        }
+    }
+
+    def Xform "LEFT_HIP_YAW" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_HIP_YAW>
+    )
+    {
+        over "LEFT_HIP_YAW"
+        {
+        }
+    }
+
+    def Xform "LEFT_KNEE" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_KNEE>
+    )
+    {
+        over "LEFT_KNEE"
+        {
+        }
+    }
+
+    def Xform "LEFT_ANKLE_A" (
+        prepend references = @./geometries.usd@</Geometries/LEFT_ANKLE_A>
+    )
+    {
+        over "LEFT_ANKLE_A"
+        {
+        }
+    }
+
+    def Xform "ANKLE_B_NEW" (
+        prepend references = @./geometries.usd@</Geometries/ANKLE_B_NEW>
+    )
+    {
+        over "ANKLE_B_NEW"
+        {
+        }
+    }
+
+    def Xform "RIGHT_HIP_PITCH" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_HIP_PITCH>
+    )
+    {
+        over "RIGHT_HIP_PITCH"
+        {
+        }
+    }
+
+    def Xform "RIGHT_HIP_ROLL" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_HIP_ROLL>
+    )
+    {
+        over "RIGHT_HIP_ROLL"
+        {
+        }
+    }
+
+    def Xform "RIGHT_HIP_YAW" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_HIP_YAW>
+    )
+    {
+        over "RIGHT_HIP_YAW"
+        {
+        }
+    }
+
+    def Xform "RIGHT_KNEE" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_KNEE>
+    )
+    {
+        over "RIGHT_KNEE"
+        {
+        }
+    }
+
+    def Xform "RIGHT_ANKLE_A" (
+        prepend references = @./geometries.usd@</Geometries/RIGHT_ANKLE_A>
+    )
+    {
+        over "RIGHT_ANKLE_A"
+        {
+        }
+    }
+}
+

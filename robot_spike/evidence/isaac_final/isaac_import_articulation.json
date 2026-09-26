@@ -1,0 +1,156 @@
+{
+  "status": "pass",
+  "isaac_version": "6.1.0-rc.26+release.49347.2d230af4.gl",
+  "source_urdf": "asimov_orcahand_right.urdf",
+  "imported_usd": "derived_usd/asimov_orcahand_right/asimov_orcahand_right.usda",
+  "default_prim": "/asimov_1_orcahand_v1_right_spike",
+  "articulation_root": "/asimov_1_orcahand_v1_right_spike/Geometry/pelvis_link",
+  "dof_count": 40,
+  "dof_names": [
+    "left_hip_pitch_joint",
+    "right_hip_pitch_joint",
+    "waist_yaw_joint",
+    "left_hip_roll_joint",
+    "right_hip_roll_joint",
+    "right_shoulder_pitch_joint",
+    "left_shoulder_pitch_joint",
+    "left_hip_yaw_joint",
+    "right_hip_yaw_joint",
+    "right_shoulder_roll_joint",
+    "left_shoulder_roll_joint",
+    "left_knee_joint",
+    "right_knee_joint",
+    "right_shoulder_yaw_joint",
+    "left_shoulder_yaw_joint",
+    "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint",
+    "right_elbow_joint",
+    "left_elbow_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+    "right_wrist_yaw_joint",
+    "left_wrist_yaw_joint",
+    "right_wrist",
+    "right_thumb_mcp",
+    "right_index_abd",
+    "right_middle_abd",
+    "right_ring_abd",
+    "right_pinky_abd",
+    "right_thumb_abd",
+    "right_index_mcp",
+    "right_middle_mcp",
+    "right_ring_mcp",
+    "right_pinky_mcp",
+    "right_thumb_pip",
+    "right_index_pip",
+    "right_middle_pip",
+    "right_ring_pip",
+    "right_pinky_pip",
+    "right_thumb_dip"
+  ],
+  "rigid_body_prim_count": 61,
+  "collision_prim_count": 48,
+  "import_config_allow_self_collision": false,
+  "self_collision_enabled": null,
+  "diagnostic_material": {
+    "purpose": "render-only neutral opaque override for Orca diagnostic views",
+    "source_urdf_material": "named white references with no color/alpha definition",
+    "imported_white_opacity": null,
+    "bound_visual_prim_count": 34,
+    "material_path": "/SpikeDiagnostics/OrcaOpaque"
+  },
+  "bounds_m": {
+    "min": [
+      -0.19820120424579035,
+      -0.4721372377800581,
+      -0.6316750998479481
+    ],
+    "max": [
+      0.3083897079084337,
+      0.2880212402800279,
+      0.6231804624354512
+    ],
+    "span": [
+      0.506590912154224,
+      0.7601584780600861,
+      1.2548555622833995
+    ]
+  },
+  "renders": [
+    "renders\\full_body_3q.png",
+    "renders\\wrist_connection.png",
+    "renders\\orcahand_close.png"
+  ],
+  "motion": {
+    "frame_count": 24,
+    "fps_for_encoding": 12,
+    "fixed_mount_max_abs_transform_drift": 3.0228017466882307e-07,
+    "first": {
+      "frame": 0,
+      "phase": 0.0,
+      "commanded_rad": {
+        "right_wrist_yaw_joint": -0.15,
+        "right_wrist": -0.2,
+        "right_thumb_pip": 0.0,
+        "right_index_mcp": 0.0,
+        "right_index_pip": 0.0,
+        "right_middle_mcp": 0.0,
+        "right_middle_pip": 0.0
+      },
+      "right_wrist_yaw_position_m": [
+        0.045698341,
+        -0.324092478,
+        0.090962343
+      ],
+      "right_tower_position_m": [
+        0.092359036,
+        -0.343752235,
+        0.0587712
+      ],
+      "right_palm_position_m": [
+        0.178243935,
+        -0.406172603,
+        -0.044265058
+      ],
+      "right_index_fingertip_position_m": [
+        0.293364022,
+        -0.378485778,
+        -0.089670258
+      ]
+    },
+    "last": {
+      "frame": 23,
+      "phase": 1.0,
+      "commanded_rad": {
+        "right_wrist_yaw_joint": 0.25,
+        "right_wrist": 0.35000000000000003,
+        "right_thumb_pip": 0.6,
+        "right_index_mcp": 0.7,
+        "right_index_pip": 0.8,
+        "right_middle_mcp": 0.6,
+        "right_middle_pip": 0.75
+      },
+      "right_wrist_yaw_position_m": [
+        0.042113341,
+        -0.322594851,
+        0.088613726
+      ],
+      "right_tower_position_m": [
+        0.088365182,
+        -0.342200011,
+        0.055805117
+      ],
+      "right_palm_position_m": [
+        0.172095031,
+        -0.408587635,
+        -0.045737013
+      ],
+      "right_index_fingertip_position_m": [
+        0.262837031,
+        -0.393171493,
+        -0.077328887
+      ]
+    },
+    "frame_directory": "motion_frames"
+  }
+}
