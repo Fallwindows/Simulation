@@ -2,9 +2,8 @@
 
 Date: 2026-09-26
 
-Status: **CPU code candidate only; an Isaac 6.1 feedback adapter and future smoke
-harness now exist, but no Isaac/PhysX run has occurred and the R2 gate has not
-passed**
+Status: **CPU revision candidate after failed Isaac 6.1 physical attempts; the
+R2 gate has not passed and this revision has not run in Isaac/PhysX**
 
 ## Routing and immutable base
 
@@ -22,17 +21,18 @@ passed**
   onto the orchestrator-supplied RST-003 revision 3 base commit
   `db94dd139cd0e1e60a01557c25103a3c792ce9d6`, tree
   `29752b846a0ad72999a9c31fca251d4c32d78878`. It does not edit the
-  locomotion policy, integration worktree, reviewer snapshot, or journal.
-  RST-003 revision 3 remains under fresh separate review and has no acceptance
-  status implied by this port.
+  locomotion policy, integration worktree, or reviewer snapshot.
+  The current staged-startup revision is based exactly on approved integration
+  commit `a3f2899f6a968b36d43f15ca9a17f8efe4ee1e01`, tree
+  `b003f8f5c0bf19721f06fcd06f23427289f5dd55`.
 - The task is routed to GPT-5.6 Sol with high reasoning effort. Runtime model and
   effort identity are not independently exposed to the worker and remain
   `unknown` rather than inferred from configuration.
 - Implementation and acceptance review are separate assignments. This worker
   cannot approve its own candidate; every changed candidate or combined
   integration base requires a new independent review.
-- The orchestrator owns integration and the authoritative implementation
-  journal. This task does not edit either.
+- The orchestrator owns integration. This revision updates only the requested
+  R2 runtime entry in the authoritative implementation journal.
 
 The owner-authorized restocking specification makes R2 an intermediate gate.
 The full goal remains one continuous physical store-to-backroom pick, carry,
@@ -245,6 +245,35 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   candidates by the measured plane, and records raw-to-sphere matches. It will
   still reject this observed one-foot/two-point state instead of turning it into
   a support polygon.
+- `RST-004-F08`: the approved a3 correction ran from exact integration commit
+  `a3f2899f6a968b36d43f15ca9a17f8efe4ee1e01`. After the old blind two-second
+  settle, it again found only a left heel contact: 39.59727097 N and two Z=0
+  raw points; the right sensor was valid with zero force and no points. Only
+  left sphere index 1 reached the plane; index 0 was 2.1047 mm high and the
+  other two were 0.166--0.169 m high. The adapter now retains root pose,
+  quaternion/RPY, world/body velocities, leg q/qd, and both ankles' pose and
+  sphere geometry before support construction, including the noncontact side.
+  The harness replaces blind settling with a bounded measured startup: acquire
+  real bilateral polygonal support, ramp from measured joints to the symmetric
+  crouch with drive targets, then hold a verified dwell. Every increment checks
+  contact/support, root tilt and speed, clearance, target tracking, and sole
+  flatness. Failure aborts before the gait controller.
+- `RST-004-R2-F01`: fixed after exact review of `eba801d`. The first staged
+  candidate approximated sole tilt with the four-sphere footprint's diagonal
+  height spread; a narrow-foot 30 degree roll could pass that proxy. The gate
+  now rotates the authored sole-plane normal (ankle-link local +Z, established
+  by all four sphere centers sharing one local Z) through the normalized
+  measured ankle quaternion and measures its angle to world +Z. This is yaw and
+  Euler-wrap invariant, rejects an upside-down sole, accepts at most the exact
+  existing 12 degree limit, and rejects the reviewer's reproduced 30 degree
+  pure roll.
+- `RST-004-R2-F02`: fixed after the same review. Every contact-acquisition read,
+  including unavailable support and nonbilateral feedback, now evaluates root
+  tilt/speed, geometric root-to-sole clearance, and both measured sole-normal
+  angles before another physics step. It does not claim either sole is support.
+  A failed gate is stored with the causal kinematics and aborts immediately.
+  CPU regressions cover unavailable support with 30 degree ankle roll and a
+  0.20 m root height.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -277,9 +306,12 @@ margin, invalid/stale/missing sensor failure, and malformed data failure. A
 pitched-foot regression proves sphere centers are transformed before radius is
 subtracted along world Z, high spheres are excluded, raw points are spatially
 matched to authored collisions, and a one-foot/two-point state remains
-unavailable. Static inspection confirms that the future smoke harness contains
-no direct root/joint state setter call. Invalid, nonfinite, or nonpositive run
-arguments are also checked
+unavailable. Failure regressions verify that root, joints, and both ankles'
+world sphere geometry survive a support exception. Staged-startup regressions
+cover target interpolation and timing, contact loss, unsafe root state, target
+tracking failure, and durable causal diagnostics. Static inspection confirms
+that the smoke harness contains no post-reset direct root/joint state setter
+call. Invalid, nonfinite, or nonpositive run arguments are also checked
 through the CPU-safe preflight boundary. Regression cases mutate or remove the
 acceptance spec, manifest hash, and installed-API hash and verify that preflight,
 repeat, and final checks fail closed after persisting the mismatch. Launcher
@@ -288,9 +320,9 @@ inspection requires `fast_shutdown: false`; injected post-shutdown runners
 verify durable pass/fail results with exit codes 0/1 and durable runtime errors
 with exit code 2.
 
-## Future one-job evidence harness
+## Serialized one-job evidence harness
 
-`robot_spike/production/run_locomotion_smoke.py` is an explicit future heavy-job
+`robot_spike/production/run_locomotion_smoke.py` is an explicit heavy-job
 entry point. Importing it does not import Isaac. Before constructing
 `SimulationApp`, it requires a clean worktree and exact expected candidate and
 tree SHAs. It opens and hashes the actual owner acceptance spec, the production
@@ -309,7 +341,19 @@ rewritten after `close()`; a runtime exception is likewise written as a terminal
 error with `shutdown_returned: false` before close, then wrapped in the final
 durable error after close. The run performs one explicit
 deterministic reset per repeat, and uses only drive position targets after each
-reset. It writes every controller step to one JSONL measured sample stream per
+reset. Instead of sending a crouch target and advancing two seconds without
+sensing, it first advances a bounded contact-acquisition window until measured
+bilateral contact produces valid support geometry. It then interpolates from
+the measured joint state to the symmetric crouch over the existing 0.30 s
+double-support duration and verifies another 0.30 s dwell. Each increment uses
+the existing control gates: 12 degree root/sole tilt envelope, 0.35 m/s root
+linear speed, 1.0 rad/s root angular component, 0.30 rad joint target error,
+`[-0.015 m]` minimum support margin, and `[0.45, 0.80] m` root clearance. Sole
+flatness applies the same 12 degree gate directly to the measured angle between
+the authored sole normal and world up; it does not add or loosen a physical
+threshold. Any loss of
+contact/support, instability, sole tilt, or tracking aborts before constructing
+the gait controller. It writes every controller step to one JSONL measured sample stream per
 repeat plus an incrementally durable status report containing root motion,
 target error, clearance, tilt, velocity, contact forces/transitions/raw-point
 counts, contacting-sole slip, joint state, one-step-lag target error, COM,
@@ -332,14 +376,13 @@ C:\isaacsim\python.bat robot_spike\production\run_locomotion_smoke.py `
   --repeats 2
 ```
 
-Two predecessor integration attempts exist, both failed before gait commands.
-Neither is passing evidence for this candidate. The script itself is not
-evidence that sensing, inferred support, walking, docking, or reset
-repeatability works.
+The recorded predecessor integration attempts all failed before gait commands.
+None is passing evidence for this candidate. The script itself is not evidence
+that sensing, inferred support, walking, docking, or reset repeatability works.
 
 ## Scheduled Isaac validation requirements
 
-No Isaac, PhysX, or GPU process is launched by this task. R2 remains pending
+No Isaac, PhysX, or GPU process is launched for this source revision. R2 remains pending
 until the orchestrator schedules one heavy job and an independent reviewer
 checks the exact integrated candidate. That validation must at minimum:
 
@@ -356,10 +399,14 @@ checks the exact integrated candidate. That validation must at minimum:
 8. repeat reset and the short-path run to check reproducibility.
 
 The source-level API names and return shapes are now resolved for the installed
-6.1 build. The failed `58f1298` run verified the imported link order and recorded
-the exact initial contact state. It found only two left-foot raw points with the
-right foot airborne after settle, so the robot did not have polygonal support
-for gait. Physical behavior remains unresolved: whether a corrected reset/settle
+6.1 build. The failed `58f1298` and `a3f2899` runs verified the imported link
+order and recorded the exact initial contact state. The a3 receipt is
+`C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-a3f2899\locomotion_smoke_status.json`;
+its Kit log is
+`C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_051145.log`.
+It found only two left-foot raw points with the right foot airborne after the
+blind settle, so the robot did not have polygonal support for gait. Physical
+behavior remains unresolved: whether the staged measured startup
 state produces bilateral support, whether the strict sphere-plane inference is
 ever needed in a flat supported pose, correctness of the selected sole reference
 under load, mass/COM fidelity, drive authority, friction/slip, self-collision

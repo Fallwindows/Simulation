@@ -19,16 +19,27 @@ from robot_spike.production.isaac_feedback import (
     convex_hull_xy,
     support_polygon_center_and_margin,
 )
-from robot_spike.production.locomotion import LEG_JOINTS
+from robot_spike.production.locomotion import (
+    FootFeedback,
+    FootPose,
+    GaitConfig,
+    LEG_JOINTS,
+    LocomotionFeedback,
+    PlanarPose,
+)
 from robot_spike.production.run_locomotion_smoke import (
     EVIDENCE_FILES,
     ISAAC_API_SOURCE_FILES,
     EvidenceIdentityGuard,
     EvidenceIdentityMismatchError,
+    StartupValidationError,
     _execute_smoke,
+    _interpolate_joint_targets,
     _persist_feedback_failure,
     _persist_pre_shutdown_runtime_error,
     _record_identity_boundary,
+    _startup_feedback_failures,
+    _staged_double_support_startup,
     _terminate_process,
     _validate_arguments,
     acceptance_spec_identity,
@@ -102,6 +113,134 @@ class FakeSensor:
             {"position": {"x": point[0], "y": point[1], "z": point[2]}}
             for point in self.points
         ]
+
+
+def startup_diagnostics(
+    *,
+    root_pitch: float = 0.0,
+    linear_speed: float = 0.0,
+    root_z: float = 0.635,
+    ankle_roll: float = 0.0,
+) -> dict[str, object]:
+    half_roll = 0.5 * ankle_roll
+    ankle = {
+        "link_position_world_m": [0.0, 0.0, 0.034],
+        "link_orientation_world_wxyz": [
+            math.cos(half_roll),
+            math.sin(half_roll),
+            0.0,
+            0.0,
+        ],
+        "link_roll_pitch_yaw_rad": [ankle_roll, 0.0, 0.0],
+        "sole_reference_world_m": [0.0385, 0.0, 0.0],
+        "sphere_centers_world_m": [
+            [center[0], center[1], 0.005]
+            for center in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m
+        ],
+        "sphere_world_lowest_points_m": [
+            [center[0], center[1], 0.0]
+            for center in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m
+        ],
+    }
+    return {
+        "kinematics": {
+            "sample_time_s": 1.0,
+            "root": {
+                "position_world_m": [0.0, 0.0, root_z],
+                "orientation_world_wxyz": [1.0, 0.0, 0.0, 0.0],
+                "roll_pitch_yaw_rad": [0.0, root_pitch, 0.0],
+                "linear_velocity_world_mps": [linear_speed, 0.0, 0.0],
+                "angular_velocity_world_rps": [0.0, 0.0, 0.0],
+                "linear_velocity_body_mps": [linear_speed, 0.0, 0.0],
+                "angular_velocity_body_rps": [0.0, 0.0, 0.0],
+            },
+            "leg_joint_position_rad": {name: 0.0 for name in LEG_JOINTS},
+            "leg_joint_velocity_rad_s": {name: 0.0 for name in LEG_JOINTS},
+            "ankles": {"left": copy.deepcopy(ankle), "right": copy.deepcopy(ankle)},
+        },
+        "contacts": {
+            "left": {"is_valid": True, "in_contact": True, "force_n": 100.0},
+            "right": {"is_valid": True, "in_contact": True, "force_n": 100.0},
+        },
+        "support": {"source": "measured_raw_contact_hull"},
+    }
+
+
+def startup_feedback(
+    *,
+    timestamp: float = 1.0,
+    joints: dict[str, float] | None = None,
+    left_contact: bool = True,
+    right_contact: bool = True,
+    root_pitch: float = 0.0,
+) -> LocomotionFeedback:
+    positions = joints if joints is not None else {name: 0.0 for name in LEG_JOINTS}
+    return LocomotionFeedback(
+        timestamp_s=timestamp,
+        root_pose=PlanarPose(0.0, 0.0, 0.0),
+        root_height_m=0.635,
+        root_tilt_roll_pitch_rad=(0.0, root_pitch),
+        root_linear_velocity_body_mps=(0.0, 0.0, 0.0),
+        root_angular_velocity_body_rps=(0.0, 0.0, 0.0),
+        left_foot=FootFeedback(FootPose((0.0, 0.0675, 0.0), 0.0), left_contact),
+        right_foot=FootFeedback(FootPose((0.0, -0.0675, 0.0), 0.0), right_contact),
+        joint_position_rad=positions,
+        joint_velocity_rad_s={name: 0.0 for name in LEG_JOINTS},
+        com_position_world_m=(0.0, 0.0, 0.50),
+        support_center_world_m=(0.0, 0.0, 0.0),
+        support_margin_m=0.03,
+    )
+
+
+class StartupController:
+    def __init__(self):
+        self.commands: list[dict[str, float]] = []
+
+    def command_joint_positions(self, targets):
+        self.commands.append(dict(targets))
+
+
+class StartupAdapter:
+    def __init__(self):
+        self.current = startup_diagnostics()
+
+    def diagnostics(self):
+        return copy.deepcopy(self.current)
+
+
+class StartupFeedbackSource:
+    def __init__(self, controller: StartupController):
+        self.controller = controller
+        self.adapter = StartupAdapter()
+        self.read_count = 0
+        self.mode = "success"
+
+    def read_feedback(self):
+        self.read_count += 1
+        if self.mode == "unavailable":
+            raise FeedbackUnavailableError("measured support is not yet available")
+        if self.mode == "unavailable_sole_tilt":
+            self.adapter.current = startup_diagnostics(ankle_roll=math.radians(30.0))
+            raise FeedbackUnavailableError("measured support is not yet available")
+        if self.mode == "unavailable_clearance":
+            self.adapter.current = startup_diagnostics(root_z=0.20)
+            raise FeedbackUnavailableError("measured support is not yet available")
+        if self.mode == "nonbilateral_sole_tilt":
+            self.adapter.current = startup_diagnostics(ankle_roll=math.radians(30.0))
+            return startup_feedback(right_contact=False)
+        if self.mode == "unsafe_root":
+            self.adapter.current = startup_diagnostics(root_pitch=math.radians(13.0))
+            return startup_feedback(root_pitch=math.radians(13.0))
+        if self.mode == "contact_loss" and self.read_count == 2:
+            return startup_feedback(right_contact=False)
+        if self.mode == "tracking_failure" and self.read_count >= 2:
+            return startup_feedback(joints={name: -1.0 for name in LEG_JOINTS})
+        joints = (
+            self.controller.commands[-1]
+            if self.controller.commands
+            else {name: 0.02 for name in LEG_JOINTS}
+        )
+        return startup_feedback(timestamp=1.0 + 0.1 * self.read_count, joints=joints)
 
 
 class IsaacFeedbackTests(unittest.TestCase):
@@ -772,6 +911,211 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertEqual(persisted["error_type"], "FeedbackUnavailableError")
         self.assertEqual(persisted["error"], "support polygon unavailable")
         self.assertIn("FeedbackUnavailableError", persisted["traceback"])
+
+    def test_feedback_failure_retains_root_joint_and_both_ankle_kinematics(self):
+        adapter = self.adapter(
+            left=Reading(in_contact=True),
+            right=Reading(in_contact=False, value=0.0),
+        )
+        adapter.left_contact_sensor = FakeSensor(
+            Reading(in_contact=True), [(9.0, 9.0, 0.0)]
+        )
+        with self.assertRaisesRegex(FeedbackUnavailableError, "outside its sole spheres"):
+            adapter.read_feedback()
+
+        kinematics = adapter.diagnostics()["kinematics"]
+        self.assertEqual(kinematics["root"]["position_world_m"], [1.0, 2.0, 0.635])
+        self.assertEqual(len(kinematics["root"]["orientation_world_wxyz"]), 4)
+        self.assertEqual(set(kinematics["leg_joint_position_rad"]), set(LEG_JOINTS))
+        self.assertEqual(set(kinematics["leg_joint_velocity_rad_s"]), set(LEG_JOINTS))
+        self.assertEqual(set(kinematics["ankles"]), {"left", "right"})
+        for side in ("left", "right"):
+            ankle = kinematics["ankles"][side]
+            self.assertEqual(len(ankle["sphere_centers_world_m"]), 4)
+            self.assertEqual(len(ankle["sphere_world_lowest_points_m"]), 4)
+            self.assertEqual(len(ankle["link_roll_pitch_yaw_rad"]), 3)
+
+    def test_staged_startup_interpolates_targets_and_observes_timing(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        crouch = {name: 0.18 for name in LEG_JOINTS}
+        physics_steps = []
+        progress = []
+
+        final, report = _staged_double_support_startup(
+            feedback_source=source,  # type: ignore[arg-type]
+            joint_controller=controller,  # type: ignore[arg-type]
+            step_physics=lambda: physics_steps.append(len(physics_steps) + 1),
+            crouch_targets=crouch,
+            physics_dt=0.1,
+            maximum_duration_s=2.0,
+            progress=lambda value: progress.append(copy.deepcopy(value)),
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["contact_acquired_step"], 1)
+        self.assertEqual(report["step_budget"]["target_ramp"], 3)
+        self.assertEqual(report["step_budget"]["verified_dwell"], 3)
+        self.assertEqual(len(physics_steps), 7)
+        self.assertEqual(len(controller.commands), 3)
+        self.assertAlmostEqual(controller.commands[0][LEG_JOINTS[0]], 0.02 + (0.16 / 3.0))
+        self.assertEqual(controller.commands[-1], crouch)
+        self.assertEqual(final.joint_position_rad, crouch)
+        self.assertEqual(progress[-1]["status"], "pass")
+        self.assertEqual(
+            _interpolate_joint_targets({"joint": 1.0}, {"joint": 3.0}, 0.5),
+            {"joint": 2.0},
+        )
+
+    def test_sole_normal_tilt_rejects_thirty_degrees_and_honors_boundary(self):
+        config = GaitConfig()
+        feedback = startup_feedback()
+        at_boundary, boundary_metrics = _startup_feedback_failures(
+            feedback,
+            startup_diagnostics(ankle_roll=config.maximum_root_tilt_rad),
+            None,
+            config,
+        )
+        over_boundary, _over_metrics = _startup_feedback_failures(
+            feedback,
+            startup_diagnostics(
+                ankle_roll=config.maximum_root_tilt_rad + math.radians(0.01)
+            ),
+            None,
+            config,
+        )
+        thirty_degrees, thirty_metrics = _startup_feedback_failures(
+            feedback,
+            startup_diagnostics(ankle_roll=math.radians(30.0)),
+            None,
+            config,
+        )
+
+        self.assertFalse(any("sole tilt" in failure for failure in at_boundary))
+        self.assertAlmostEqual(
+            boundary_metrics["left_sole_tilt_rad"], config.maximum_root_tilt_rad
+        )
+        self.assertTrue(any("sole tilt" in failure for failure in over_boundary))
+        self.assertTrue(any("sole tilt" in failure for failure in thirty_degrees))
+        self.assertAlmostEqual(
+            thirty_metrics["left_sole_tilt_rad"], math.radians(30.0)
+        )
+
+    def test_staged_startup_aborts_on_contact_loss_with_diagnostics(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "contact_loss"
+        with self.assertRaises(StartupValidationError) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+            )
+
+        error = raised.exception
+        self.assertEqual(error.phase, "target_ramp")
+        self.assertIn("both measured feet are not in contact", str(error))
+        rejected = error.report["events"][-1]
+        self.assertEqual(rejected["status"], "rejected")
+        self.assertIn("kinematics", rejected["diagnostics"])
+        self.assertEqual(len(controller.commands), 1)
+
+    def test_staged_startup_bounds_acquisition_and_persists_each_failed_read(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "unavailable"
+        progress = []
+        with self.assertRaisesRegex(
+            StartupValidationError, "bounded window ended"
+        ) as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+                progress=lambda value: progress.append(copy.deepcopy(value)),
+            )
+
+        acquisition_steps = raised.exception.report["step_budget"]["contact_acquisition"]
+        self.assertEqual(source.read_count, acquisition_steps)
+        self.assertEqual(len(raised.exception.report["events"]), acquisition_steps)
+        self.assertGreaterEqual(len(progress), acquisition_steps)
+        self.assertTrue(
+            all("kinematics" in event["diagnostics"] for event in progress[-2]["events"])
+        )
+        self.assertEqual(controller.commands, [])
+
+    def test_acquisition_without_bilateral_support_gates_sole_tilt_and_clearance(self):
+        for mode, expected in (
+            ("unavailable_sole_tilt", "sole tilt"),
+            ("unavailable_clearance", "root clearance"),
+            ("nonbilateral_sole_tilt", "sole tilt"),
+        ):
+            with self.subTest(mode=mode):
+                controller = StartupController()
+                source = StartupFeedbackSource(controller)
+                source.mode = mode
+                physics_steps = []
+                with self.assertRaisesRegex(StartupValidationError, expected) as raised:
+                    _staged_double_support_startup(
+                        feedback_source=source,  # type: ignore[arg-type]
+                        joint_controller=controller,  # type: ignore[arg-type]
+                        step_physics=lambda: physics_steps.append(1),
+                        crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                        physics_dt=0.1,
+                        maximum_duration_s=2.0,
+                    )
+
+                self.assertEqual(physics_steps, [1])
+                self.assertEqual(controller.commands, [])
+                event = raised.exception.report["events"][-1]
+                self.assertEqual(event["status"], "rejected")
+                self.assertTrue(
+                    any(expected in failure for failure in event["gate_failures"])
+                )
+                self.assertIn("kinematics", event["diagnostics"])
+
+    def test_staged_startup_aborts_on_unstable_root_before_any_target(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "unsafe_root"
+        with self.assertRaisesRegex(StartupValidationError, "root tilt") as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "contact_acquisition")
+        self.assertEqual(controller.commands, [])
+        self.assertEqual(raised.exception.report["status"], "error")
+
+    def test_staged_startup_aborts_on_target_tracking_error(self):
+        controller = StartupController()
+        source = StartupFeedbackSource(controller)
+        source.mode = "tracking_failure"
+        with self.assertRaisesRegex(StartupValidationError, "target tracking") as raised:
+            _staged_double_support_startup(
+                feedback_source=source,  # type: ignore[arg-type]
+                joint_controller=controller,  # type: ignore[arg-type]
+                step_physics=lambda: None,
+                crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                physics_dt=0.1,
+                maximum_duration_s=2.0,
+            )
+
+        self.assertEqual(raised.exception.phase, "target_ramp")
+        event = raised.exception.report["events"][-1]
+        self.assertGreater(event["metrics"]["maximum_joint_target_error_rad"], 0.3)
+        self.assertIn("kinematics", event["diagnostics"])
 
 
 if __name__ == "__main__":
