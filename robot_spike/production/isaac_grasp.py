@@ -411,6 +411,7 @@ class IsaacArmApproachPort:
         *,
         command_period_s: float,
         joint_space_vias: Sequence[Mapping[str, float]] = (),
+        required_final_confirmations: int = 1,
         position_tolerance_m: float = 0.015,
         orientation_tolerance_rad: float = 0.08,
     ) -> None:
@@ -428,6 +429,13 @@ class IsaacArmApproachPort:
         self.kinematics = kinematics
         self.timestamp_source = timestamp_source
         self.command_period_s = float(command_period_s)
+        if (
+            isinstance(required_final_confirmations, bool)
+            or not isinstance(required_final_confirmations, int)
+            or required_final_confirmations < 1
+        ):
+            raise ValueError("required final confirmations must be a positive integer")
+        self.required_final_confirmations = required_final_confirmations
         self.position_tolerance_m = float(position_tolerance_m)
         self.orientation_tolerance_rad = float(orientation_tolerance_rad)
         self.planner = ArmReachPlanner(kinematics, command_period_s=command_period_s)
@@ -529,8 +537,12 @@ class IsaacArmApproachPort:
             self.last_error = str(exc)
             self._waypoints = []
             return False
-        if len(self._waypoints) * self.command_period_s > maximum_duration_s:
-            self.last_error = "bounded arm approach cannot finish before deadline"
+        reserved_steps = len(self._waypoints) + self.required_final_confirmations
+        if reserved_steps * self.command_period_s > maximum_duration_s + 1.0e-12:
+            self.last_error = (
+                "bounded arm approach cannot finish and reserve final "
+                "confirmations before deadline"
+            )
             self._waypoints = []
             return False
         now = float(self.timestamp_source())
@@ -612,6 +624,7 @@ class IsaacArmApproachPort:
             },
             "goal_joint_positions_rad": dict(sorted(self._goal.items())),
             "remaining_waypoints": len(self._waypoints),
+            "required_final_confirmations": self.required_final_confirmations,
             "position_error_m": position_error,
             "orientation_error_rad": orientation_error,
             "position_tolerance_m": self.position_tolerance_m,

@@ -281,6 +281,31 @@ unchanged. No Isaac, PhysX, SimulationApp, or GPU run occurred for this source
 correction; physical clearance and final grasp remain runtime gates after fresh
 exact review.
 
+Fresh review of source candidate
+`c6def07eb0479e5c2490c21455d0cb7c9b804f53` (tree
+`44a93195ada75c4379a4aad032fafe6faedb7960`) found two source blockers. An
+adversarial measured start at the shoulder-pitch lower bound was admitted with
+360 commands, leaving only the last command sample for confirmation before the
+inclusive deadline expired. Review also transformed the actual hand collision
+meshes and found index, middle, ring, and pinky vertices inside the pickup-board
+AABB over the former route's waypoints 59--88; palm-center clearance was not a
+sufficient geometry proof.
+
+The successor reserves three complete physics periods beyond every accepted
+command queue, using the same three consecutive confirmation requirement as
+the runner. The former lower-bound start is rejected before any command. The
+nominal path has 324 commands and reserves three more samples inside the
+unchanged 360-period deadline. The route now rotates `right_wrist` to `-0.65`
+rad before folding or raising the arm, holds that orientation through the
+clearance vias, and returns to the exact R3 solution only from overhead.
+Regression transforms all 82 authored collision geometries on the complete
+Asimov forearm and OrcaHand assembly at all 324 waypoints. Mesh bounds use every
+authored collision vertex; sphere and cylinder checks use conservative enclosing
+boxes. Every transformed bound is disjoint from the pickup-board AABB. The same
+test retains all URDF joint-limit and per-step velocity checks. Runtime evidence
+records the vias, deadline, and confirmation reserve. No deadline, physical
+gate, measured tolerance, product property, or state-write policy changed.
+
 ## Source-only validation limits
 
 CPU fakes cover path resolution, impulse conversion, orientation conversion,

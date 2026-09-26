@@ -624,10 +624,14 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             lambda: 0.0,
             command_period_s=1.0 / 120.0,
             joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
+            required_final_confirmations=grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES,
         )
         self.assertTrue(port.request_approach(plan.arm_target, 3.0))
         waypoints = tuple(port._waypoints)
-        self.assertLessEqual(len(waypoints), 360)
+        self.assertEqual(len(waypoints), 324)
+        self.assertLessEqual(
+            len(waypoints) + grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES, 360
+        )
         self.assertEqual(waypoints[-1], port._goal)
         via_indices = [waypoints.index(via) for via in PREGRASP_CLEARANCE_VIAS_RAD]
         self.assertEqual(via_indices, sorted(via_indices))
@@ -668,6 +672,118 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertGreaterEqual(
             min(pose[2] for pose in crossing), board.maximum_m[2] + 0.12
         )
+
+        # Check every authored collision geometry on the complete robot at
+        # every command. Mesh bounds use all vertices. Primitive bounds use a
+        # conservative enclosing box, so disjoint bounds prove the authored
+        # geometry cannot intersect the pickup-board AABB.
+        import xml.etree.ElementTree as ET
+
+        import numpy as np
+        import trimesh
+
+        from robot_spike.validate_combined_model import _fk, _origin
+
+        robot = ET.parse(self.spec.model.path).getroot()
+        children = {}
+        for joint in robot.findall("joint"):
+            parent = joint.find("parent").attrib["link"]
+            children.setdefault(parent, []).append(joint)
+        collision_geometry = []
+        for link in robot.findall("link"):
+            for collision in link.findall("collision"):
+                geometry = collision.find("geometry")
+                mesh_element = geometry.find("mesh")
+                if mesh_element is not None:
+                    mesh_path = (
+                        self.spec.model.path.parent / mesh_element.attrib["filename"]
+                    ).resolve()
+                    vertices = np.asarray(
+                        trimesh.load_mesh(mesh_path, process=False).vertices,
+                        dtype=float,
+                    )
+                else:
+                    sphere = geometry.find("sphere")
+                    cylinder = geometry.find("cylinder")
+                    if sphere is not None:
+                        radius = float(sphere.attrib["radius"])
+                        half_extents = (radius, radius, radius)
+                    elif cylinder is not None:
+                        radius = float(cylinder.attrib["radius"])
+                        half_extents = (
+                            radius,
+                            radius,
+                            float(cylinder.attrib["length"]) / 2.0,
+                        )
+                    else:
+                        self.fail(
+                            f"unsupported authored collision geometry on {link.attrib['name']}"
+                        )
+                    vertices = np.asarray([
+                        (x, y, z)
+                        for x in (-half_extents[0], half_extents[0])
+                        for y in (-half_extents[1], half_extents[1])
+                        for z in (-half_extents[2], half_extents[2])
+                    ])
+                collision_geometry.append((
+                    link.attrib["name"],
+                    collision.attrib.get("name", ""),
+                    _origin(collision.find("origin")),
+                    vertices,
+                ))
+        self.assertEqual(len(collision_geometry), 82)
+
+        root_transform = np.eye(4)
+        root_transform[:3, :3] = (
+            (cosine, -sine, 0.0),
+            (sine, cosine, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+        root_transform[:3, 3] = plan.root_position_m
+        board_minimum = np.asarray(board.minimum_m)
+        board_maximum = np.asarray(board.maximum_m)
+        for step, waypoint in enumerate(waypoints):
+            link_transforms = _fk("pelvis_link", children, waypoint)
+            for link_name, collision_name, local, vertices in collision_geometry:
+                world = trimesh.transform_points(
+                    vertices, root_transform @ link_transforms[link_name] @ local
+                )
+                geometry_minimum = world.min(axis=0)
+                geometry_maximum = world.max(axis=0)
+                separated = bool(
+                    np.any(geometry_maximum < board_minimum)
+                    or np.any(geometry_minimum > board_maximum)
+                )
+                self.assertTrue(
+                    separated,
+                    f"step {step} {link_name}/{collision_name} overlaps pickup board",
+                )
+
+    def test_arm_approach_rejects_start_without_confirmation_reserve(self):
+        from robot_spike.production.arm_reach import RightArmKinematics
+
+        kinematics = RightArmKinematics(self.spec)
+        plan = pickup_reset_plan(self.spec, self.layout, kinematics)
+        articulation = FakeArticulation(self.spec)
+        articulation.positions["right_shoulder_pitch_joint"] = (
+            self.spec.model.joint_limits["right_shoulder_pitch_joint"].lower
+        )
+        port = IsaacArmApproachPort(
+            RecordingController(),
+            articulation,
+            kinematics,
+            lambda: 0.0,
+            command_period_s=1.0 / 120.0,
+            joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
+            required_final_confirmations=grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES,
+        )
+        self.assertFalse(port.request_approach(plan.arm_target, 3.0))
+        self.assertEqual(
+            port.last_error,
+            "bounded arm approach cannot finish and reserve final "
+            "confirmations before deadline",
+        )
+        self.assertEqual(port._waypoints, [])
 
     def test_pickup_reset_plan_stages_base_and_preserves_dynamic_product(self):
         from robot_spike.production.arm_reach import RightArmKinematics
