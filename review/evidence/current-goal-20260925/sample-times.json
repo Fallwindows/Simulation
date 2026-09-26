@@ -1,0 +1,37 @@
+{
+  "timestamp_source": "identical capture rgb_frames.jsonl rows",
+  "current_rgb_index_sha256": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+  "r7_rgb_index_sha256": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+  "samples": [
+    {
+      "sample": 1,
+      "frame_index": 0,
+      "timestamp_s": 0.1
+    },
+    {
+      "sample": 2,
+      "frame_index": 90,
+      "timestamp_s": 3.1
+    },
+    {
+      "sample": 3,
+      "frame_index": 180,
+      "timestamp_s": 6.1
+    },
+    {
+      "sample": 4,
+      "frame_index": 360,
+      "timestamp_s": 12.1
+    },
+    {
+      "sample": 5,
+      "frame_index": 510,
+      "timestamp_s": 17.1
+    },
+    {
+      "sample": 6,
+      "frame_index": 600,
+      "timestamp_s": 20.1
+    }
+  ]
+}

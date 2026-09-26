@@ -1,0 +1,206 @@
+{
+  "schema": "grocery.technical_lidar_preview_evidence",
+  "schema_version": 1,
+  "created_date": "2026-09-25",
+  "claim_scope": "Preview-only visual evidence for one simulated capture; not final technical delivery.",
+  "capture_id": "20260925-183307101",
+  "source_id": "production-20260925-183307101-v1",
+  "preview_status": "complete",
+  "profile": "preview",
+  "delivery_eligible": false,
+  "original_producer_manifest": {
+    "logical_path": "runs/20260925-183307101/outputs/technical-views-preview-visual-fix/technical_views_preview_manifest.json",
+    "sha256": "6139318c88399137a953f41b4c8d460ab62c7301bc1bb11407b98bb873dc34a3",
+    "size_bytes": 272876,
+    "included_in_packet": false,
+    "reason": "The unchanged raw receipt contains absolute paths into the user profile and disposable worktree."
+  },
+  "portable_manifest": {
+    "path": "technical_views_preview_manifest.portable.json",
+    "sha256": "a5f3167e84c1d2f88328a7c0c97aa6091ebea7a0a97fecb9add02d2dec008ebb",
+    "size_bytes": 272176,
+    "derivation": "Path-only sanitization of the original receipt: three unique absolute repository paths were replaced with their equivalent repository-relative paths; all other receipt fields and hashes are retained."
+  },
+  "provenance": {
+    "source_catalog_sha256": "2b9dd055a893be4870ebd2fd3e5e057562452651a39edcea12e6e28c6588f31f",
+    "capture_source_commit": "48de461b42d5e0945b21432cef9f5523cc5b0874",
+    "slam_source_commit": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+    "perception_source_commit": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+    "capture_manifest_sha256": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+    "slam_manifest_sha256": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+    "perception_manifest_sha256": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295",
+    "rgb_video_sha256": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+    "rgb_frame_index_sha256": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+    "raw_lidar_bag_sha256": "4e060311b69102ca4c94758f150d69455941f95e3e182a46cda2d0b72902ed7a",
+    "map_sha256": "1a8980c7916a0786e3ae7324e07bcc3de0004e0cb2a6805e58e4c3ea8b68bd15",
+    "trajectory_sha256": "472853fe1674a009ff0a95d68fadec3b2f1cd8f73e296d20a974eee53668f84d",
+    "inventory_sha256": "0f33ca766eccc9419fc1f2535f9158f76778d8007948a10ebc6693c7adab68e1",
+    "ground_truth_consumed": false,
+    "depth_sources": [
+      "lidar_projected_with_slam_pose"
+    ],
+    "selected_scan_count": 204,
+    "estimated_pose_count": 204,
+    "map_version": "offline-slam-map/20260925-183307101/1a8980c7916a0786",
+    "trajectory_version": "offline-slam-trajectory/20260925-183307101/472853fe1674a009",
+    "object_state_version": "estimated-object-state/20260925-183307101/0f33ca766eccc941",
+    "implementation_sha256": {
+      "simulator/sensors/feature_selection.py": "c25b9c4efc9b60bca0406e470b0280ce63c132f2f268a3d1c248af91d0dfd654",
+      "simulator/sensors/scan_projection.py": "90b5411a6d37d0100ae205f34e3450198af75db768d7b95431b3089d399e186a",
+      "simulator/technical_lidar.py": "96048060024f6dd2f293bbbce842b21347cf21f47ee2c2170ff78d59237d9d94"
+    }
+  },
+  "outputs": {
+    "video": {
+      "path": "technical_views_preview_720p.mp4",
+      "sha256": "ef8d27137e6c564c3c524e557b1a37c13742808278d8cc4f00a4d2f31714771d",
+      "size_bytes": 6280743,
+      "width": 1280,
+      "height": 720,
+      "fps": 30.0,
+      "frames": 810,
+      "duration_s": 27.0,
+      "ordered_views": [
+        "sensor_activation",
+        "lidar_environment",
+        "persistent_map",
+        "object_association",
+        "object_detail",
+        "observed_aisle_overview",
+        "final_technical_view"
+      ]
+    },
+    "contact_sheet": {
+      "path": "technical_views_contact_sheet.png",
+      "sha256": "341f15200378909d699b227e7efe633cce99ffd13a1033d71e90ce6340bb860b",
+      "size_bytes": 1520928,
+      "dimensions_px": [
+        1440,
+        1890
+      ],
+      "representative_still_count": 21
+    },
+    "camera_motion_trace": {
+      "path": "technical_camera_trace.jsonl",
+      "sha256": "4bc6adcafc8134d13afcd38a123405cac151ee9b95af511a424dca05822300c0",
+      "size_bytes": 546645,
+      "frame_count": 810,
+      "row_count": 810
+    },
+    "representative_frames": [
+      {
+        "path": "representative_frames/sensor_activation_0000.png",
+        "sha256": "e91153f640e522d28ea41bff31cdb7af0353a1ebe3bb8d93001957b153edd599",
+        "size_bytes": 877745
+      },
+      {
+        "path": "representative_frames/sensor_activation_0060.png",
+        "sha256": "ad7bdcee8f3dc58c9403ab1cd1559cd6ddd2210e02a0354ac57c2d0f9fe60182",
+        "size_bytes": 931580
+      },
+      {
+        "path": "representative_frames/sensor_activation_0119.png",
+        "sha256": "af336603fbe3d07ad93df3da483a142d9a2fbf43d5bc07e6b7baaa7d5ff50f62",
+        "size_bytes": 907178
+      },
+      {
+        "path": "representative_frames/lidar_environment_0000.png",
+        "sha256": "8731e081fbb6a1531d8da62a82a163fa12f3962ecac78917160b17cdec88e9b9",
+        "size_bytes": 93626
+      },
+      {
+        "path": "representative_frames/lidar_environment_0045.png",
+        "sha256": "0f0d893de6c2d6893ff2503fec269cd5c20fc502cdb7dc24c7098211d5e6d63a",
+        "size_bytes": 107022
+      },
+      {
+        "path": "representative_frames/lidar_environment_0089.png",
+        "sha256": "3d4e67091265f6f229f2427d1f7ac899eee6b75656b9a006d15cea6ab4dc0b8a",
+        "size_bytes": 115211
+      },
+      {
+        "path": "representative_frames/persistent_map_0000.png",
+        "sha256": "592bb7878d6bde1af9661e473a98dc0918587b711047a0aebe9fde2b09323d13",
+        "size_bytes": 120526
+      },
+      {
+        "path": "representative_frames/persistent_map_0045.png",
+        "sha256": "2aa7a0331d221b8392e606ae00c3b92ec4de44dde8c16b6aeaa0655ed004ccaf",
+        "size_bytes": 112499
+      },
+      {
+        "path": "representative_frames/persistent_map_0089.png",
+        "sha256": "b0faf784f4a1a6c2e4e0910e2f4c4a2a6258010c089d2abfcd4d03a5c57935aa",
+        "size_bytes": 194055
+      },
+      {
+        "path": "representative_frames/object_association_0000.png",
+        "sha256": "c4382ffc2a4ebc32c7015cd4d606a2ef918fe1914b11e77d811483b4a81a72bc",
+        "size_bytes": 154049
+      },
+      {
+        "path": "representative_frames/object_association_0060.png",
+        "sha256": "a888a53b84ce9afcc96288c57d2bd6a31594ae18371832aafa3c34524b55f7e5",
+        "size_bytes": 155388
+      },
+      {
+        "path": "representative_frames/object_association_0119.png",
+        "sha256": "fff9d8b7d4ad64bcf2c55a169e27748b6bfecf7fea8fe30a13b4ffe1015e684d",
+        "size_bytes": 156626
+      },
+      {
+        "path": "representative_frames/object_detail_0000.png",
+        "sha256": "19442ec8ab5e439d6110a5280b3fed49a3435628db51e4a4ff27f85ec9de55a6",
+        "size_bytes": 126975
+      },
+      {
+        "path": "representative_frames/object_detail_0060.png",
+        "sha256": "a74f8ec642dcf26ae5c70746178489a386000445d1de29fd5ae28ed7635e32a6",
+        "size_bytes": 126667
+      },
+      {
+        "path": "representative_frames/object_detail_0119.png",
+        "sha256": "6a290e92f6ed223d8653a3dc932ddfa33951d617f4ac6788afdb3d2435306d61",
+        "size_bytes": 125909
+      },
+      {
+        "path": "representative_frames/observed_aisle_overview_0000.png",
+        "sha256": "47b7057fd3ed2b2c2499c5aa3ccbdea89d83bb5ccc758ddf3032db3d2bee819c",
+        "size_bytes": 234249
+      },
+      {
+        "path": "representative_frames/observed_aisle_overview_0060.png",
+        "sha256": "134de13159613c8216618883a001b25d49bd5156be0baebfd5331f4639fee84c",
+        "size_bytes": 155562
+      },
+      {
+        "path": "representative_frames/observed_aisle_overview_0119.png",
+        "sha256": "99a93bf483b1686f2aecc30bf06f86ddc44006152e5481930b9348bb662d8b4e",
+        "size_bytes": 148361
+      },
+      {
+        "path": "representative_frames/final_technical_view_0000.png",
+        "sha256": "f370acd3b54ad230e304067a51a41eb8ad05c60572295f9a3de6a3a62196697b",
+        "size_bytes": 179771
+      },
+      {
+        "path": "representative_frames/final_technical_view_0075.png",
+        "sha256": "3d48b7ae4d0a13688100b061880433dab472a9f09a7a656d42d7505fe777096f",
+        "size_bytes": 172942
+      },
+      {
+        "path": "representative_frames/final_technical_view_0149.png",
+        "sha256": "d566b13caf9d415bb23316f3264fc2fc150736114a196f71ddab8889dd140e67",
+        "size_bytes": 173332
+      }
+    ]
+  },
+  "limitations": [
+    "All LiDAR data is simulated sensor output from capture 20260925-183307101; no physical-world LiDAR capture is claimed.",
+    "This is one combined 1280×720 preview clip, not the seven final 1080p per-view delivery clips.",
+    "PointCloud2 returns use rigid header-stamp projection without per-return timing or deskew.",
+    "ROI association indicates nearest-surface raw-return support only; class and full object extent are not estimated.",
+    "Ray/origin markers and typography are explanatory overlays, not literal visible laser emission.",
+    "The RGB scene is synthetic; this preview does not establish photorealism, full-scene asset quality, SLAM accuracy, or perception accuracy."
+  ]
+}

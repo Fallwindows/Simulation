@@ -1504,15 +1504,29 @@ class TechnicalRenderer:
         scale = height / 720.0
         pad = int(42 * scale)
         draw.rounded_rectangle((pad, pad, min(width - pad, int(650 * scale)), int(162 * scale)), radius=int(12 * scale), fill=(5, 13, 24, 214), outline=(51, 211, 241, 155), width=max(1, int(1 * scale)))
-        draw.text((pad + int(22 * scale), pad + int(14 * scale)), "SIMULATED CAPTURE · SELECTIVE REAL LIDAR", font=self.fonts["kicker"], fill=(96, 222, 241, 255))
+        draw.text((pad + int(22 * scale), pad + int(14 * scale)), "SIMULATED CAPTURE · SELECTIVE RAW RETURNS", font=self.fonts["kicker"], fill=(96, 222, 241, 255))
         draw.text((pad + int(22 * scale), pad + int(42 * scale)), spec.title, font=self.fonts["title"], fill=(238, 247, 250, 255))
         draw.text((pad + int(22 * scale), pad + int(94 * scale)), spec.subtitle, font=self.fonts["body"], fill=(160, 185, 199, 255))
         frame_label = "CAMERA OPTICAL FRAME" if spec.temporal_mode == "current_window" else "ESTIMATED MAP FRAME"
         footer_parts = [frame_label, f"{point_count:,} SELECTED RETURNS", "RIGID HEADER-STAMP SCANS", "NO DESKEW"]
         if spec.temporal_mode != "current_window":
             footer_parts.append(f"{len(self.trajectory)} ESTIMATED POSES")
-        footer = " · ".join(footer_parts) + f" · source t={timestamp_s:0.2f}s"
-        draw.text((pad, height - pad - int(21 * scale)), footer, font=self.fonts["mono"], fill=(125, 162, 178, 235))
+        if spec.id == "final_technical_view":
+            footer_lines = (
+                " · ".join(footer_parts[:2]),
+                " · ".join(footer_parts[2:4]),
+                " · ".join(footer_parts[4:]) + f" · source t={timestamp_s:0.2f}s",
+            )
+            draw.multiline_text(
+                (pad, height - pad - int(64 * scale)),
+                "\n".join(footer_lines),
+                font=self.fonts["mono"],
+                fill=(125, 162, 178, 235),
+                spacing=max(2, int(3 * scale)),
+            )
+        else:
+            footer = " · ".join(footer_parts) + f" · source t={timestamp_s:0.2f}s"
+            draw.text((pad, height - pad - int(21 * scale)), footer, font=self.fonts["mono"], fill=(125, 162, 178, 235))
         for index, (track_id, (x, y), support_count) in enumerate(callouts[:3]):
             box_x = width - int(350 * scale)
             box_y = int((84 + index * 86) * scale)

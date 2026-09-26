@@ -1,0 +1,219 @@
+{
+  "schema": "grocery.rgb_current_vs_r7_evidence",
+  "schema_version": 1,
+  "created_date": "2026-09-25",
+  "claim_scope": "RGB visual review only",
+  "generation_receipt": null,
+  "generation_receipt_reason": "No generative image or video model was used; only labels were added.",
+  "captures": {
+    "current": {
+      "capture_id": "20260925-183307101",
+      "source_commit": "48de461b42d5e0945b21432cef9f5523cc5b0874",
+      "source_tree": "74fc8d8457799a49b0e2ddaccef139e86aac99c1",
+      "capture_seal_sha256": "a89471e34fb490727c182601c631d4a2ba95bb37499cbdddf03a1829829579b0",
+      "status": "complete",
+      "rgb_frame_count": 613,
+      "rgb_first_stamp_s": 0.1,
+      "rgb_last_stamp_s": 20.5,
+      "panel": "left",
+      "horizontal_fov_degrees": 75
+    },
+    "r7": {
+      "capture_id": "20260925-041644489",
+      "source_commit": "3dc5107e8fedee3835259282e1655749ec7438c0",
+      "source_tree": "048f7d9d50d6339864ac0bc9e4b2d3a4fbb7ccb4",
+      "capture_seal_sha256": "5429fb8cfbbae8bc5bca6c2c688515eb49e3b81c5f8eae2bad1de836730e86d9",
+      "status": "complete",
+      "rgb_frame_count": 613,
+      "rgb_first_stamp_s": 0.1,
+      "rgb_last_stamp_s": 20.5,
+      "panel": "right",
+      "horizontal_fov_degrees": 90
+    }
+  },
+  "timestamp_binding": {
+    "frame_count": 613,
+    "current_and_r7_index_bytes_identical": true,
+    "samples": [
+      {
+        "sample": 1,
+        "frame_index": 0,
+        "timestamp_s": 0.1
+      },
+      {
+        "sample": 2,
+        "frame_index": 90,
+        "timestamp_s": 3.1
+      },
+      {
+        "sample": 3,
+        "frame_index": 180,
+        "timestamp_s": 6.1
+      },
+      {
+        "sample": 4,
+        "frame_index": 360,
+        "timestamp_s": 12.1
+      },
+      {
+        "sample": 5,
+        "frame_index": 510,
+        "timestamp_s": 17.1
+      },
+      {
+        "sample": 6,
+        "frame_index": 600,
+        "timestamp_s": 20.1
+      }
+    ]
+  },
+  "inputs": {
+    "raw_comparison_video": {
+      "path": "runs/20260925-183307101/outputs/rgb-vs-r7/current-left_r7-right_3840x1080.mp4",
+      "sha256": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+      "size_bytes": 48649488
+    },
+    "raw_six_sample_sheet": {
+      "path": "runs/20260925-183307101/outputs/rgb-vs-r7/paired-contact-sheet-6times.png",
+      "sha256": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+      "size_bytes": 3599856
+    },
+    "current_capture_manifest": {
+      "path": "runs/20260925-183307101/capture/capture_manifest.json",
+      "sha256": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "size_bytes": 89124
+    },
+    "current_rgb_video": {
+      "path": "runs/20260925-183307101/capture/rgb_camera.mp4",
+      "sha256": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+      "size_bytes": 15195142
+    },
+    "current_rgb_index": {
+      "path": "runs/20260925-183307101/capture/rgb_frames.jsonl",
+      "sha256": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "size_bytes": 72887
+    },
+    "current_effective_config": {
+      "path": "runs/20260925-183307101/capture/effective_config.json",
+      "sha256": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+      "size_bytes": 2973
+    },
+    "r7_capture_manifest": {
+      "path": "runs/production-quality-20260924/scene-r7-full-capture/runs/20260925-041644489/capture/capture_manifest.json",
+      "sha256": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+      "size_bytes": 88274
+    },
+    "r7_rgb_video": {
+      "path": "runs/production-quality-20260924/scene-r7-full-capture/runs/20260925-041644489/capture/rgb_camera.mp4",
+      "sha256": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+      "size_bytes": 15082591
+    },
+    "r7_rgb_index": {
+      "path": "runs/production-quality-20260924/scene-r7-full-capture/runs/20260925-041644489/capture/rgb_frames.jsonl",
+      "sha256": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "size_bytes": 72887
+    },
+    "r7_effective_config": {
+      "path": "runs/production-quality-20260924/scene-r7-full-capture/runs/20260925-041644489/capture/effective_config.json",
+      "sha256": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+      "size_bytes": 2097
+    },
+    "current_slam_manifest": {
+      "path": "runs/20260925-183307101/slam/slam_manifest.json",
+      "sha256": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "size_bytes": 24941
+    },
+    "current_perception_manifest": {
+      "path": "runs/20260925-183307101/perception/perception_manifest.json",
+      "sha256": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295",
+      "size_bytes": 11606
+    }
+  },
+  "outputs": {
+    "current-vs-r7-labeled-3840x1080.mp4": {
+      "path": "current-vs-r7-labeled-3840x1080.mp4",
+      "sha256": "ab4071bb11d6590d5c21c5d379f7a756ed917c159c785499e0ae3ba048568e7f",
+      "size_bytes": 55598725
+    },
+    "current-vs-r7-labeled-6-samples.png": {
+      "path": "current-vs-r7-labeled-6-samples.png",
+      "sha256": "bc1d0c517a6df0ae039a307919aa5aadd84d1ad38efc424783aa1580705b760a",
+      "size_bytes": 3340206
+    },
+    "sample-times.json": {
+      "path": "sample-times.json",
+      "sha256": "09584844769c1d2b6ffca54d339624c06da7772280654523a7e318c44adb82b7",
+      "size_bytes": 813
+    },
+    "README.md": {
+      "path": "README.md",
+      "sha256": "d90123f6e4b5db8980a4f9c01fd22c52b1ec0bb11ccd665a69850fe7fec9866e",
+      "size_bytes": 4403
+    },
+    "build_evidence.py": {
+      "path": "build_evidence.py",
+      "sha256": "0b25d237d88ae3ea448884c802ab55b6da35f57c39b0dd5c0e9a7a2119d31163",
+      "size_bytes": 23091
+    }
+  },
+  "current_pipeline_checkpoint": {
+    "slam": {
+      "status": "complete",
+      "manifest_sha256": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "manifest_size_bytes": 24941,
+      "replay_source_commit": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+      "attempt_id": "20260926T042347915Z-d146ed0c1bbd4edfb296f655a0b5fe36",
+      "node_count": 204,
+      "node_stamp_sha256": "5aab0707589b38fffb6fd9f79170d5723c81b175615a9e027a44435c5ccd92ad",
+      "directed_neighbor_link_count": 203,
+      "exact_sequence_coverage": true,
+      "ground_truth_subscribed": false,
+      "publish_map_service_acknowledged": true,
+      "final_source_graph_identity": "1629496b3e72246645ebae7f7af42c0fc35bfeae0bf8b573c77ccc64883efd88",
+      "graph_pose_version": "ce3e92e85ed6bd0e0f0070104e86102fbffc198aa7eb61d1afb43efebfbbf262",
+      "dense_pose_version": "65f2b539ba833702798a604cf2fd72623369c9681ceff377e6333005999fcba6",
+      "map_version": "1ef9caa1b5c8fb4e2138d67180462cc7f48f239479465b704ce0ce52cd999aef",
+      "slam_cloud_sha256": "7bfaef8fcaa3de917e13a9c2d2c0440043ccd4b533cb2beaaf7af1a6a2e8cb94",
+      "slam_cloud_size_bytes": 12173414,
+      "slam_map_pose_sha256": "472853fe1674a009ff0a95d68fadec3b2f1cd8f73e296d20a974eee53668f84d",
+      "slam_map_pose_size_bytes": 31621,
+      "slam_map_keyframes_sha256": "ba1eb037c55e2768a36ad4933979409f8332ba019927f70a70431e0fd6eb3293",
+      "slam_map_keyframes_size_bytes": 92123
+    },
+    "perception": {
+      "status": "complete",
+      "manifest_sha256": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295",
+      "manifest_size_bytes": 11606,
+      "producer_commit": "b9ade5b904c8c0cbea959650cc86620957d0de5e",
+      "capture_manifest_sha256": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "rgb_frame_count": 613,
+      "raw_lidar_scan_count": 204,
+      "valid_lidar_scan_count": 204,
+      "usable_lidar_scan_count": 204,
+      "projected_point_count": 82097,
+      "localized_inventory_row_count": 604,
+      "ground_truth_consumed": false,
+      "graph_pose_version": "ce3e92e85ed6bd0e0f0070104e86102fbffc198aa7eb61d1afb43efebfbbf262",
+      "dense_pose_version": "65f2b539ba833702798a604cf2fd72623369c9681ceff377e6333005999fcba6",
+      "map_version": "1ef9caa1b5c8fb4e2138d67180462cc7f48f239479465b704ce0ce52cd999aef"
+    },
+    "technical_lidar_preview_review": "preview independently reviewed; see technical-lidar-preview packet"
+  },
+  "source_receipt_policy": {
+    "included_in_portable_packet": false,
+    "reason": "Original producer receipts contain machine-local absolute paths.",
+    "integrity": "Original bytes are unchanged in the logical run paths and bound above by SHA-256 and size."
+  },
+  "method": {
+    "pillow_version": "12.3.0",
+    "ffmpeg_version": "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers",
+    "sheet_frame_matching": "minimum RGB MSE after FFmpeg area scale to each preserved 1280x360 sheet cell",
+    "video_timestamp_labels": "one FFmpeg drawtext overlay per exact rgb_frames.jsonl row, enabled on its frame index"
+  },
+  "limitations": [
+    "Current and R7 use different horizontal FOV values (75 and 90 degrees).",
+    "Visible appearance remains synthetic, with procedural assets, repeated facings, simplified materials, and flat lighting.",
+    "The separate LiDAR preview is preview-only and does not claim final technical delivery.",
+    "This packet makes no LiDAR, SLAM-accuracy, perception-accuracy, or final-film claim."
+  ]
+}
