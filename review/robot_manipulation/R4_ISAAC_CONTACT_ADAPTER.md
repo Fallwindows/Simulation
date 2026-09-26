@@ -104,6 +104,24 @@ and robot-body allowlist. That receipt is flushed before the explicit reset.
 Each durable write uses a new same-directory temporary file and replaces the
 status atomically; it never reads or merges a prior status or fixed `.tmp` file.
 
+## First serialized setup result
+
+Exact reviewed integration `1794b3b1dd28508cb358780b76139a94a1f702c9`
+(tree `a8b7413550bfa861171f3067ff6423e4b0d1cd82`) passed its complete identity
+preflight with zero mismatches. During stage setup, USD 25.11 rejected the
+product orientation value because the default `AddOrientOp()` attribute was
+`GfQuatf` while the builder supplied `GfQuatd`. The durable failure receipt is
+`R4-grasp-1794b3b/grasp_smoke_status.json`, and the installed Kit log is
+`kit_20260926_063145.log`. No reset, contact read, grasp command, or lift command
+occurred.
+
+The successor authors the unchanged source reset pose using `Gf.Quatf` with a
+`Gf.Vec3f` imaginary component, matching the default orient op's value type.
+Translation remains the existing `Gf.Vec3d`; rigid-body, nonkinematic, mass,
+collision, material, and initialization-only reset-policy authoring are
+unchanged. A CPU typed-op regression exercises this exact pose-authoring path.
+The correction has not been rerun in Isaac pending fresh source review.
+
 ## Source-only validation limits
 
 CPU fakes cover path resolution, impulse conversion, orientation conversion,

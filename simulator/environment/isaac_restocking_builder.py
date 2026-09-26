@@ -17,6 +17,21 @@ from simulator.environment.restocking_layout import (
 )
 
 
+def _author_initial_product_pose(xformable, gf, pose) -> None:
+    """Author the initialization pose with values matching default USD op types.
+
+    ``AddTranslateOp`` defaults to double precision (``Vec3d``), while
+    ``AddOrientOp`` defaults to float precision (``Quatf``). Supplying a
+    ``Quatd`` to that orient attribute is rejected by USD 25.11 before physics
+    starts.
+    """
+
+    xformable.ClearXformOpOrder()
+    xformable.AddTranslateOp().Set(gf.Vec3d(*pose.position_m))
+    qx, qy, qz, qw = pose.orientation_xyzw
+    xformable.AddOrientOp().Set(gf.Quatf(qw, gf.Vec3f(qx, qy, qz)))
+
+
 @dataclass(frozen=True)
 class IsaacRestockingHandles:
     root_prim_path: str
@@ -109,10 +124,7 @@ class IsaacRestockingBuilder:
         product = layout.product
         body = self._UsdGeom.Xform.Define(self.stage, product.rigid_body_prim_path).GetPrim()
         xformable = self._UsdGeom.Xformable(body)
-        xformable.ClearXformOpOrder()
-        xformable.AddTranslateOp().Set(self._Gf.Vec3d(*product.source_reset_pose.position_m))
-        qx, qy, qz, qw = product.source_reset_pose.orientation_xyzw
-        xformable.AddOrientOp().Set(self._Gf.Quatd(qw, self._Gf.Vec3d(qx, qy, qz)))
+        _author_initial_product_pose(xformable, self._Gf, product.source_reset_pose)
         body.CreateAttribute("restocking:asset_key", self._Sdf.ValueTypeNames.String).Set(product.asset_key)
         body.CreateAttribute("restocking:reset_policy", self._Sdf.ValueTypeNames.String).Set(
             "initialization_only_no_phase_snap"
