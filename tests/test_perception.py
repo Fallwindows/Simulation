@@ -73,10 +73,32 @@ def _write_pose_integrity_manifests(slam_directory: Path, map_pose_count: int) -
         "files": files,
         "pose_source": "rtabmap_optimized_graph",
         "graph_pose_version": "a" * 64,
-        "pre_publish_graph_version": "a" * 64,
+        "pre_publish_graph_version": "b" * 64,
+        "pre_publish_source_graph_identity": "c" * 64,
+        "final_source_graph_identity": "c" * 64,
+        "source_graph_identity_matches_pre_publish": True,
+        "pre_publish_optimized_pose_version": "d" * 64,
+        "final_optimized_pose_version": "e" * 64,
+        "pre_publish_map_to_odom_version": "f" * 64,
+        "final_map_to_odom_version": "0" * 64,
+        "pre_publish_source_graph_link_count": 2,
+        "final_source_graph_link_count": 2,
+        "pre_publish_source_graph_link_type_histogram": {"0": 1, "1": 1},
+        "final_source_graph_link_type_histogram": {"0": 1, "1": 1},
         "dense_pose_version": dense_pose_version,
         "map_version": map_version,
         "map_graph_matches_final_cloud": True,
+        "map_data_graph_fingerprint": "1" * 64,
+        "map_graph_fingerprint": "1" * 64,
+        "map_data_matches_map_graph": True,
+        "cached_cloud_graph_fingerprint": "1" * 64,
+        "final_cloud_graph_fingerprint": "1" * 64,
+        "map_cloud_identity_state": "fresh_shared_publication",
+        "final_cloud_origin": "fresh_post_publish",
+        "final_map_graph_stamp_s": 12.0,
+        "final_cloud_stamp_s": 12.0,
+        "final_map_graph_frame_id": "map",
+        "final_cloud_frame_id": "map",
         "optimized_pose_graph_complete": True,
         "map_pose_frame_id": "map",
         "map_pose_sample_count": map_pose_count,
@@ -86,8 +108,6 @@ def _write_pose_integrity_manifests(slam_directory: Path, map_pose_count: int) -
     (slam_directory / "slam_observer.json").write_bytes(observer_bytes)
     manifest = {
         "status": "complete",
-        "pre_publish_graph_version": observer["pre_publish_graph_version"],
-        "graph_pose_version": observer["graph_pose_version"],
         "dense_pose_version": dense_pose_version,
         "map_version": map_version,
         "map_frame_id": "map",
@@ -100,6 +120,19 @@ def _write_pose_integrity_manifests(slam_directory: Path, map_pose_count: int) -
         },
         "observer": observer,
     }
+    for key in (
+        "pre_publish_graph_version", "graph_pose_version",
+        "pre_publish_source_graph_identity", "final_source_graph_identity",
+        "source_graph_identity_matches_pre_publish",
+        "pre_publish_optimized_pose_version", "final_optimized_pose_version",
+        "pre_publish_map_to_odom_version", "final_map_to_odom_version",
+        "pre_publish_source_graph_link_count", "final_source_graph_link_count",
+        "pre_publish_source_graph_link_type_histogram", "final_source_graph_link_type_histogram",
+        "map_cloud_identity_state", "final_cloud_origin",
+        "map_data_graph_fingerprint", "map_graph_fingerprint", "map_data_matches_map_graph",
+        "cached_cloud_graph_fingerprint", "final_cloud_graph_fingerprint", "map_graph_matches_final_cloud",
+    ):
+        manifest[key] = observer[key]
     (slam_directory / "slam_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -437,22 +470,24 @@ class PerceptionTests(unittest.TestCase):
                 for row in corrected_rows
             ])
             _write_pose_integrity_manifests(version_mismatch_directory, 2)
+            accepted = _load_slam_poses(version_mismatch_directory / "slam_map_poses.csv")
+            self.assertEqual(len(accepted), 2, "different pre/final optimizer hashes must be accepted for one source graph")
             observer_path = version_mismatch_directory / "slam_observer.json"
             observer_record = json.loads(observer_path.read_text(encoding="utf-8"))
-            observer_record["pre_publish_graph_version"] = "c" * 64
+            observer_record["pre_publish_source_graph_identity"] = "d" * 64
             observer_bytes = json.dumps(observer_record).encode("utf-8")
             observer_path.write_bytes(observer_bytes)
             top_manifest_path = version_mismatch_directory / "slam_manifest.json"
             top_manifest = json.loads(top_manifest_path.read_text(encoding="utf-8"))
-            top_manifest["observer"]["pre_publish_graph_version"] = "c" * 64
-            top_manifest["pre_publish_graph_version"] = "c" * 64
+            top_manifest["observer"]["pre_publish_source_graph_identity"] = "d" * 64
+            top_manifest["pre_publish_source_graph_identity"] = "d" * 64
             top_manifest["observer_artifact"] = {
                 "path": "slam_observer.json",
                 "size_bytes": len(observer_bytes),
                 "sha256": hashlib.sha256(observer_bytes).hexdigest(),
             }
             top_manifest_path.write_text(json.dumps(top_manifest), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "does not match the pre-publish graph version"):
+            with self.assertRaisesRegex(ValueError, "source graph identities disagree"):
                 _load_slam_poses(version_mismatch_directory / "slam_map_poses.csv")
 
             observer_tamper_directory = slam_directory / "observer_tamper"
@@ -1012,6 +1047,8 @@ class PerceptionTests(unittest.TestCase):
                 "lidar_input_stream_read": True,
                 "pose_provenance": {
                     "map_version": "e" * 64,
+                    "pre_publish_source_graph_identity": "b" * 64,
+                    "final_source_graph_identity": "b" * 64,
                     "graph_pose_version": "a" * 64,
                     "dense_pose_version": "d" * 64,
                     "slam_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
@@ -1059,11 +1096,15 @@ class PerceptionTests(unittest.TestCase):
             self.assertEqual(summary["raw_rgb_track_count"], 1)
             self.assertEqual(summary["track_count"], 1)
             self.assertEqual(summary["slam_pose_provenance"]["map_version"], "e" * 64)
+            self.assertEqual(summary["slam_pose_provenance"]["pre_publish_source_graph_identity"], "b" * 64)
+            self.assertEqual(summary["slam_pose_provenance"]["final_source_graph_identity"], "b" * 64)
             self.assertEqual(summary["slam_cloud_sha256"], hashlib.sha256(pcd_bytes).hexdigest())
             self.assertEqual(summary["slam_cloud_size_bytes"], len(pcd_bytes))
             self.assertEqual(summary["slam_cloud_ply_sha256"], hashlib.sha256(ply_bytes).hexdigest())
             self.assertEqual(summary["slam_cloud_ply_size_bytes"], len(ply_bytes))
             self.assertEqual(summary["map_version"], "e" * 64)
+            self.assertEqual(summary["pre_publish_source_graph_identity"], "b" * 64)
+            self.assertEqual(summary["final_source_graph_identity"], "b" * 64)
             self.assertEqual(summary["slam_manifest_sha256"], hashlib.sha256(manifest_bytes).hexdigest())
             self.assertEqual(summary["slam_map_keyframes_sha256"], "4" * 64)
             self.assertEqual(summary["slam_map_keyframes_size_bytes"], 512)

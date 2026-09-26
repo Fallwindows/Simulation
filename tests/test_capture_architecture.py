@@ -1262,7 +1262,12 @@ $global:LASTEXITCODE = 0
             self.assertAlmostEqual(float(keyframe_rows[0]["odom_x_m"]), 0.0, places=6)
             self.assertAlmostEqual(float(keyframe_rows[0]["correction_x_m"]), 4.0, places=6)
             self.assertTrue(result["pre_publish_graph_version"])
-            self.assertEqual(result["graph_pose_version"], result["pre_publish_graph_version"])
+            self.assertEqual(result["pre_publish_source_graph_identity"], result["final_source_graph_identity"])
+            self.assertTrue(result["source_graph_identity_matches_pre_publish"])
+            self.assertTrue(result["pre_publish_optimized_pose_version"])
+            self.assertTrue(result["final_optimized_pose_version"])
+            self.assertTrue(result["pre_publish_map_to_odom_version"])
+            self.assertTrue(result["final_map_to_odom_version"])
             self.assertTrue(result["dense_pose_version"])
             self.assertTrue(result["map_version"])
             self.assertEqual(result["replay_drain_basis"], ["/clock", "/slam/odom"])
@@ -1283,6 +1288,8 @@ $global:LASTEXITCODE = 0
             loop_closed_latest_sample = next(row for row in observer.map_pose_rows if float(row["timestamp_s"]) == 11.95)
             self.assertAlmostEqual(float(loop_closed_latest_sample["x_m"]), 4.2, places=6)
             self.assertNotEqual(observer.graph_pose_version, result["pre_publish_graph_version"])
+            self.assertNotEqual(observer.final_optimized_pose_version, result["pre_publish_optimized_pose_version"])
+            self.assertEqual(observer.final_source_graph_identity, result["pre_publish_source_graph_identity"])
 
             data, graph_message = optimized_graph_response(4.0)
             observer.map_graph_message = graph_message

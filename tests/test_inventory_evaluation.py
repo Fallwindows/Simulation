@@ -278,8 +278,32 @@ class InventoryEvaluationProvenanceTests(unittest.TestCase):
             (slam / name).write_text(content, encoding="ascii")
         observer = {
             "status": "complete", "map_version": "a" * 64, "graph_pose_version": "b" * 64,
-            "pre_publish_graph_version": "b" * 64, "map_pose_frame_id": "map",
-            "map_graph_matches_final_cloud": True, "optimized_pose_graph_complete": True,
+            "pre_publish_graph_version": "c" * 64,
+            "pre_publish_source_graph_identity": "d" * 64,
+            "final_source_graph_identity": "d" * 64,
+            "source_graph_identity_matches_pre_publish": True,
+            "pre_publish_optimized_pose_version": "e" * 64,
+            "final_optimized_pose_version": "f" * 64,
+            "pre_publish_map_to_odom_version": "0" * 64,
+            "final_map_to_odom_version": "1" * 64,
+            "pre_publish_source_graph_link_count": 1,
+            "final_source_graph_link_count": 1,
+            "pre_publish_source_graph_link_type_histogram": {"0": 1},
+            "final_source_graph_link_type_histogram": {"0": 1},
+            "map_pose_frame_id": "map",
+            "map_graph_matches_final_cloud": True,
+            "map_data_graph_fingerprint": "2" * 64,
+            "map_graph_fingerprint": "2" * 64,
+            "map_data_matches_map_graph": True,
+            "cached_cloud_graph_fingerprint": "2" * 64,
+            "final_cloud_graph_fingerprint": "2" * 64,
+            "map_cloud_identity_state": "fresh_shared_publication",
+            "final_cloud_origin": "fresh_post_publish",
+            "final_map_graph_stamp_s": 1.0,
+            "final_cloud_stamp_s": 1.0,
+            "final_map_graph_frame_id": "map",
+            "final_cloud_frame_id": "map",
+            "optimized_pose_graph_complete": True,
         }
         observer_path = slam / "slam_observer.json"
         observer_path.write_text(json.dumps(observer, sort_keys=True), encoding="utf-8")
@@ -303,15 +327,29 @@ class InventoryEvaluationProvenanceTests(unittest.TestCase):
             })
         slam_record = {
             "status": "complete", "map_version": "a" * 64, "graph_pose_version": "b" * 64,
-            "pre_publish_graph_version": "b" * 64, "map_frame_id": "map", "optimized": True,
+            "pre_publish_graph_version": "c" * 64, "map_frame_id": "map", "optimized": True,
             "observer": observer,
             "observer_artifact": {"path": observer_path.name, "size_bytes": observer_path.stat().st_size, "sha256": self._sha(observer_path)},
             "artifacts": records,
         }
+        for key in (
+            "pre_publish_source_graph_identity", "final_source_graph_identity",
+            "source_graph_identity_matches_pre_publish",
+            "pre_publish_optimized_pose_version", "final_optimized_pose_version",
+            "pre_publish_map_to_odom_version", "final_map_to_odom_version",
+            "pre_publish_source_graph_link_count", "final_source_graph_link_count",
+            "pre_publish_source_graph_link_type_histogram", "final_source_graph_link_type_histogram",
+            "map_cloud_identity_state", "final_cloud_origin",
+            "map_data_graph_fingerprint", "map_graph_fingerprint", "map_data_matches_map_graph",
+            "cached_cloud_graph_fingerprint", "final_cloud_graph_fingerprint", "map_graph_matches_final_cloud",
+        ):
+            slam_record[key] = observer[key]
         slam_manifest = slam / "slam_manifest.json"
         slam_manifest.write_text(json.dumps(slam_record, sort_keys=True), encoding="utf-8")
         perception_record = {
             "status": "complete", "map_version": "a" * 64,
+            "pre_publish_source_graph_identity": observer["pre_publish_source_graph_identity"],
+            "final_source_graph_identity": observer["final_source_graph_identity"],
             "slam_manifest_sha256": self._sha(slam_manifest), "slam_manifest_size_bytes": slam_manifest.stat().st_size,
             "slam_cloud_ply_sha256": self._sha(slam / "slam_map.ply"),
             "slam_cloud_ply_size_bytes": (slam / "slam_map.ply").stat().st_size,

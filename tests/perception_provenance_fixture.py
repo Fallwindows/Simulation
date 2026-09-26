@@ -147,7 +147,30 @@ def create_perception_run(
     observer = {
         "status": "complete", "files": [trajectory_binding], "map_version": map_version,
         "dense_pose_version": dense_pose_version, "graph_pose_version": "c" * 64,
-        "pre_publish_graph_version": "c" * 64, "map_graph_matches_final_cloud": True,
+        "pre_publish_graph_version": "d" * 64,
+        "pre_publish_source_graph_identity": "e" * 64,
+        "final_source_graph_identity": "e" * 64,
+        "source_graph_identity_matches_pre_publish": True,
+        "pre_publish_optimized_pose_version": "f" * 64,
+        "final_optimized_pose_version": "0" * 64,
+        "pre_publish_map_to_odom_version": "1" * 64,
+        "final_map_to_odom_version": "2" * 64,
+        "pre_publish_source_graph_link_count": 1,
+        "final_source_graph_link_count": 1,
+        "pre_publish_source_graph_link_type_histogram": {"0": 1},
+        "final_source_graph_link_type_histogram": {"0": 1},
+        "map_graph_matches_final_cloud": True,
+        "map_data_graph_fingerprint": "3" * 64,
+        "map_graph_fingerprint": "3" * 64,
+        "map_data_matches_map_graph": True,
+        "cached_cloud_graph_fingerprint": "3" * 64,
+        "final_cloud_graph_fingerprint": "3" * 64,
+        "map_cloud_identity_state": "cached_exact_graph_reuse",
+        "final_cloud_origin": "cached_pre_publish",
+        "final_map_graph_stamp_s": 2.0,
+        "final_cloud_stamp_s": 1.5,
+        "final_map_graph_frame_id": "map",
+        "final_cloud_frame_id": "map",
         "optimized_pose_graph_complete": True, "map_pose_frame_id": "map", "map_pose_sample_count": 2,
         "odom_sample_count": 2,
     }
@@ -165,6 +188,19 @@ def create_perception_run(
             "size_bytes": len(observer_bytes),
         },
     }
+    for key in (
+        "pre_publish_graph_version", "graph_pose_version",
+        "pre_publish_source_graph_identity", "final_source_graph_identity",
+        "source_graph_identity_matches_pre_publish",
+        "pre_publish_optimized_pose_version", "final_optimized_pose_version",
+        "pre_publish_map_to_odom_version", "final_map_to_odom_version",
+        "pre_publish_source_graph_link_count", "final_source_graph_link_count",
+        "pre_publish_source_graph_link_type_histogram", "final_source_graph_link_type_histogram",
+        "map_cloud_identity_state", "final_cloud_origin",
+        "map_data_graph_fingerprint", "map_graph_fingerprint", "map_data_matches_map_graph",
+        "cached_cloud_graph_fingerprint", "final_cloud_graph_fingerprint", "map_graph_matches_final_cloud",
+    ):
+        slam_manifest[key] = observer[key]
     write_json(slam / "slam_manifest.json", slam_manifest)
 
     annotations = [dict(row, detections=[{"track_id": 1}]) for row in frames]
