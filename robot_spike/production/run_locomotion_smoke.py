@@ -715,24 +715,15 @@ def _startup_feedback_failures(
 
 
 def _pre_ramp_recovery_correction(
-    feedback: LocomotionFeedback,
     correction: BalanceCorrection,
     config: GaitConfig = GaitConfig(),
 ) -> BalanceCorrection:
-    """Use reviewed sagittal authority once measured sagittal speed is unsettled."""
+    """Keep reviewed sagittal authority active throughout a recovery dwell."""
 
     if correction.unsafe_reason is not None:
         return correction
-    forward_unsettled = (
-        abs(float(feedback.root_linear_velocity_body_mps[0]))
-        > config.dock_linear_speed_tolerance_mps
-    )
-    pitch_unsettled = (
-        abs(float(feedback.root_angular_velocity_body_rps[1]))
-        > config.dock_angular_speed_tolerance_rps
-    )
     sagittal = float(correction.sagittal_rad)
-    if (forward_unsettled or pitch_unsettled) and sagittal != 0.0:
+    if sagittal != 0.0:
         sagittal = math.copysign(config.maximum_balance_correction_rad, sagittal)
     return BalanceCorrection(
         sagittal_rad=sagittal,
@@ -1646,7 +1637,6 @@ def run_isaac(
                 evaluated_correction = startup_balance.evaluate(feedback)
                 correction = (
                     _pre_ramp_recovery_correction(
-                        feedback,
                         evaluated_correction,
                         startup_balance.config,
                     )

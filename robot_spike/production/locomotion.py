@@ -187,6 +187,10 @@ class GaitConfig:
     # matching, velocity-aware damping term through the position target while
     # the measured target-error gate continues to bound every command.
     joint_velocity_damping_s: float = 0.100
+    # The 0.100 s value was justified only by measured sagittal chain lag.
+    # Preserve the original reviewed target damping for roll and yaw; the
+    # higher value produced a growing one-step oscillation in measured yaw.
+    non_sagittal_joint_velocity_damping_s: float = 0.012
     # Bound sagittal planted-foot correction to the nominal 0.09 rad
     # hip/ankle crouch component.  The previous half-sized sagittal bound
     # saturated throughout the measured backward drift without arresting it.
@@ -231,6 +235,7 @@ class GaitConfig:
             self.joint_limit_margin_rad,
             self.maximum_target_error_rad,
             self.joint_velocity_damping_s,
+            self.non_sagittal_joint_velocity_damping_s,
             self.maximum_balance_correction_rad,
             self.maximum_lateral_balance_correction_rad,
             self.maximum_root_tilt_rad,
@@ -268,6 +273,10 @@ class GaitConfig:
             raise LocomotionError("root clearance envelope must have increasing bounds")
         if self.joint_velocity_damping_s > 0.100:
             raise LocomotionError("joint_velocity_damping_s exceeds the 0.100 s safety cap")
+        if self.non_sagittal_joint_velocity_damping_s > 0.012:
+            raise LocomotionError(
+                "non_sagittal_joint_velocity_damping_s exceeds the 0.012 s safety cap"
+            )
         if self.maximum_balance_correction_rad > 0.090:
             raise LocomotionError(
                 "maximum_balance_correction_rad exceeds the 0.090 rad safety cap"
@@ -607,7 +616,16 @@ class ConservativeGaitTargetGenerator:
         for name in LEG_JOINTS:
             measured = float(feedback.joint_position_rad[name])
             velocity = float(feedback.joint_velocity_rad_s[name])
-            damped = targets[name] - self.config.joint_velocity_damping_s * velocity
+            sagittal = any(
+                token in name
+                for token in ("hip_pitch", "knee", "ankle_pitch")
+            )
+            damping_s = (
+                self.config.joint_velocity_damping_s
+                if sagittal
+                else self.config.non_sagittal_joint_velocity_damping_s
+            )
+            damped = targets[name] - damping_s * velocity
             low = measured - self.config.maximum_target_error_rad
             high = measured + self.config.maximum_target_error_rad
             targets[name] = max(low, min(high, damped))

@@ -563,8 +563,87 @@ class RobotLocomotionTests(unittest.TestCase):
         )
         self.assertLessEqual(maximum_error, self.config.maximum_target_error_rad)
         self.assertAlmostEqual(self.config.joint_velocity_damping_s, 12.0 / 120.0)
+        self.assertAlmostEqual(
+            self.config.non_sagittal_joint_velocity_damping_s, 0.012
+        )
         with self.assertRaisesRegex(LocomotionError, "damping_s exceeds"):
             GaitConfig(joint_velocity_damping_s=0.100001)
+        with self.assertRaisesRegex(
+            LocomotionError, "non_sagittal_joint_velocity_damping_s exceeds"
+        ):
+            GaitConfig(non_sagittal_joint_velocity_damping_s=0.012001)
+
+    def test_d654_non_sagittal_damping_does_not_recreate_one_frame_yaw_oscillation(self):
+        positions = dict(self.spec.reset_joint_positions)
+        velocities = {name: 0.0 for name in positions}
+        # Exact step-106 measurements from the d654 durable trace.  The former
+        # global 0.100 s term turned +3.591746 rad/s left hip-yaw motion into a
+        # -0.287 rad target at the -0.30 rad measured-error clamp, followed one
+        # frame later by an opposite command from -3.824663 rad/s.  The
+        # original 0.012 s bound stays well inside that discrete-time cycle.
+        positions.update(
+            {
+                "left_hip_yaw_joint": 0.013182743452489376,
+                "right_hip_yaw_joint": 0.008709223940968513,
+            }
+        )
+        velocities.update(
+            {
+                "left_hip_yaw_joint": 3.5917460918426514,
+                "right_hip_yaw_joint": 0.3538234233856201,
+                "left_ankle_roll_joint": 0.07117246836423874,
+                "right_ankle_roll_joint": -0.716313362121582,
+                # Sagittal joints retain the separately justified Kd/Kp term.
+                "left_hip_pitch_joint": -0.03520350530743599,
+            }
+        )
+        feedback = replace(
+            self.feedback(0.95),
+            joint_position_rad=positions,
+            joint_velocity_rad_s=velocities,
+        )
+        correction = BalanceCorrection(0.09, 0.0058296465057226625)
+        targets = ConservativeGaitTargetGenerator(self.spec, self.config).targets(
+            feedback, GaitPhase.DOUBLE_SUPPORT, 0.0, correction
+        )
+
+        self.assertAlmostEqual(
+            targets["left_hip_yaw_joint"],
+            -0.012 * velocities["left_hip_yaw_joint"],
+        )
+        self.assertAlmostEqual(
+            targets["right_hip_yaw_joint"],
+            -0.012 * velocities["right_hip_yaw_joint"],
+        )
+        self.assertLess(abs(targets["left_hip_yaw_joint"]), 0.05)
+        old_global_damping_target = max(
+            positions["left_hip_yaw_joint"] - self.config.maximum_target_error_rad,
+            -self.config.joint_velocity_damping_s
+            * velocities["left_hip_yaw_joint"],
+        )
+        self.assertAlmostEqual(
+            old_global_damping_target,
+            positions["left_hip_yaw_joint"]
+            - self.config.maximum_target_error_rad,
+        )
+        self.assertAlmostEqual(
+            targets["left_ankle_roll_joint"],
+            -0.65 * correction.lateral_rad
+            - 0.012 * velocities["left_ankle_roll_joint"],
+        )
+        expected_left_hip_pitch = (
+            -0.5 * self.config.neutral_knee_flexion_rad
+            - 0.35 * correction.sagittal_rad
+            - self.config.joint_velocity_damping_s
+            * velocities["left_hip_pitch_joint"]
+        )
+        self.assertAlmostEqual(
+            targets["left_hip_pitch_joint"], expected_left_hip_pitch
+        )
+        self.assertLessEqual(
+            max(abs(targets[name] - positions[name]) for name in LEG_JOINTS),
+            self.config.maximum_target_error_rad,
+        )
 
     def test_recorded_four_sample_gait_entry_faults_before_an_unsafe_command(self):
         samples = (

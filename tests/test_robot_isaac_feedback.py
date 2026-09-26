@@ -1390,7 +1390,6 @@ class IsaacFeedbackTests(unittest.TestCase):
 
         def balanced_hold(feedback: LocomotionFeedback) -> dict[str, float]:
             correction = _pre_ramp_recovery_correction(
-                feedback,
                 balance.evaluate(feedback),
             )
             self.assertIsNone(correction.unsafe_reason)
@@ -1456,24 +1455,18 @@ class IsaacFeedbackTests(unittest.TestCase):
             )
         )
 
-    def test_pre_ramp_recovery_uses_existing_sagittal_cap_only_when_unsettled(self):
+    def test_active_pre_ramp_recovery_latches_existing_sagittal_cap(self):
         config = GaitConfig()
         evaluated = BalanceCorrection(
             sagittal_rad=0.024646587896420272,
             lateral_rad=0.0044073721683587355,
         )
-        unsettled = startup_feedback(
-            root_pitch=-0.01972,
-            root_linear=(-0.03526, 0.0, 0.0),
-            root_angular=(0.0, -0.06054, 0.0),
-        )
-        applied = _pre_ramp_recovery_correction(unsettled, evaluated, config)
+        applied = _pre_ramp_recovery_correction(evaluated, config)
         self.assertEqual(
             applied.sagittal_rad, config.maximum_balance_correction_rad
         )
         self.assertEqual(applied.lateral_rad, evaluated.lateral_rad)
         reverse = _pre_ramp_recovery_correction(
-            unsettled,
             BalanceCorrection(sagittal_rad=-0.024, lateral_rad=-0.004),
             config,
         )
@@ -1482,21 +1475,13 @@ class IsaacFeedbackTests(unittest.TestCase):
         )
         self.assertEqual(reverse.lateral_rad, -0.004)
 
-        settled = startup_feedback(
-            root_linear=(-0.035, 0.0, 0.0),
-            root_angular=(0.0, -0.10, 0.0),
-        )
-        self.assertEqual(
-            _pre_ramp_recovery_correction(settled, evaluated, config),
-            evaluated,
-        )
         unsafe = BalanceCorrection(
             sagittal_rad=0.024,
             lateral_rad=0.004,
             unsafe_reason="support margin",
         )
         self.assertIs(
-            _pre_ramp_recovery_correction(unsettled, unsafe, config),
+            _pre_ramp_recovery_correction(unsafe, config),
             unsafe,
         )
 

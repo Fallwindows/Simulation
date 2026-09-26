@@ -476,6 +476,34 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   gait. The receipt is
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-6735df6\locomotion_smoke_status.json`;
   the supplied Kit-log filename is `kit_20260926_084122.log`.
+- `RST-004-F18`: exact reviewed integration
+  `d654aafdb4664114e6f422cb901669b6e08eec84` acquired bilateral contact at
+  step 2, then exhausted all 144 bounded pre-ramp samples without the required
+  stable dwell. The durable receipt itself contains the complete startup trace;
+  no sibling `repeat_00_samples.jsonl` was produced. At the final sample,
+  support margin remained above the unchanged hard gate at -0.0026615 m, but
+  linear and angular speeds were 0.06429 m/s and 0.44328 rad/s. Ramp and gait
+  never began.
+
+  The trace exposes two target-controller discontinuities. Recovery activated
+  with the existing +0.090 rad sagittal cap at step 35, but a brief speed dip
+  caused the applied value to fall back to the evaluated +0.02480 rad at step
+  37 even though recovery remained active. The successor therefore preserves
+  the evaluated sign and latches the same reviewed cap for the whole active
+  recovery dwell; unsafe feedback still produces no target and every existing
+  contact, support, geometry, tracking, and stability gate remains unchanged.
+  Separately, the 0.100 s `Kd/Kp` target-damping term introduced for measured
+  sagittal pitch-chain lag was being applied to roll and yaw joints. Recorded
+  left hip-yaw velocity/target pairs alternated from +3.59175/-0.287 rad to
+  -3.82466/+0.296 rad in consecutive frames and root yaw rate grew to
+  0.44328 rad/s. Sagittal hip/knee/ankle-pitch joints retain the justified
+  0.100 s term; hip/ankle roll and hip yaw restore the original reviewed
+  0.012 s bound. Lateral balance authority remains independently capped at
+  0.045 rad. The receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-d654aaf\locomotion_smoke_status.json`
+  (SHA-256 `073a2a56d1c5f937beea6ce931fec34f7190d6bbdda23447b604dea8deebb5c1`,
+  2,734,288 bytes); the Kit log is `kit_20260926_090559.log` (SHA-256
+  `e0009c64b66926c85d951d7ee2023a5a3046644f3a2e9b9177187ceb9b373788`).
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
