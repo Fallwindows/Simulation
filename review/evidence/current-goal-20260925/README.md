@@ -33,6 +33,13 @@ is `b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec`. The packe
 inputs, both exact capture manifests, both RGB videos and timestamp indices, and all
 packet outputs.
 
+The builder copies all 12 inputs into private, read-only files while hashing the
+copied bytes. All decoding, matching, labels, and metadata use only those verified snapshots. It
+rehashes both snapshots and original logical inputs before publication, builds the
+five generated files in a private staging directory, verifies stable media hashes and
+all manifest output bindings, then promotes the complete set with rollback backups.
+Failed input, output, or promotion checks leave the previously published packet intact.
+
 Before any packet output is written, all 12 declared raw inputs must match their
 pinned SHA-256 values. Both RGB frame indices must be byte-identical and must contain
 exactly 613 contiguous rows with finite, strictly increasing timestamps on the

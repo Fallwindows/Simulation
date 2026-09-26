@@ -7,9 +7,12 @@ import hashlib
 import math
 import os
 import shutil
+import stat
 import struct
 import subprocess
+import uuid
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, __version__ as PILLOW_VERSION
@@ -61,6 +64,18 @@ EXPECTED_FIXED_INPUT_SHA256 = {
     "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
     "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
     "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295",
+}
+GENERATED_OUTPUT_NAMES = (
+    "current-vs-r7-labeled-3840x1080.mp4",
+    "current-vs-r7-labeled-6-samples.png",
+    "sample-times.json",
+    "README.md",
+    "manifest.json",
+)
+EXPECTED_STABLE_OUTPUT_SHA256 = {
+    "current-vs-r7-labeled-3840x1080.mp4": "ab4071bb11d6590d5c21c5d379f7a756ed917c159c785499e0ae3ba048568e7f",
+    "current-vs-r7-labeled-6-samples.png": "bc1d0c517a6df0ae039a307919aa5aadd84d1ad38efc424783aa1580705b760a",
+    "sample-times.json": "09584844769c1d2b6ffca54d339624c06da7772280654523a7e318c44adb82b7",
 }
 
 
@@ -116,10 +131,6 @@ def file_record(
     }
 
 
-def load_timestamps() -> list[float]:
-    return [json.loads(line)["stamp_s"] for line in CURRENT_INDEX.read_text(encoding="utf-8").splitlines()]
-
-
 def fixed_input_paths() -> dict[str, Path]:
     return {
         "raw_comparison_video": RAW_VIDEO,
@@ -137,20 +148,91 @@ def fixed_input_paths() -> dict[str, Path]:
     }
 
 
-def verify_fixed_inputs() -> tuple[list[float], dict[str, object]]:
-    """Fail closed unless every fixed input and capture/index binding is exact."""
-    paths = fixed_input_paths()
-    actual_sha256 = {name: sha256(path) for name, path in paths.items()}
-    if actual_sha256 != EXPECTED_FIXED_INPUT_SHA256:
+def verify_expected_hashes(
+    paths: dict[str, Path],
+    *,
+    label: str,
+) -> dict[str, str]:
+    if set(paths) != set(EXPECTED_FIXED_INPUT_SHA256):
+        raise RuntimeError(
+            f"{label} input set mismatch: expected={sorted(EXPECTED_FIXED_INPUT_SHA256)}, "
+            f"actual={sorted(paths)}"
+        )
+    actual = {name: sha256(path) for name, path in paths.items()}
+    if actual != EXPECTED_FIXED_INPUT_SHA256:
         mismatches = {
             name: {
                 "expected": EXPECTED_FIXED_INPUT_SHA256.get(name),
-                "actual": actual_sha256.get(name),
+                "actual": actual.get(name),
             }
-            for name in sorted(set(EXPECTED_FIXED_INPUT_SHA256) | set(actual_sha256))
-            if EXPECTED_FIXED_INPUT_SHA256.get(name) != actual_sha256.get(name)
+            for name in sorted(set(EXPECTED_FIXED_INPUT_SHA256) | set(actual))
+            if EXPECTED_FIXED_INPUT_SHA256.get(name) != actual.get(name)
         }
-        raise RuntimeError(f"fixed RGB evidence input hash mismatch: {mismatches}")
+        raise RuntimeError(f"{label} RGB evidence input hash mismatch: {mismatches}")
+    return actual
+
+
+def snapshot_fixed_inputs(
+    original_paths: dict[str, Path],
+    snapshot_dir: Path,
+) -> tuple[dict[str, Path], dict[str, object]]:
+    """Copy and hash all fixed inputs into a private, verified snapshot set."""
+    if set(original_paths) != set(EXPECTED_FIXED_INPUT_SHA256):
+        raise RuntimeError("cannot snapshot an incomplete fixed-input set")
+    snapshot_dir.mkdir(parents=True, exist_ok=False)
+    snapshot_paths: dict[str, Path] = {}
+    copied_sha256: dict[str, str] = {}
+    copied_size_bytes: dict[str, int] = {}
+    for name, source in original_paths.items():
+        destination = snapshot_dir / f"{name}{source.suffix}"
+        digest = hashlib.sha256()
+        size_bytes = 0
+        with source.open("rb") as source_stream, destination.open("xb") as snapshot_stream:
+            for chunk in iter(lambda: source_stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+                snapshot_stream.write(chunk)
+                size_bytes += len(chunk)
+            snapshot_stream.flush()
+            os.fsync(snapshot_stream.fileno())
+        copied_hash = digest.hexdigest()
+        expected_hash = EXPECTED_FIXED_INPUT_SHA256[name]
+        if copied_hash != expected_hash:
+            raise RuntimeError(
+                f"input changed or was substituted while snapshotting {name}: "
+                f"{copied_hash} != {expected_hash}"
+            )
+        snapshot_paths[name] = destination
+        copied_sha256[name] = copied_hash
+        copied_size_bytes[name] = size_bytes
+    snapshot_sha256 = verify_expected_hashes(snapshot_paths, label="private snapshot")
+    if os.name != "nt":
+        snapshot_dir.chmod(0o700)
+    for path in snapshot_paths.values():
+        path.chmod(stat.S_IREAD)
+    return snapshot_paths, {
+        "status": "passed",
+        "rule": (
+            "Each of the 12 fixed inputs is copied once into a private snapshot while "
+            "the copied bytes are hashed. Generation reads only those snapshots. The "
+            "snapshot files are rehashed against the same pins before use and again "
+            "before publication."
+        ),
+        "copied_while_hashing": True,
+        "private_transaction_scope": True,
+        "read_only_during_generation": True,
+        "artifact_count": len(snapshot_paths),
+        "copied_sha256": copied_sha256,
+        "snapshot_sha256": snapshot_sha256,
+        "size_bytes": copied_size_bytes,
+    }
+
+
+def verify_fixed_inputs(
+    paths: dict[str, Path] | None = None,
+) -> tuple[list[float], dict[str, object], dict[str, dict[str, object]]]:
+    """Fail closed unless every fixed input and capture/index binding is exact."""
+    paths = fixed_input_paths() if paths is None else paths
+    actual_sha256 = verify_expected_hashes(paths, label="fixed")
 
     current_index_bytes = paths["current_rgb_index"].read_bytes()
     r7_index_bytes = paths["r7_rgb_index"].read_bytes()
@@ -242,11 +324,13 @@ def verify_fixed_inputs() -> tuple[list[float], dict[str, object]]:
     }
     expected_fov_degrees = {"current": 75.0, "r7": 90.0}
     capture_receipt: dict[str, dict[str, object]] = {}
+    parsed_captures: dict[str, dict[str, object]] = {}
     for name, path in capture_paths.items():
         try:
             capture = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
             raise RuntimeError(f"invalid {name} capture manifest: {error}") from error
+        parsed_captures[name] = capture
         identity = {key: capture.get(key) for key in expected_captures[name]}
         if identity != expected_captures[name]:
             raise RuntimeError(
@@ -379,7 +463,7 @@ def verify_fixed_inputs() -> tuple[list[float], dict[str, object]]:
             f"actual={actual_perception_capture_input}"
         )
 
-    return timestamps, {
+    verification = {
         "status": "passed",
         "rule": (
             "All 12 declared raw inputs must match pinned SHA-256 values before any "
@@ -417,6 +501,13 @@ def verify_fixed_inputs() -> tuple[list[float], dict[str, object]]:
             },
         },
     }
+    parsed_receipts = {
+        "current_capture": parsed_captures["current"],
+        "r7_capture": parsed_captures["r7"],
+        "slam": slam,
+        "perception": perception,
+    }
+    return timestamps, verification, parsed_receipts
 
 
 def _read_exact(stream: object, byte_count: int) -> bytes:
@@ -429,12 +520,15 @@ def _read_exact(stream: object, byte_count: int) -> bytes:
     return bytes(payload)
 
 
-def verify_raw_comparison_sources() -> dict[str, object]:
+def verify_raw_comparison_sources(
+    paths: dict[str, Path] | None = None,
+) -> dict[str, object]:
     """Verify every comparison panel frame against its exact declared RGB source."""
+    paths = fixed_input_paths() if paths is None else paths
     sources = {
-        "comparison": RAW_VIDEO,
-        "current": CURRENT_CAPTURE / "rgb_camera.mp4",
-        "r7": R7_CAPTURE / "rgb_camera.mp4",
+        "comparison": paths["raw_comparison_video"],
+        "current": paths["current_rgb_video"],
+        "r7": paths["r7_rgb_video"],
     }
     expected_artifact_sha256 = {
         "comparison": EXPECTED_FIXED_INPUT_SHA256["raw_comparison_video"],
@@ -599,12 +693,12 @@ def verify_raw_comparison_sources() -> dict[str, object]:
     }
 
 
-def match_sheet_frames(sheet: Image.Image) -> list[int]:
+def match_sheet_frames(sheet: Image.Image, raw_video: Path) -> list[int]:
     rgb = np.asarray(sheet.convert("RGB"))
     cells = [rgb[y:y + 360, x:x + 1280] for y in (8, 376, 744) for x in (8, 1296)]
     best: list[tuple[float, int]] = [(float("inf"), -1) for _ in cells]
     command = [
-        str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(RAW_VIDEO),
+        str(FFMPEG), "-hide_banner", "-loglevel", "error", "-i", str(raw_video),
         "-vf", "scale=1280:360:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
     ]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -639,9 +733,13 @@ def draw_box(draw: ImageDraw.ImageDraw, xy: tuple[int, int, int, int], fill: tup
     draw.rectangle(xy, fill=fill)
 
 
-def build_sheet(timestamps: list[float]) -> list[dict[str, object]]:
-    sheet = Image.open(RAW_SHEET).convert("RGBA")
-    matches = match_sheet_frames(sheet)
+def build_sheet(
+    timestamps: list[float],
+    inputs: dict[str, Path],
+    output_dir: Path,
+) -> list[dict[str, object]]:
+    sheet = Image.open(inputs["raw_six_sample_sheet"]).convert("RGBA")
+    matches = match_sheet_frames(sheet, inputs["raw_comparison_video"])
     overlay = Image.new("RGBA", sheet.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     panel_font = ImageFont.truetype(str(FONT_BOLD), 17)
@@ -665,7 +763,7 @@ def build_sheet(timestamps: list[float]) -> list[dict[str, object]]:
         draw.text((x + 652, y + 28), "90 degree horizontal FOV", font=small_font, fill=(255, 218, 181, 255))
         records.append({"sample": sample_index, "frame_index": frame_index, "timestamp_s": stamp})
     Image.alpha_composite(sheet, overlay).convert("RGB").save(
-        PACKET / "current-vs-r7-labeled-6-samples.png", optimize=True
+        output_dir / "current-vs-r7-labeled-6-samples.png", optimize=True
     )
     return records
 
@@ -674,7 +772,11 @@ def ffmpeg_escape(value: str) -> str:
     return value.replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
 
 
-def build_video(timestamps: list[float]) -> None:
+def build_video(
+    timestamps: list[float],
+    inputs: dict[str, Path],
+    output_dir: Path,
+) -> None:
     font = ffmpeg_escape(str(FONT_BOLD))
     common = f"fontfile='{font}':fontcolor=white:borderw=2:bordercolor=black"
     filters = [
@@ -693,60 +795,71 @@ def build_video(timestamps: list[float]) -> None:
             f"drawtext={common}:fontsize=34:text='{label}':"
             f"x=(w-text_w)/2:y=1010:enable='eq(n,{frame_index})'"
         )
-    filter_path = PACKET / "video-label-filter.txt"
+    filter_path = output_dir / "video-label-filter.txt"
     filter_path.write_text(",\n".join(filters) + "\n", encoding="utf-8")
     command = [
         str(FFMPEG), "-y", "-hide_banner", "-loglevel", "warning",
-        "-i", str(RAW_VIDEO), "-filter_script:v", filter_path.name,
+        "-i", str(inputs["raw_comparison_video"]), "-filter_script:v", filter_path.name,
         "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "16",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        str(PACKET / "current-vs-r7-labeled-3840x1080.mp4"),
+        str(output_dir / "current-vs-r7-labeled-3840x1080.mp4"),
     ]
     try:
-        subprocess.run(command, check=True, cwd=PACKET)
+        subprocess.run(command, check=True, cwd=output_dir)
     finally:
         filter_path.unlink(missing_ok=True)
 
 
-def main() -> None:
-    validate_runtime()
-    timestamps, fixed_input_verification = verify_fixed_inputs()
-    source_verification = verify_raw_comparison_sources()
-    samples = build_sheet(timestamps)
-    build_video(timestamps)
-    (PACKET / "sample-times.json").write_text(
+def build_staged_packet(
+    staging_dir: Path,
+    snapshot_paths: dict[str, Path],
+    original_paths: dict[str, Path],
+    snapshot_verification: dict[str, object],
+) -> dict[str, object]:
+    timestamps, fixed_input_verification, parsed_receipts = verify_fixed_inputs(
+        snapshot_paths
+    )
+    source_verification = verify_raw_comparison_sources(snapshot_paths)
+    samples = build_sheet(timestamps, snapshot_paths, staging_dir)
+    build_video(timestamps, snapshot_paths, staging_dir)
+    (staging_dir / "sample-times.json").write_text(
         json.dumps({
             "timestamp_source": "identical capture rgb_frames.jsonl rows",
-            "current_rgb_index_sha256": sha256(CURRENT_INDEX),
-            "r7_rgb_index_sha256": sha256(R7_CAPTURE / "rgb_frames.jsonl"),
+            "current_rgb_index_sha256": sha256(snapshot_paths["current_rgb_index"]),
+            "r7_rgb_index_sha256": sha256(snapshot_paths["r7_rgb_index"]),
             "samples": samples,
         }, indent=2) + "\n", encoding="utf-8"
     )
 
-    for stale_copy in (
-        "current-capture-manifest.json",
-        "r7-capture-manifest.json",
-        "current-slam-manifest.json",
-        "current-perception-manifest.json",
-    ):
-        (PACKET / stale_copy).unlink(missing_ok=True)
-
     raw_inputs = {
-        "raw_comparison_video": file_record(RAW_VIDEO, logical_path="runs/20260925-183307101/outputs/rgb-vs-r7/current-left_r7-right_3840x1080.mp4"),
-        "raw_six_sample_sheet": file_record(RAW_SHEET, logical_path="runs/20260925-183307101/outputs/rgb-vs-r7/paired-contact-sheet-6times.png"),
-        "current_capture_manifest": file_record(CURRENT_CAPTURE / "capture_manifest.json", logical_path="runs/20260925-183307101/capture/capture_manifest.json"),
-        "current_rgb_video": file_record(CURRENT_CAPTURE / "rgb_camera.mp4", logical_path="runs/20260925-183307101/capture/rgb_camera.mp4"),
-        "current_rgb_index": file_record(CURRENT_INDEX, logical_path="runs/20260925-183307101/capture/rgb_frames.jsonl"),
-        "current_effective_config": file_record(CURRENT_CAPTURE / "effective_config.json", logical_path="runs/20260925-183307101/capture/effective_config.json"),
-        "r7_capture_manifest": file_record(R7_CAPTURE / "capture_manifest.json", logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/capture_manifest.json"),
-        "r7_rgb_video": file_record(R7_CAPTURE / "rgb_camera.mp4", logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/rgb_camera.mp4"),
-        "r7_rgb_index": file_record(R7_CAPTURE / "rgb_frames.jsonl", logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/rgb_frames.jsonl"),
-        "r7_effective_config": file_record(R7_CAPTURE / "effective_config.json", logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/effective_config.json"),
-        "current_slam_manifest": file_record(CURRENT_SLAM, logical_path="runs/20260925-183307101/slam/slam_manifest.json"),
-        "current_perception_manifest": file_record(CURRENT_PERCEPTION, logical_path="runs/20260925-183307101/perception/perception_manifest.json"),
+        "raw_comparison_video": file_record(snapshot_paths["raw_comparison_video"], logical_path="runs/20260925-183307101/outputs/rgb-vs-r7/current-left_r7-right_3840x1080.mp4"),
+        "raw_six_sample_sheet": file_record(snapshot_paths["raw_six_sample_sheet"], logical_path="runs/20260925-183307101/outputs/rgb-vs-r7/paired-contact-sheet-6times.png"),
+        "current_capture_manifest": file_record(snapshot_paths["current_capture_manifest"], logical_path="runs/20260925-183307101/capture/capture_manifest.json"),
+        "current_rgb_video": file_record(snapshot_paths["current_rgb_video"], logical_path="runs/20260925-183307101/capture/rgb_camera.mp4"),
+        "current_rgb_index": file_record(snapshot_paths["current_rgb_index"], logical_path="runs/20260925-183307101/capture/rgb_frames.jsonl"),
+        "current_effective_config": file_record(snapshot_paths["current_effective_config"], logical_path="runs/20260925-183307101/capture/effective_config.json"),
+        "r7_capture_manifest": file_record(snapshot_paths["r7_capture_manifest"], logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/capture_manifest.json"),
+        "r7_rgb_video": file_record(snapshot_paths["r7_rgb_video"], logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/rgb_camera.mp4"),
+        "r7_rgb_index": file_record(snapshot_paths["r7_rgb_index"], logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/rgb_frames.jsonl"),
+        "r7_effective_config": file_record(snapshot_paths["r7_effective_config"], logical_path=f"{R7_CAPTURE_LOGICAL.as_posix()}/effective_config.json"),
+        "current_slam_manifest": file_record(snapshot_paths["current_slam_manifest"], logical_path="runs/20260925-183307101/slam/slam_manifest.json"),
+        "current_perception_manifest": file_record(snapshot_paths["current_perception_manifest"], logical_path="runs/20260925-183307101/perception/perception_manifest.json"),
     }
-    labeled_video = file_record(PACKET / "current-vs-r7-labeled-3840x1080.mp4", PACKET)
-    labeled_sheet = file_record(PACKET / "current-vs-r7-labeled-6-samples.png", PACKET)
+    prepublication_input_verification = {
+        "status": "passed",
+        "snapshot_sha256": verify_expected_hashes(
+            snapshot_paths, label="prepublication snapshot"
+        ),
+        "original_sha256": verify_expected_hashes(
+            original_paths, label="prepublication original"
+        ),
+    }
+    labeled_video = file_record(
+        staging_dir / "current-vs-r7-labeled-3840x1080.mp4", staging_dir
+    )
+    labeled_sheet = file_record(
+        staging_dir / "current-vs-r7-labeled-6-samples.png", staging_dir
+    )
     sample_rows = "\n".join(
         f"| {item['sample']} | {item['frame_index']} | {item['timestamp_s']:.9f} |"
         for item in samples
@@ -780,6 +893,13 @@ The unlabelled inputs remain unchanged under
 is `{raw_inputs['raw_six_sample_sheet']['sha256']}`. The packet manifest binds these
 inputs, both exact capture manifests, both RGB videos and timestamp indices, and all
 packet outputs.
+
+The builder copies all 12 inputs into private, read-only files while hashing the
+copied bytes. All decoding, matching, labels, and metadata use only those verified snapshots. It
+rehashes both snapshots and original logical inputs before publication, builds the
+five generated files in a private staging directory, verifies stable media hashes and
+all manifest output bindings, then promotes the complete set with rollback backups.
+Failed input, output, or promotion checks leave the previously published packet intact.
 
 Before any packet output is written, all 12 declared raw inputs must match their
 pinned SHA-256 values. Both RGB frame indices must be byte-identical and must contain
@@ -843,23 +963,23 @@ That directory must contain `capture_manifest.json`, `rgb_camera.mp4`,
 `rgb_frames.jsonl`, and `effective_config.json`. The script's default checks the same
 logical path below its checkout and fails with a prerequisite list when it is absent.
 """
-    (PACKET / "README.md").write_text(readme, encoding="utf-8", newline="\n")
+    (staging_dir / "README.md").write_text(readme, encoding="utf-8", newline="\n")
 
     ffmpeg_version = source_verification["ffmpeg_version"]
     outputs = {
-        name: file_record(PACKET / name, PACKET)
+        name: file_record(staging_dir / name, staging_dir)
         for name in [
             "current-vs-r7-labeled-3840x1080.mp4",
             "current-vs-r7-labeled-6-samples.png",
             "sample-times.json",
             "README.md",
-            "build_evidence.py",
         ]
     }
-    current_capture_receipt = json.loads((CURRENT_CAPTURE / "capture_manifest.json").read_text(encoding="utf-8"))
-    r7_capture_receipt = json.loads((R7_CAPTURE / "capture_manifest.json").read_text(encoding="utf-8"))
-    slam_receipt = json.loads(CURRENT_SLAM.read_text(encoding="utf-8"))
-    perception_receipt = json.loads(CURRENT_PERCEPTION.read_text(encoding="utf-8"))
+    outputs["build_evidence.py"] = file_record(Path(__file__).resolve())
+    current_capture_receipt = parsed_receipts["current_capture"]
+    r7_capture_receipt = parsed_receipts["r7_capture"]
+    slam_receipt = parsed_receipts["slam"]
+    perception_receipt = parsed_receipts["perception"]
     slam_artifacts = {item["path"]: item for item in slam_receipt["artifacts"]}
     manifest = {
         "schema": "grocery.rgb_current_vs_r7_evidence",
@@ -896,10 +1016,12 @@ logical path below its checkout and fails with a prerequisite list when it is ab
         },
         "timestamp_binding": {
             "frame_count": len(timestamps),
-            "current_and_r7_index_bytes_identical": sha256(CURRENT_INDEX) == sha256(R7_CAPTURE / "rgb_frames.jsonl"),
+            "current_and_r7_index_bytes_identical": True,
             "samples": samples,
         },
+        "input_snapshot_verification": snapshot_verification,
         "fixed_input_verification": fixed_input_verification,
+        "prepublication_input_verification": prepublication_input_verification,
         "panel_source_verification": source_verification,
         "inputs": raw_inputs,
         "outputs": outputs,
@@ -956,6 +1078,17 @@ logical path below its checkout and fails with a prerequisite list when it is ab
             "ffmpeg_version": ffmpeg_version,
             "sheet_frame_matching": "minimum RGB MSE after FFmpeg area scale to each preserved 1280x360 sheet cell",
             "video_timestamp_labels": "one FFmpeg drawtext overlay per exact rgb_frames.jsonl row, enabled on its frame index",
+            "publication_transaction": (
+                "Generate five files in private staging; validate stable output hashes and "
+                "manifest bindings; rehash snapshots and originals; replace the complete "
+                "set with rollback backups on any promotion failure."
+            ),
+        },
+        "staged_output_validation": {
+            "status": "passed",
+            "expected_stable_output_sha256": EXPECTED_STABLE_OUTPUT_SHA256,
+            "manifest_output_bindings_verified": True,
+            "final_input_rehash_required_before_promotion": True,
         },
         "limitations": [
             "Current and R7 use different horizontal FOV values (75 and 90 degrees).",
@@ -964,9 +1097,180 @@ logical path below its checkout and fails with a prerequisite list when it is ab
             "This packet makes no LiDAR, SLAM-accuracy, perception-accuracy, or final-film claim.",
         ],
     }
-    (PACKET / "manifest.json").write_text(
+    (staging_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
+    return manifest
+
+
+def validate_staged_packet(
+    staging_dir: Path,
+    manifest: dict[str, object],
+) -> dict[str, str]:
+    staged_names = {path.name for path in staging_dir.iterdir() if path.is_file()}
+    if staged_names != set(GENERATED_OUTPUT_NAMES):
+        raise RuntimeError(
+            f"staged output set mismatch: expected={sorted(GENERATED_OUTPUT_NAMES)}, "
+            f"actual={sorted(staged_names)}"
+        )
+    stable_hashes = {
+        name: sha256(staging_dir / name) for name in EXPECTED_STABLE_OUTPUT_SHA256
+    }
+    if stable_hashes != EXPECTED_STABLE_OUTPUT_SHA256:
+        raise RuntimeError(
+            "stable staged output hash mismatch: "
+            f"expected={EXPECTED_STABLE_OUTPUT_SHA256}, actual={stable_hashes}"
+        )
+    parsed_manifest = json.loads(
+        (staging_dir / "manifest.json").read_text(encoding="utf-8")
+    )
+    if parsed_manifest != manifest:
+        raise RuntimeError("staged manifest bytes do not parse to the validated manifest")
+    outputs = manifest.get("outputs")
+    if not isinstance(outputs, dict):
+        raise RuntimeError("staged manifest outputs must be an object")
+    expected_output_names = {
+        "current-vs-r7-labeled-3840x1080.mp4",
+        "current-vs-r7-labeled-6-samples.png",
+        "sample-times.json",
+        "README.md",
+        "build_evidence.py",
+    }
+    if set(outputs) != expected_output_names:
+        raise RuntimeError(
+            f"manifest output set mismatch: expected={sorted(expected_output_names)}, "
+            f"actual={sorted(outputs)}"
+        )
+    for name, declared in outputs.items():
+        path = Path(__file__).resolve() if name == "build_evidence.py" else staging_dir / name
+        actual = file_record(path, None if name == "build_evidence.py" else staging_dir)
+        if declared != actual:
+            raise RuntimeError(
+                f"staged manifest output binding mismatch for {name}: "
+                f"declared={declared}, actual={actual}"
+            )
+    return {name: sha256(staging_dir / name) for name in GENERATED_OUTPUT_NAMES}
+
+
+def promote_staged_outputs(
+    staging_dir: Path,
+    destination_dir: Path,
+    *,
+    expected_hashes: dict[str, str] | None = None,
+    replace: Callable[[Path, Path], object] = os.replace,
+) -> None:
+    """Promote the complete staged set, manifest last, rolling back on any failure."""
+    current_staged_hashes = {
+        name: sha256(staging_dir / name) for name in GENERATED_OUTPUT_NAMES
+    }
+    if expected_hashes is None:
+        expected_hashes = current_staged_hashes
+    elif current_staged_hashes != expected_hashes:
+        raise RuntimeError(
+            f"staged outputs changed after validation: expected={expected_hashes}, "
+            f"actual={current_staged_hashes}"
+        )
+    rollback_dir = staging_dir / ".rollback"
+    rollback_dir.mkdir(exist_ok=False)
+    states: list[dict[str, object]] = []
+    try:
+        for name in GENERATED_OUTPUT_NAMES:
+            source = staging_dir / name
+            destination = destination_dir / name
+            backup = rollback_dir / name
+            state: dict[str, object] = {
+                "name": name,
+                "source": source,
+                "destination": destination,
+                "backup": backup,
+                "backed_up": False,
+                "published": False,
+            }
+            states.append(state)
+            if destination.exists():
+                replace(destination, backup)
+                state["backed_up"] = True
+            replace(source, destination)
+            state["published"] = True
+        published_hashes = {
+            name: sha256(destination_dir / name) for name in GENERATED_OUTPUT_NAMES
+        }
+        if published_hashes != expected_hashes:
+            raise RuntimeError(
+                f"published output hash mismatch: expected={expected_hashes}, "
+                f"actual={published_hashes}"
+            )
+    except BaseException as error:
+        rollback_errors: list[str] = []
+        for state in reversed(states):
+            source = state["source"]
+            destination = state["destination"]
+            backup = state["backup"]
+            try:
+                if state["published"] and destination.exists():
+                    replace(destination, source)
+                if state["backed_up"] and backup.exists():
+                    replace(backup, destination)
+            except BaseException as rollback_error:
+                rollback_errors.append(
+                    f"{state['name']}: {type(rollback_error).__name__}: {rollback_error}"
+                )
+        if rollback_errors:
+            raise RuntimeError(
+                f"publication failed ({error}); rollback also failed: {rollback_errors}"
+            ) from error
+        raise RuntimeError(f"publication failed and was rolled back: {error}") from error
+
+
+def remove_private_transaction_tree(transaction_root: Path, packet_parent: Path) -> None:
+    transaction_root = transaction_root.resolve()
+    packet_parent = packet_parent.resolve()
+    if transaction_root.parent != packet_parent or not transaction_root.name.startswith(
+        ".rgb-evidence-transaction-"
+    ):
+        raise RuntimeError(f"refusing to clean unsafe transaction root: {transaction_root}")
+    if not transaction_root.exists():
+        return
+    for root, directories, files in os.walk(transaction_root, topdown=False):
+        for name in files:
+            Path(root, name).chmod(stat.S_IREAD | stat.S_IWRITE)
+        for name in directories:
+            Path(root, name).chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+    transaction_root.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+    shutil.rmtree(transaction_root, ignore_errors=False)
+
+
+def main() -> None:
+    validate_runtime()
+    original_paths = fixed_input_paths()
+    PACKET.parent.mkdir(parents=True, exist_ok=True)
+    transaction_root = (
+        PACKET.parent / f".rgb-evidence-transaction-{uuid.uuid4().hex}"
+    ).resolve()
+    packet_parent = PACKET.parent.resolve()
+    if transaction_root.parent != packet_parent:
+        raise RuntimeError(f"unsafe transaction root: {transaction_root}")
+    transaction_root.mkdir()
+    try:
+        snapshot_paths, snapshot_verification = snapshot_fixed_inputs(
+            original_paths, transaction_root / "snapshots"
+        )
+        staging_dir = transaction_root / "staging"
+        staging_dir.mkdir()
+        manifest = build_staged_packet(
+            staging_dir,
+            snapshot_paths,
+            original_paths,
+            snapshot_verification,
+        )
+        validated_output_hashes = validate_staged_packet(staging_dir, manifest)
+        verify_expected_hashes(snapshot_paths, label="final prepromotion snapshot")
+        verify_expected_hashes(original_paths, label="final prepromotion original")
+        promote_staged_outputs(
+            staging_dir, PACKET, expected_hashes=validated_output_hashes
+        )
+    finally:
+        remove_private_transaction_tree(transaction_root, packet_parent)
 
 
 if __name__ == "__main__":

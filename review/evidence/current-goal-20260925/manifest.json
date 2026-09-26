@@ -67,6 +67,56 @@
       }
     ]
   },
+  "input_snapshot_verification": {
+    "status": "passed",
+    "rule": "Each of the 12 fixed inputs is copied once into a private snapshot while the copied bytes are hashed. Generation reads only those snapshots. The snapshot files are rehashed against the same pins before use and again before publication.",
+    "copied_while_hashing": true,
+    "private_transaction_scope": true,
+    "read_only_during_generation": true,
+    "artifact_count": 12,
+    "copied_sha256": {
+      "raw_comparison_video": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+      "raw_six_sample_sheet": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+      "current_capture_manifest": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "current_rgb_video": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+      "current_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "current_effective_config": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+      "r7_capture_manifest": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+      "r7_rgb_video": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+      "r7_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+      "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295"
+    },
+    "snapshot_sha256": {
+      "raw_comparison_video": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+      "raw_six_sample_sheet": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+      "current_capture_manifest": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "current_rgb_video": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+      "current_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "current_effective_config": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+      "r7_capture_manifest": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+      "r7_rgb_video": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+      "r7_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+      "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295"
+    },
+    "size_bytes": {
+      "raw_comparison_video": 48649488,
+      "raw_six_sample_sheet": 3599856,
+      "current_capture_manifest": 89124,
+      "current_rgb_video": 15195142,
+      "current_rgb_index": 72887,
+      "current_effective_config": 2973,
+      "r7_capture_manifest": 88274,
+      "r7_rgb_video": 15082591,
+      "r7_rgb_index": 72887,
+      "r7_effective_config": 2097,
+      "current_slam_manifest": 24941,
+      "current_perception_manifest": 11606
+    }
+  },
   "fixed_input_verification": {
     "status": "passed",
     "rule": "All 12 declared raw inputs must match pinned SHA-256 values before any output write. Current and R7 RGB indices must be byte-identical and contain exactly 613 schema-exact, contiguous rgb8 camera_optical_frame 1920x1080 rows with finite, strictly increasing timestamps on the 30-fps 0.1..20.5 s schedule within 3e-9 s. Each pinned capture manifest must bind the expected identity, RGB/config files, dimensions, FOV, count, rate, and timestamp range. The pinned SLAM and perception receipts must be complete and exactly linked to Current capture.",
@@ -210,6 +260,37 @@
           }
         }
       }
+    }
+  },
+  "prepublication_input_verification": {
+    "status": "passed",
+    "snapshot_sha256": {
+      "raw_comparison_video": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+      "raw_six_sample_sheet": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+      "current_capture_manifest": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "current_rgb_video": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+      "current_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "current_effective_config": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+      "r7_capture_manifest": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+      "r7_rgb_video": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+      "r7_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+      "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295"
+    },
+    "original_sha256": {
+      "raw_comparison_video": "d0d1a2796b2b2e9c53d2e3633ac8c3f46cb995ba6002a83121ecf3909057aae4",
+      "raw_six_sample_sheet": "b8cfcb5a5c4519b253b25da253809da37dced9065bed8ea583f03da5caa3bbec",
+      "current_capture_manifest": "49de286dc0a26220ebfa9e3d141cb972e35bcdf5cc3e33e9ef506fd8474bfe3b",
+      "current_rgb_video": "465cb43619a3ac58bea359840ae779ffc5ed588191832d9448d568dd2e834738",
+      "current_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "current_effective_config": "6e8882240a061d288013b3a21db0fc737fdaf515e946a2db0cbc30e401584d86",
+      "r7_capture_manifest": "76da43e3acfea0559b81cd4462667e95d7f1bdaacf00471b9e001db114d2174b",
+      "r7_rgb_video": "b36904fde78e44e65107d7ef3fe3eff5342f8b0d011fd589c3238e13682d1b6d",
+      "r7_rgb_index": "69f171b691d35061185c31378598f0fc4dfdc7c44b2e260e404d452fbcf88915",
+      "r7_effective_config": "0bac353757bb1674c8bf15a3424f347cf201aa1a275da4a5a54f451d64f77de1",
+      "current_slam_manifest": "803ca96a2fcb4e8d294ed6adc6f73a366e9b2fea83d343c7d2087ce435b53ad4",
+      "current_perception_manifest": "ce05a2e0654fb3e00b264a9aea1b065ae1eca1a2e7513e44b4c1fe4160119295"
     }
   },
   "panel_source_verification": {
@@ -359,13 +440,13 @@
     },
     "README.md": {
       "path": "README.md",
-      "sha256": "c1956f517aad98f537539cb714a88ae0169c27a53bbea89c91d16c944a4d8161",
-      "size_bytes": 5471
+      "sha256": "96473b847f775bf45d71e72351e99e508868a805640298721fecb6372b58996e",
+      "size_bytes": 5991
     },
     "build_evidence.py": {
       "path": "build_evidence.py",
-      "sha256": "c1b1b74e3b32e0b0f3e0257490309f3c92f864d023330ba150f9ca9281971015",
-      "size_bytes": 47519
+      "sha256": "19f88686e19427dc3b4ab3e92c2ad141862373c1a597cfb36fcc44f866b3cea2",
+      "size_bytes": 60215
     }
   },
   "current_pipeline_checkpoint": {
@@ -420,7 +501,18 @@
     "pillow_version": "12.3.0",
     "ffmpeg_version": "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers",
     "sheet_frame_matching": "minimum RGB MSE after FFmpeg area scale to each preserved 1280x360 sheet cell",
-    "video_timestamp_labels": "one FFmpeg drawtext overlay per exact rgb_frames.jsonl row, enabled on its frame index"
+    "video_timestamp_labels": "one FFmpeg drawtext overlay per exact rgb_frames.jsonl row, enabled on its frame index",
+    "publication_transaction": "Generate five files in private staging; validate stable output hashes and manifest bindings; rehash snapshots and originals; replace the complete set with rollback backups on any promotion failure."
+  },
+  "staged_output_validation": {
+    "status": "passed",
+    "expected_stable_output_sha256": {
+      "current-vs-r7-labeled-3840x1080.mp4": "ab4071bb11d6590d5c21c5d379f7a756ed917c159c785499e0ae3ba048568e7f",
+      "current-vs-r7-labeled-6-samples.png": "bc1d0c517a6df0ae039a307919aa5aadd84d1ad38efc424783aa1580705b760a",
+      "sample-times.json": "09584844769c1d2b6ffca54d339624c06da7772280654523a7e318c44adb82b7"
+    },
+    "manifest_output_bindings_verified": true,
+    "final_input_rehash_required_before_promotion": true
   },
   "limitations": [
     "Current and R7 use different horizontal FOV values (75 and 90 degrees).",
