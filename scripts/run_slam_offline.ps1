@@ -5,6 +5,8 @@ param(
   [string]$PixiPath = "",
   [string]$RosWorkspace = "",
   [string]$IsaacPython = "C:/isaacsim/python.bat",
+  [ValidateRange(0.05, 1.0)]
+  [double]$ReplayRate = 0.25,
   [string]$ExperimentName = "offline_slam"
 )
 $ErrorActionPreference = "Stop"
@@ -473,7 +475,7 @@ try {
   $replayTopics = @("--topics","/sim/camera/rgb/image_raw","/sim/camera/rgb/camera_info","/sim/lidar/points","/tf","/tf_static")
   # Give the player's publishers a bounded discovery interval before the first
   # recorded timestamp. The observer's clock-start gate rejects any missed start.
-  $player = Start-Process -FilePath $pixi -ArgumentList @($baseArgs + @("bag","play",$bagUri.Replace([char]92, "/"),"--clock","--delay",([string]$replayDiscoveryDelaySeconds)) + $replayTopics) -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_bag_play.out.log") -RedirectStandardError (Join-Path $logsDir "offline_bag_play.err.log")
+  $player = Start-Process -FilePath $pixi -ArgumentList @($baseArgs + @("bag","play",$bagUri.Replace([char]92, "/"),"--clock","--rate",([string]$ReplayRate),"--delay",([string]$replayDiscoveryDelaySeconds)) + $replayTopics) -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "offline_bag_play.out.log") -RedirectStandardError (Join-Path $logsDir "offline_bag_play.err.log")
   $waitSeconds = [Math]::Max(240, [int]($duration * 20) + 120)
   Wait-ProcessWithTimeout $player $waitSeconds "bag replay" | Out-Null
   New-Item -ItemType File -Force -Path $replaySignal | Out-Null
@@ -554,7 +556,7 @@ try {
     bag_replayed=$bagUri; ground_truth_subscribed=$false; publish_map_service_acknowledged=$observerMeta.publish_map_acknowledged; database_path=$database
     slam_attempt=[ordered]@{attempt_id=[string]$slamAttempt.attempt_id; mapper_database_relative_path=("attempts/$($slamAttempt.attempt_id)/rtabmap.db"); rotated_prior_artifacts=@($slamAttempt.rotated_prior_artifacts)}
     database_artifact=[ordered]@{path="rtabmap.db"; size_bytes=[long]$databaseInfo.Length; sha256=$databaseHash}
-    replay_clock_contract=[ordered]@{expected_first_clock_s=$firstClockStamp; target_clock_s=$targetClockStamp; start_tolerance_s=$clockStartTolerance; publisher_discovery_delay_s=$replayDiscoveryDelaySeconds}
+    replay_clock_contract=[ordered]@{expected_first_clock_s=$firstClockStamp; target_clock_s=$targetClockStamp; start_tolerance_s=$clockStartTolerance; playback_rate=$ReplayRate; publisher_discovery_delay_s=$replayDiscoveryDelaySeconds}
     pre_publish_graph_version=$observerMeta.pre_publish_graph_version; pre_publish_graph_version_source=$observerMeta.pre_publish_graph_version_source; graph_pose_version=$observerMeta.graph_pose_version
     dense_pose_version=$observerMeta.dense_pose_version; map_version=$observerMeta.map_version
     map_frame_id=$observerMeta.map_pose_frame_id; optimized=$observerMeta.optimized_pose_graph_complete
