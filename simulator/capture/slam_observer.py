@@ -433,6 +433,9 @@ class SlamObserver:
         # has stopped and checkpointed its live transaction.
         self.mapper_database_span: bool | None = None
         self.database_node_count: int | None = None
+        self.database_node_stamp_sha256: str | None = None
+        self.database_node_timestamps_strictly_increasing: bool | None = None
+        self.database_scan_coverage_complete = False
         self.database_last_stamp_s: float | None = None
         self.database_verification_stage = "pending_post_mapper_shutdown"
         self.map_messages_before_publish = 0
@@ -1193,6 +1196,13 @@ class SlamObserver:
             "final_map_span": self.final_map_span,
             "mapper_database_span": self.mapper_database_span,
             "database_node_count": self.database_node_count,
+            "database_node_stamp_sha256": getattr(self, "database_node_stamp_sha256", None),
+            "database_node_timestamps_strictly_increasing": getattr(
+                self, "database_node_timestamps_strictly_increasing", None
+            ),
+            "database_scan_coverage_complete": getattr(
+                self, "database_scan_coverage_complete", False
+            ),
             "database_last_stamp_s": self.database_last_stamp_s,
             "database_verification_stage": self.database_verification_stage,
             "last_map_stamp_s": self.map_stamp_s,
