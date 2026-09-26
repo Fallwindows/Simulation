@@ -346,6 +346,8 @@ def _map_graph_fingerprint(graph) -> str:
 
 
 def _cloud_payload_fingerprint(message) -> str:
+    from simulator.capture.manifest import sha256_json
+
     data = getattr(message, "data", None)
     if data is None:
         raise ValueError("map cloud message omitted its raw payload")
@@ -353,7 +355,35 @@ def _cloud_payload_fingerprint(message) -> str:
         payload = bytes(data)
     except (TypeError, ValueError) as exc:
         raise ValueError("map cloud raw payload is not byte-addressable") from exc
-    return hashlib.sha256(payload).hexdigest()
+    fields = []
+    for field in getattr(message, "fields", []):
+        fields.append({
+            "name": str(field.name),
+            "offset": int(field.offset),
+            "datatype": int(field.datatype),
+            "count": int(field.count),
+        })
+    header = getattr(message, "header", None)
+    if header is None or getattr(header, "stamp", None) is None:
+        raise ValueError("map cloud message omitted its stamped header")
+    stamp = header.stamp
+    if not hasattr(stamp, "sec") or not hasattr(stamp, "nanosec"):
+        raise ValueError("map cloud header stamp omitted integer seconds or nanoseconds")
+    return sha256_json({
+        "header": {
+            "stamp": {"sec": int(stamp.sec), "nanosec": int(stamp.nanosec)},
+            "frame_id": str(getattr(header, "frame_id", "")).lstrip("/"),
+        },
+        "height": int(message.height),
+        "width": int(message.width),
+        "fields": fields,
+        "is_bigendian": bool(message.is_bigendian),
+        "point_step": int(message.point_step),
+        "row_step": int(message.row_step),
+        "is_dense": bool(message.is_dense),
+        "data_length": len(payload),
+        "data_sha256": hashlib.sha256(payload).hexdigest(),
+    })
 
 
 def _write_pcd(path: Path, points: list[tuple[float, float, float]]) -> None:
@@ -386,6 +416,7 @@ class SlamObserver:
         from nav_msgs.msg import Odometry
         from rosgraph_msgs.msg import Clock
         from rclpy.node import Node
+        from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
         from rtabmap_msgs.srv import GetMap, PublishMap
         from rtabmap_msgs.msg import MapData, MapGraph
         from sensor_msgs.msg import PointCloud2
@@ -525,9 +556,41 @@ class SlamObserver:
         self.node.create_subscription(Clock, "/clock", self._on_clock, 100)
         self.node.create_subscription(Odometry, "/slam/odom", self._on_odom, 50)
         self.node.create_subscription(TFMessage, "/tf", self._on_tf, 50)
-        self.node.create_subscription(PointCloud2, "/slam/map_cloud", self._on_map, 10)
-        self.node.create_subscription(MapGraph, "/mapGraph", self._on_map_graph, 10)
-        self.node.create_subscription(MapData, "/mapData", self._on_map_data, 10)
+        self.map_cloud_message_type = PointCloud2
+        self.map_graph_message_type = MapGraph
+        self.map_data_message_type = MapData
+        self.map_subscription_generation = 0
+        self.active_map_subscription_generation: int | None = 0
+        self.map_subscription_rebinds = 0
+        self.map_subscription_publisher_counts: dict[str, int] = {}
+        self.map_subscription_qos_premise = "all three publishers are volatile; late-joining readers receive only post-match samples"
+        self.map_subscription_qos_contract = {
+            "history": "keep_last", "depth": 1, "reliability": "reliable", "durability": "volatile",
+        }
+        self.callback_executor_model = "single_threaded_explicit_rclpy_spin_once"
+        self.volatile_durability_policy = DurabilityPolicy.VOLATILE
+        self.map_subscription_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+        self.retired_map_subscription_generations: list[int] = []
+        self.ignored_stale_map_cloud_callbacks = 0
+        self.ignored_stale_map_graph_callbacks = 0
+        self.ignored_stale_map_data_callbacks = 0
+        self.map_cloud_subscription = self.node.create_subscription(
+            PointCloud2, "/slam/map_cloud",
+            lambda message: self._on_map(message, 0), self.map_subscription_qos,
+        )
+        self.map_graph_subscription = self.node.create_subscription(
+            MapGraph, "/mapGraph",
+            lambda message: self._on_map_graph(message, 0), self.map_subscription_qos,
+        )
+        self.map_data_subscription = self.node.create_subscription(
+            MapData, "/mapData",
+            lambda message: self._on_map_data(message, 0), self.map_subscription_qos,
+        )
         self.get_map_data_client = self.node.create_client(GetMap, "/rtabmap/get_map_data")
         self.get_map_data_request_factory = GetMap.Request
         self.publish_map_client = self.node.create_client(PublishMap, "/rtabmap/publish_map")
@@ -588,7 +651,10 @@ class SlamObserver:
             })
             self.callback_generation += 1
 
-    def _on_map(self, message) -> None:
+    def _on_map(self, message, subscription_generation: int | None = None) -> None:
+        if subscription_generation is not None and subscription_generation != self.active_map_subscription_generation:
+            self.ignored_stale_map_cloud_callbacks += 1
+            return
         self.callback_generation += 1
         self.map_publication_generation += 1
         self.map_cloud_callbacks = getattr(self, "map_cloud_callbacks", 0) + 1
@@ -605,7 +671,10 @@ class SlamObserver:
         self.map_cloud_frame_id = str(message.header.frame_id).lstrip("/")
         self.map_messages += 1
 
-    def _on_map_graph(self, message) -> None:
+    def _on_map_graph(self, message, subscription_generation: int | None = None) -> None:
+        if subscription_generation is not None and subscription_generation != self.active_map_subscription_generation:
+            self.ignored_stale_map_graph_callbacks += 1
+            return
         self.callback_generation += 1
         self.map_publication_generation += 1
         self.map_graph_messages += 1
@@ -613,13 +682,164 @@ class SlamObserver:
         self.map_graph_stamp_s = _stamp(message.header.stamp)
         self.final_map_graph_frame_id = str(message.header.frame_id).lstrip("/")
 
-    def _on_map_data(self, message) -> None:
+    def _on_map_data(self, message, subscription_generation: int | None = None) -> None:
+        if subscription_generation is not None and subscription_generation != self.active_map_subscription_generation:
+            self.ignored_stale_map_data_callbacks += 1
+            return
         self.callback_generation += 1
         self.map_publication_generation += 1
         self.map_data_messages += 1
         self.map_data_message = message
         self.map_data_stamp_s = _stamp(message.header.stamp)
         self.map_data_frame_id = str(message.header.frame_id).lstrip("/")
+
+    def _retire_map_subscriptions(self, generation: int) -> None:
+        subscriptions = (
+            "map_cloud_subscription",
+            "map_graph_subscription",
+            "map_data_subscription",
+        )
+        had_subscriptions = any(getattr(self, attribute, None) is not None for attribute in subscriptions)
+        self.active_map_subscription_generation = None
+        failures = []
+        for attribute in subscriptions:
+            subscription = getattr(self, attribute, None)
+            if subscription is None:
+                continue
+            try:
+                destroyed = bool(self.node.destroy_subscription(subscription))
+            except BaseException as exc:
+                failures.append(f"{attribute}: {exc}")
+                continue
+            if destroyed:
+                setattr(self, attribute, None)
+            else:
+                failures.append(attribute)
+        remaining = [attribute for attribute in subscriptions if getattr(self, attribute, None) is not None]
+        if had_subscriptions and not remaining:
+            retired = getattr(self, "retired_map_subscription_generations", None)
+            if retired is None:
+                retired = []
+                self.retired_map_subscription_generations = retired
+            if generation not in retired:
+                retired.append(generation)
+        if failures:
+            raise RuntimeError(
+                f"failed to destroy map subscriptions for generation {generation}: {', '.join(failures)}"
+            )
+
+    def _reset_publish_attempt_state(self) -> None:
+        self.map_data_message = None
+        self.map_data_stamp_s = None
+        self.map_data_frame_id = None
+        self.map_graph_message = None
+        self.map_graph_stamp_s = None
+        self.final_map_graph_frame_id = None
+        self.latest_map = []
+        self.map_stamp_s = None
+        self.map_cloud_frame_id = None
+        self.map_cloud_payload_fingerprint = None
+
+    def _wait_for_publish_map_response(
+        self,
+        future,
+        deadline: float,
+        attempt: int,
+        max_attempts: int,
+        subscription_generation: int,
+        attempt_receipt: dict[str, object],
+    ):
+        while self.rclpy.ok() and not future.done():
+            if time.monotonic() >= deadline:
+                self._retire_map_subscriptions(subscription_generation)
+                attempt_receipt["subscriptions_retired"] = True
+                raise RuntimeError(f"RTAB-Map PublishMap response timed out on attempt {attempt}/{max_attempts}")
+            self.rclpy.spin_once(self.node, timeout_sec=0.1)
+        if not self.rclpy.ok():
+            self._retire_map_subscriptions(subscription_generation)
+            attempt_receipt["subscriptions_retired"] = True
+            raise RuntimeError("ROS shut down while waiting for final map publication")
+        try:
+            response = future.result()
+        except BaseException:
+            self._retire_map_subscriptions(subscription_generation)
+            attempt_receipt["subscriptions_retired"] = True
+            raise
+        if response is None:
+            self._retire_map_subscriptions(subscription_generation)
+            attempt_receipt["subscriptions_retired"] = True
+            raise RuntimeError(f"RTAB-Map PublishMap returned no response on attempt {attempt}/{max_attempts}")
+        return response
+
+    def _rebind_map_subscriptions(self, deadline: float) -> tuple[int, dict[str, int]]:
+        prior_generation = int(getattr(self, "map_subscription_generation", 0))
+        self._retire_map_subscriptions(prior_generation)
+        generation = prior_generation + 1
+        self.map_subscription_generation = generation
+        self.active_map_subscription_generation = generation
+        try:
+            self.map_cloud_subscription = self.node.create_subscription(
+                self.map_cloud_message_type, "/slam/map_cloud",
+                lambda message, bound_generation=generation: self._on_map(message, bound_generation), self.map_subscription_qos,
+            )
+            self.map_graph_subscription = self.node.create_subscription(
+                self.map_graph_message_type, "/mapGraph",
+                lambda message, bound_generation=generation: self._on_map_graph(message, bound_generation), self.map_subscription_qos,
+            )
+            self.map_data_subscription = self.node.create_subscription(
+                self.map_data_message_type, "/mapData",
+                lambda message, bound_generation=generation: self._on_map_data(message, bound_generation), self.map_subscription_qos,
+            )
+        except BaseException as exc:
+            try:
+                self._retire_map_subscriptions(generation)
+            except BaseException as cleanup_exc:
+                raise RuntimeError(
+                    f"map subscription creation failed and partial cleanup also failed: {cleanup_exc}"
+                ) from exc
+            raise
+        current_subscriptions = (
+            ("/slam/map_cloud", self.map_cloud_subscription),
+            ("/mapGraph", self.map_graph_subscription),
+            ("/mapData", self.map_data_subscription),
+        )
+        if any(not hasattr(subscription, "get_publisher_count") for _, subscription in current_subscriptions):
+            raise RuntimeError("map subscription does not expose publisher discovery state")
+        publisher_counts: dict[str, int] = {}
+        while self.rclpy.ok():
+            publisher_counts = {
+                topic: int(subscription.get_publisher_count())
+                for topic, subscription in current_subscriptions
+            }
+            if any(count > 1 for count in publisher_counts.values()):
+                self._retire_map_subscriptions(generation)
+                raise RuntimeError(f"fresh PublishMap subscription matched an unexpected publisher count: {publisher_counts}")
+            endpoint_info = {
+                topic: list(self.node.get_publishers_info_by_topic(topic))
+                for topic, _ in current_subscriptions
+            }
+            if any(len(records) > 1 for records in endpoint_info.values()):
+                self._retire_map_subscriptions(generation)
+                raise RuntimeError("fresh PublishMap subscription discovered multiple publisher endpoints")
+            ready = all(publisher_counts[topic] == 1 and len(endpoint_info[topic]) == 1 for topic in publisher_counts)
+            if ready:
+                if any(
+                    records[0].qos_profile.durability != self.volatile_durability_policy
+                    for records in endpoint_info.values()
+                ):
+                    self._retire_map_subscriptions(generation)
+                    raise RuntimeError("fresh PublishMap publisher is not volatile; generation rebinding is not a valid fence")
+                break
+            if time.monotonic() >= deadline:
+                self._retire_map_subscriptions(generation)
+                raise RuntimeError("fresh PublishMap subscriptions did not match all three publishers")
+            self.rclpy.spin_once(self.node, timeout_sec=0.1)
+        if not self.rclpy.ok():
+            self._retire_map_subscriptions(generation)
+            raise RuntimeError("ROS shut down while matching fresh PublishMap subscriptions")
+        self.map_subscription_rebinds = int(getattr(self, "map_subscription_rebinds", 0)) + 1
+        self.map_subscription_publisher_counts = dict(publisher_counts)
+        return generation, publisher_counts
 
     def _request_full_optimized_graph(self) -> None:
         has_client = hasattr(self, "get_map_data_client")
@@ -760,12 +980,24 @@ class SlamObserver:
             attempt_deadline = now + (overall_deadline - now) / remaining_attempts
             self.publish_map_attempts = attempt
             self.final_map_span = False
+            subscription_generation, publisher_counts = self._rebind_map_subscriptions(attempt_deadline)
+            self._reset_publish_attempt_state()
+            # This process dispatches callbacks only through its direct single-threaded
+            # spin_once calls. With no intervening spin, these counters are the exact
+            # post-discovery/pre-request boundary for the new volatile subscriptions.
             self.map_messages_before_publish = self.map_messages
             self.map_cloud_callbacks_before_publish = self.map_cloud_callbacks
             self.map_graph_before_publish = self.map_graph_messages
             self.map_data_before_publish = self.map_data_messages
             attempt_receipt = {
                 "attempt": attempt,
+                "subscription_generation": subscription_generation,
+                "subscriptions_matched": True,
+                "matched_publisher_counts": dict(publisher_counts),
+                "publisher_qos_premise": self.map_subscription_qos_premise,
+                "subscription_qos": dict(self.map_subscription_qos_contract),
+                "callback_executor_model": self.callback_executor_model,
+                "subscriptions_retired": False,
                 "acknowledged": False,
                 "map_cloud_callbacks_before": self.map_cloud_callbacks_before_publish,
                 "map_cloud_callbacks_after": self.map_cloud_callbacks,
@@ -788,6 +1020,16 @@ class SlamObserver:
                 "cloud_payload_fingerprints": [],
                 "source_graph_identity": None,
                 "cloud_identity_state": None,
+                "ignored_stale_callbacks_before": {
+                    "map_cloud": self.ignored_stale_map_cloud_callbacks,
+                    "map_graph": self.ignored_stale_map_graph_callbacks,
+                    "map_data": self.ignored_stale_map_data_callbacks,
+                },
+                "ignored_stale_callbacks_after": {
+                    "map_cloud": self.ignored_stale_map_cloud_callbacks,
+                    "map_graph": self.ignored_stale_map_graph_callbacks,
+                    "map_data": self.ignored_stale_map_data_callbacks,
+                },
                 "accepted": False,
             }
             self.publish_map_attempt_receipts.append(attempt_receipt)
@@ -796,17 +1038,12 @@ class SlamObserver:
             request.optimized = True
             request.graph_only = False
             future = self.publish_map_client.call_async(request)
-            while self.rclpy.ok() and not future.done():
-                if time.monotonic() >= attempt_deadline:
-                    raise RuntimeError(f"RTAB-Map PublishMap response timed out on attempt {attempt}/{max_attempts}")
-                self.rclpy.spin_once(self.node, timeout_sec=0.1)
-            if not self.rclpy.ok():
-                raise RuntimeError("ROS shut down while waiting for final map publication")
-            response = future.result()
+            response = self._wait_for_publish_map_response(
+                future, attempt_deadline, attempt, max_attempts,
+                subscription_generation, attempt_receipt,
+            )
             # PublishMap.srv has an empty response. A completed, exception-free
             # future is its acknowledgement; the generated response has no success field.
-            if response is None:
-                raise RuntimeError(f"RTAB-Map PublishMap returned no response on attempt {attempt}/{max_attempts}")
             self.publish_map_acknowledged = True
             attempt_receipt["acknowledged"] = True
 
@@ -837,6 +1074,11 @@ class SlamObserver:
                     "map_cloud_frame_id": self.map_cloud_frame_id if fresh_cloud else None,
                     "map_graph_frame_id": self.final_map_graph_frame_id if fresh_graph else None,
                     "map_data_frame_id": self.map_data_frame_id if fresh_data else None,
+                    "ignored_stale_callbacks_after": {
+                        "map_cloud": self.ignored_stale_map_cloud_callbacks,
+                        "map_graph": self.ignored_stale_map_graph_callbacks,
+                        "map_data": self.ignored_stale_map_data_callbacks,
+                    },
                 })
                 data_fingerprint: str | None = None
                 graph_fingerprint: str | None = None
@@ -911,8 +1153,12 @@ class SlamObserver:
                     break
                 self.rclpy.spin_once(self.node, timeout_sec=0.1)
             if not self.rclpy.ok():
+                self._retire_map_subscriptions(subscription_generation)
+                attempt_receipt["subscriptions_retired"] = True
                 raise RuntimeError("ROS shut down while waiting for final map publication")
 
+            self._retire_map_subscriptions(subscription_generation)
+            attempt_receipt["subscriptions_retired"] = True
             if accepted:
                 self.drain_complete = True
                 self._capture_final_optimized_graph()
@@ -1162,6 +1408,11 @@ class SlamObserver:
             self.rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def close(self) -> dict[str, object]:
+        map_subscription_attributes = (
+            "map_cloud_subscription", "map_graph_subscription", "map_data_subscription",
+        )
+        if any(getattr(self, attribute, None) is not None for attribute in map_subscription_attributes):
+            self._retire_map_subscriptions(int(getattr(self, "map_subscription_generation", 0)))
         odom_fields = ["timestamp_s", "x_m", "y_m", "z_m", "qx", "qy", "qz", "qw", "quaternion_valid", "frame_id"]
         raw_rows = [{**row, "frame_id": "odom"} for row in sorted(self.odom_rows, key=lambda row: float(row["timestamp_s"]))]
         with (self.output_dir / "slam_odom_poses.csv").open("w", newline="", encoding="utf-8") as handle:
@@ -1321,6 +1572,17 @@ class SlamObserver:
             "replay_drain_basis": ["/clock", "/slam/odom"],
             "map_publication_generation": self.map_publication_generation,
             "post_publish_drain_basis": ["/slam/map_cloud", "/mapGraph", "/mapData"],
+            "map_subscription_generation": getattr(self, "map_subscription_generation", 0),
+            "active_map_subscription_generation": getattr(self, "active_map_subscription_generation", None),
+            "map_subscription_rebinds": getattr(self, "map_subscription_rebinds", 0),
+            "retired_map_subscription_generations": getattr(self, "retired_map_subscription_generations", []),
+            "map_subscription_publisher_counts": getattr(self, "map_subscription_publisher_counts", {}),
+            "map_subscription_qos_premise": getattr(self, "map_subscription_qos_premise", None),
+            "map_subscription_qos_contract": getattr(self, "map_subscription_qos_contract", {}),
+            "callback_executor_model": getattr(self, "callback_executor_model", None),
+            "ignored_stale_map_cloud_callbacks": getattr(self, "ignored_stale_map_cloud_callbacks", 0),
+            "ignored_stale_map_graph_callbacks": getattr(self, "ignored_stale_map_graph_callbacks", 0),
+            "ignored_stale_map_data_callbacks": getattr(self, "ignored_stale_map_data_callbacks", 0),
             "replay_drained": self.replay_drained,
             "publish_map_acknowledged": self.publish_map_acknowledged,
             "publish_map_attempts": getattr(self, "publish_map_attempts", 0),

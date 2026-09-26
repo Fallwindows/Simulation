@@ -1045,6 +1045,58 @@ $global:LASTEXITCODE = 0
         self.assertEqual(FakeRgbRecorder.instance.close_calls, 1)
         self.assertEqual(rgb_rclpy.shutdown_calls, 1)
 
+    def test_cloud_payload_fingerprint_binds_full_pointcloud2_envelope(self):
+        from simulator.capture.slam_observer import _cloud_payload_fingerprint
+
+        default_fields = [
+            ("x", 0, 7, 1),
+            ("y", 4, 7, 1),
+            ("z", 8, 7, 1),
+        ]
+
+        def message(**overrides):
+            field_specs = overrides.pop("field_specs", default_fields)
+            stamp = types.SimpleNamespace(
+                sec=overrides.pop("stamp_sec", 12),
+                nanosec=overrides.pop("stamp_nanosec", 34),
+            )
+            values = {
+                "header": types.SimpleNamespace(stamp=stamp, frame_id=overrides.pop("frame_id", "map")),
+                "height": 1,
+                "width": 1,
+                "fields": [
+                    types.SimpleNamespace(name=name, offset=offset, datatype=datatype, count=count)
+                    for name, offset, datatype, count in field_specs
+                ],
+                "is_bigendian": False,
+                "point_step": 12,
+                "row_step": 12,
+                "is_dense": True,
+                "data": bytes(range(12)),
+            }
+            values.update(overrides)
+            return types.SimpleNamespace(**values)
+
+        baseline = _cloud_payload_fingerprint(message())
+        mutations = {
+            "stamp": message(stamp_nanosec=35),
+            "frame": message(frame_id="odom"),
+            "height": message(height=2),
+            "width": message(width=2),
+            "field_order": message(field_specs=list(reversed(default_fields))),
+            "field_offset": message(field_specs=[("x", 1, 7, 1), *default_fields[1:]]),
+            "field_datatype": message(field_specs=[("x", 0, 8, 1), *default_fields[1:]]),
+            "field_count": message(field_specs=[("x", 0, 7, 2), *default_fields[1:]]),
+            "endianness": message(is_bigendian=True),
+            "point_step": message(point_step=16),
+            "row_step": message(row_step=16),
+            "density": message(is_dense=False),
+            "raw_data": message(data=bytes(range(11))),
+        }
+        for label, mutated in mutations.items():
+            with self.subTest(metadata=label):
+                self.assertNotEqual(_cloud_payload_fingerprint(mutated), baseline)
+
     def test_slam_replay_requires_process_signal_clock_target_and_drain(self):
         from simulator.capture.slam_observer import SlamObserver
 
@@ -1103,9 +1155,57 @@ $global:LASTEXITCODE = 0
                 })()
                 return data, graph_message
 
+            def cloud_message(payload, points, *, stamp_sec=12, frame_id="map"):
+                fields = [
+                    type("Field", (), {"name": name, "offset": offset, "datatype": 7, "count": 1})()
+                    for name, offset in (("x", 0), ("y", 4), ("z", 8))
+                ]
+                return type("Message", (), {
+                    "fields": fields,
+                    "header": type("Header", (), {
+                        "stamp": type("Stamp", (), {"sec": stamp_sec, "nanosec": 0})(),
+                        "frame_id": frame_id,
+                    })(),
+                    "height": 1,
+                    "width": len(points),
+                    "is_bigendian": False,
+                    "point_step": 12,
+                    "row_step": 12 * len(points),
+                    "is_dense": True,
+                    "data": payload,
+                    "points": points,
+                })()
+
             class PointCloudReader:
                 @staticmethod
                 def read_points(message, **kwargs): return list(message.points)
+
+            class Subscription:
+                def __init__(self, node, topic, callback):
+                    self.node = node; self.topic = topic; self.callback = callback; self.destroyed = False
+                def get_publisher_count(self): return self.node.publisher_count
+
+            class Node:
+                def __init__(self):
+                    self.subscriptions = []; self.publisher_count = 1
+                    self.create_failure_topic = None; self.destroy_failure_topics = set()
+                def create_subscription(self, message_type, topic, callback, depth):
+                    if topic == self.create_failure_topic:
+                        raise RuntimeError(f"fixture create failure for {topic}")
+                    subscription = Subscription(self, topic, callback)
+                    self.subscriptions.append(subscription)
+                    return subscription
+                def destroy_subscription(self, subscription):
+                    if subscription.topic in self.destroy_failure_topics:
+                        return False
+                    subscription.destroyed = True
+                    return True
+                def get_publishers_info_by_topic(self, topic):
+                    return [
+                        types.SimpleNamespace(qos_profile=types.SimpleNamespace(durability="volatile"))
+                        for _ in range(self.publisher_count)
+                    ]
+                def destroy_node(self): pass
 
             class FakeRos:
                 def __init__(self): self.observer = None; self.spin_count = 0
@@ -1126,22 +1226,28 @@ $global:LASTEXITCODE = 0
                         # use its own fresh graph/data pair with the exact cached
                         # pre-publish cloud, never the first attempt's cloud.
                         if attempt == 1:
-                            message = type("Message", (), {
-                                "fields": [type("Field", (), {"name": name})() for name in ("x", "y", "z")],
-                                "header": type("Header", (), {"stamp": type("Stamp", (), {"sec": 12, "nanosec": 0})(), "frame_id": "map"})(),
-                                "data": b"failed-attempt-map-cloud-payload",
-                                "points": [(9.0, 0.0, 0.0)],
-                            })()
-                            self.observer._on_map(message)
+                            self.old_subscriptions = (
+                                self.observer.map_cloud_subscription,
+                                self.observer.map_graph_subscription,
+                                self.observer.map_data_subscription,
+                            )
+                            self.observer.map_cloud_subscription.callback(cloud_message(
+                                b"failed-attempt-map-cloud-payload", [(9.0, 0.0, 0.0)]
+                            ))
+                            self.observer.map_graph_subscription.callback(graph_message)
                         else:
-                            self.observer._on_map_data(data)
-                        self.observer._on_map_graph(graph_message)
+                            late_data, late_graph = optimized_graph_response(7.0)
+                            old_cloud, old_graph, old_data = self.old_subscriptions
+                            old_cloud.callback(cloud_message(
+                                b"late-failed-attempt-cloud", [(8.0, 0.0, 0.0)]
+                            ))
+                            old_graph.callback(late_graph)
+                            old_data.callback(late_data)
+                            self.observer.map_data_subscription.callback(data)
+                            self.observer.map_graph_subscription.callback(graph_message)
                         future.is_done = True
                     else:
                         __import__("time").sleep(timeout_sec)
-
-            class Node:
-                def destroy_node(self): pass
 
             observer = SlamObserver.__new__(SlamObserver)
             ros = FakeRos()
@@ -1192,16 +1298,28 @@ $global:LASTEXITCODE = 0
             observer.map_graph_stamp_s = None; observer.map_data_stamp_s = None
             observer.map_cloud_frame_id = None; observer.final_map_graph_frame_id = None
             observer.final_map_graph_stamp_s = None; observer.final_cloud_stamp_s = None
+            observer.map_cloud_message_type = object; observer.map_graph_message_type = object; observer.map_data_message_type = object
+            observer.map_subscription_generation = 0; observer.active_map_subscription_generation = 0
+            observer.map_subscription_rebinds = 0; observer.retired_map_subscription_generations = []
+            observer.map_subscription_publisher_counts = {}
+            observer.map_subscription_qos_premise = "all three publishers are volatile; late-joining readers receive only post-match samples"
+            observer.map_subscription_qos_contract = {
+                "history": "keep_last", "depth": 1, "reliability": "reliable", "durability": "volatile",
+            }
+            observer.map_subscription_qos = types.SimpleNamespace(
+                history="keep_last", depth=1, reliability="reliable", durability="volatile",
+            )
+            observer.callback_executor_model = "single_threaded_explicit_rclpy_spin_once"
+            observer.volatile_durability_policy = "volatile"
+            observer.ignored_stale_map_cloud_callbacks = 0
+            observer.ignored_stale_map_graph_callbacks = 0
+            observer.ignored_stale_map_data_callbacks = 0
+            observer.map_cloud_subscription = None; observer.map_graph_subscription = None; observer.map_data_subscription = None
             observer.point_cloud2 = PointCloudReader; observer.publish_map_client = FakeClient(); observer.close_timeout_s = 5.0
             observer.publish_map_request_factory = type("PublishMapRequest", (), {"__init__": lambda self: None})
             ros.observer = observer
             pre_data, pre_graph = optimized_graph_response(4.0)
-            pre_cloud = type("Message", (), {
-                "fields": [type("Field", (), {"name": name})() for name in ("x", "y", "z")],
-                "header": type("Header", (), {"stamp": type("Stamp", (), {"sec": 12, "nanosec": 0})(), "frame_id": "map"})(),
-                "data": b"cached-pre-publish-map-cloud-payload",
-                "points": [(4.0, 0.0, 0.0)],
-            })()
+            pre_cloud = cloud_message(b"cached-pre-publish-map-cloud-payload", [(4.0, 0.0, 0.0)])
             observer._on_map(pre_cloud); observer._on_map_data(pre_data); observer._on_map_graph(pre_graph)
             observer.spin_until_done()
             self.assertTrue(observer.replay_complete_signal_observed)
@@ -1213,6 +1331,20 @@ $global:LASTEXITCODE = 0
             self.assertIsNone(observer.mapper_database_span)
             self.assertTrue(observer.final_map_span)
             self.assertEqual(observer.publish_map_attempts, 2)
+            self.assertEqual(observer.map_subscription_generation, 2)
+            self.assertIsNone(observer.active_map_subscription_generation)
+            self.assertEqual(observer.map_subscription_rebinds, 2)
+            self.assertEqual(observer.retired_map_subscription_generations, [1, 2])
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+            self.assertTrue(all(subscription.destroyed for subscription in observer.node.subscriptions))
+            self.assertEqual(observer.map_subscription_publisher_counts, {
+                "/slam/map_cloud": 1, "/mapGraph": 1, "/mapData": 1,
+            })
+            self.assertEqual(observer.ignored_stale_map_cloud_callbacks, 1)
+            self.assertEqual(observer.ignored_stale_map_graph_callbacks, 1)
+            self.assertEqual(observer.ignored_stale_map_data_callbacks, 1)
             self.assertEqual(observer.map_messages_before_publish, 2)
             self.assertEqual(observer.map_messages, 2)
             self.assertEqual(len(observer.publish_map_client.requests), 2)
@@ -1220,6 +1352,24 @@ $global:LASTEXITCODE = 0
             self.assertFalse(observer.publish_map_attempt_receipts[0]["accepted"])
             self.assertTrue(observer.publish_map_attempt_receipts[1]["fresh_map_data"])
             self.assertTrue(observer.publish_map_attempt_receipts[1]["accepted"])
+            self.assertEqual(observer.publish_map_attempt_receipts[0]["subscription_generation"], 1)
+            self.assertEqual(observer.publish_map_attempt_receipts[1]["subscription_generation"], 2)
+            self.assertTrue(observer.publish_map_attempt_receipts[0]["subscriptions_retired"])
+            self.assertTrue(observer.publish_map_attempt_receipts[1]["subscriptions_retired"])
+            self.assertEqual(observer.publish_map_attempt_receipts[1]["matched_publisher_counts"], {
+                "/slam/map_cloud": 1, "/mapGraph": 1, "/mapData": 1,
+            })
+            self.assertEqual(
+                observer.publish_map_attempt_receipts[1]["callback_executor_model"],
+                "single_threaded_explicit_rclpy_spin_once",
+            )
+            self.assertEqual(observer.publish_map_attempt_receipts[1]["subscription_qos"], {
+                "history": "keep_last", "depth": 1, "reliability": "reliable", "durability": "volatile",
+            })
+            self.assertEqual(
+                observer.publish_map_attempt_receipts[1]["ignored_stale_callbacks_after"],
+                {"map_cloud": 1, "map_graph": 1, "map_data": 1},
+            )
             self.assertEqual(
                 observer.publish_map_attempt_receipts[0]["map_data_messages_before"],
                 observer.publish_map_attempt_receipts[0]["map_data_messages_after"],
@@ -1281,6 +1431,10 @@ $global:LASTEXITCODE = 0
             self.assertEqual(result["final_cloud_origin"], "cached_pre_publish")
             self.assertEqual(result["publish_map_attempts"], 2)
             self.assertEqual(len(result["publish_map_attempt_receipts"]), 2)
+            self.assertEqual(result["map_subscription_rebinds"], 2)
+            self.assertEqual(result["ignored_stale_map_cloud_callbacks"], 1)
+            self.assertEqual(result["ignored_stale_map_graph_callbacks"], 1)
+            self.assertEqual(result["ignored_stale_map_data_callbacks"], 1)
             self.assertTrue(result["final_cloud_payload_fingerprint"])
             self.assertTrue(result["graph_pose_version"])
             self.assertEqual(result["final_map_graph_stamp_s"], result["final_cloud_stamp_s"])
@@ -1361,6 +1515,56 @@ $global:LASTEXITCODE = 0
             observer.map_data_stamp_s = 11.9
             with self.assertRaisesRegex(RuntimeError, "stamps do not identify one publication"):
                 observer._capture_final_optimized_graph()
+
+            observer.node.publisher_count = 2
+            with self.assertRaisesRegex(RuntimeError, "unexpected publisher count"):
+                observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+
+            observer.node.publisher_count = 1
+            timeout_generation, _ = observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+            timeout_receipt = {"subscriptions_retired": False}
+            request_count = len(observer.publish_map_client.requests)
+            with self.assertRaisesRegex(RuntimeError, "response timed out"):
+                observer._wait_for_publish_map_response(
+                    Future(), __import__("time").monotonic(), 1, 3,
+                    timeout_generation, timeout_receipt,
+                )
+            self.assertTrue(timeout_receipt["subscriptions_retired"])
+            self.assertEqual(len(observer.publish_map_client.requests), request_count)
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+
+            destroy_generation, _ = observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+            observer.node.destroy_failure_topics = {"/mapGraph"}
+            with self.assertRaisesRegex(RuntimeError, "failed to destroy"):
+                observer._retire_map_subscriptions(destroy_generation)
+            self.assertIsNone(observer.active_map_subscription_generation)
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNotNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+            observer.node.destroy_failure_topics = set()
+            observer._retire_map_subscriptions(destroy_generation)
+            self.assertIsNone(observer.map_graph_subscription)
+
+            observer.node.create_failure_topic = "/mapGraph"
+            with self.assertRaisesRegex(RuntimeError, "fixture create failure"):
+                observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+            self.assertIsNone(observer.active_map_subscription_generation)
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
+            observer.node.create_failure_topic = None
+
+            observer.node.publisher_count = 0
+            with self.assertRaisesRegex(RuntimeError, "did not match all three publishers"):
+                observer._rebind_map_subscriptions(__import__("time").monotonic())
+            self.assertIsNone(observer.map_cloud_subscription)
+            self.assertIsNone(observer.map_graph_subscription)
+            self.assertIsNone(observer.map_data_subscription)
 
             clock_observer = SlamObserver.__new__(SlamObserver)
             clock_observer.callback_generation = 0; clock_observer.replay_input_generation = 0
