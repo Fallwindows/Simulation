@@ -145,6 +145,7 @@ Local source inspection used the installed
 | Contact report | `C:\isaacsim\exts\isaacsim.sensors.experimental.physics\isaacsim\sensors\experimental\physics\impl\contact_sensor.py`, `get_sensor_reading()` lines 157–185 returns explicit validity, contact state, force, and time; `get_raw_data()` lines 187–200 returns body IDs, position, normal, impulse, time, and dt. `contact.py` lines 169–199 verifies a rigid-body ancestor and applies `PhysxContactReportAPI`. NVIDIA's generated Isaac Sim 6.1 `ContactRawData` API identifies x/y/z as world coordinates: `https://docs.isaacsim.omniverse.nvidia.com/6.1.0/py/api/structisaacsim_1_1sensors_1_1experimental_1_1physics_1_1_contact_raw_data.html`. |
 | Link masses and COM | Experimental articulation `get_link_masses()` lines 3830–3890 returns `(N,L)` and `get_link_coms()` lines 3892–3937 returns `(N,L,3/4)`. The underlying installed `omni.physics.tensors` `api.py` lines 2309–2328 explicitly says the principal-axis/COM pose is relative to and expressed in each rigid-body prim frame; the adapter composes it with the link world pose before mass weighting. |
 | Simulation time/step | `C:\isaacsim\exts\isaacsim.core.simulation_manager\isaacsim\core\simulation_manager\impl\simulation_manager.py`, `get_simulation_time()` lines 895–911 and `step()` lines 968–1021. The harness fixes and verifies physics dt before play. |
+| Application shutdown | `C:\isaacsim\exts\isaacsim.simulation_app\isaacsim\simulation_app\simulation_app.py`, SHA-256 `e5db812e752cc415f969c464dfe7248bb4524eaa240ba556386d3a8007f36ce5`: `DEFAULT_LAUNCHER_CONFIG` sets `fast_shutdown` true at lines 92–116, while `close()` at lines 886–1005 documents and uses an `os._exit()` fast path. The harness explicitly sets `fast_shutdown` false so `close()` returns to its caller. This source file is included in the installed-API identity vector. |
 | Support margin | Isaac supplies contact points, link state, mass, and COM rather than a ready biped support margin. The adapter's dependency-free convex-hull and signed half-space calculation is covered analytically on CPU; it fails on fewer than three non-collinear measured points. |
 
 The safety policy also checks measured root clearance above the highest
@@ -190,6 +191,13 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   every missing, changed, or unavailable identity input. It writes a
   `preflight_identity` error report with `runtime_invoked: false` and returns
   nonzero without calling the Isaac runtime boundary.
+- `RST-004-F04`: addressed after the first serialized integration attempt.
+  Isaac Sim 6.1 defaulted `SimulationApp.fast_shutdown` to true, so `close()`
+  terminated the interpreter with status 0 while unwinding a runtime failure;
+  the durable file remained `running` at `repeat_0_start` and no sample file was
+  created. The harness now selects graceful shutdown explicitly. After the
+  runner returns, `_execute_smoke` rewrites the returned terminal result; a
+  propagated runtime exception writes an error report and returns 2.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -224,7 +232,10 @@ setter call. Invalid, nonfinite, or nonpositive run arguments are also checked
 through the CPU-safe preflight boundary. Regression cases mutate or remove the
 acceptance spec, manifest hash, and installed-API hash and verify that preflight,
 repeat, and final checks fail closed after persisting the mismatch. Launcher
-sentinels confirm preflight failures do not call the runtime boundary.
+sentinels confirm preflight failures do not call the runtime boundary. Static
+inspection requires `fast_shutdown: false`; injected post-shutdown runners
+verify durable pass/fail results with exit codes 0/1 and durable runtime errors
+with exit code 2.
 
 ## Future one-job evidence harness
 
@@ -240,7 +251,10 @@ nonzero before the Isaac runtime boundary is called. The preserved initial
 vector is re-read and compared at both boundaries of every repeat and before
 final success. Checks, including failures, are written to the durable status
 report; a missing or changed byte prevents a passing result. A run uses a fixed
-physics rate, verifies metre stage units, performs one explicit
+physics rate, verifies metre stage units, and launches `SimulationApp` with
+`fast_shutdown: false`. Successful or exceptional shutdown therefore returns
+to the reporting boundary; success is durably rewritten after `close()` and a
+runtime exception becomes a durable nonzero error. The run performs one explicit
 deterministic reset per repeat, and uses only drive position targets after each
 reset. It writes every controller step to one JSONL measured sample stream per
 repeat plus an incrementally durable status report containing root motion,

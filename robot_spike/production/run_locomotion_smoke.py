@@ -55,6 +55,7 @@ EVIDENCE_FILES = (
 )
 ISAAC_API_SOURCE_FILES = (
     "VERSION",
+    "exts/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py",
     "exts/isaacsim.core.experimental.prims/isaacsim/core/experimental/prims/impl/articulation.py",
     "exts/isaacsim.core.experimental.prims/isaacsim/core/experimental/prims/impl/rigid_prim.py",
     "exts/isaacsim.sensors.experimental.physics/isaacsim/sensors/experimental/physics/impl/contact_sensor.py",
@@ -457,7 +458,16 @@ def run_isaac(
     # the explicit heavy-job action; importing the harness is CPU-safe.
     from isaacsim import SimulationApp
 
-    simulation_app = SimulationApp({"headless": bool(args.headless), "renderer": "RaytracedLighting"})
+    simulation_app = SimulationApp(
+        {
+            "headless": bool(args.headless),
+            "renderer": "RaytracedLighting",
+            # Isaac Sim 6.1 defaults this to True, and close() then terminates
+            # through os._exit().  Graceful shutdown must return so runtime
+            # exceptions and exit status reach _execute_smoke's durable report.
+            "fast_shutdown": False,
+        }
+    )
     timeline = None
     try:
         import omni.timeline
@@ -757,6 +767,12 @@ def _execute_smoke(
 
     try:
         result = runtime_runner(args, repo, initial_identity, output)
+        # The real runner writes incremental evidence before shutdown.  Write
+        # its returned terminal result again after graceful close has returned,
+        # proving that the caller regained control before reporting success.
+        status_path.write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
     except BaseException as exc:
         partial_result = None
         if status_path.is_file():

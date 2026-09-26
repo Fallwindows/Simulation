@@ -227,6 +227,23 @@ class IsaacFeedbackTests(unittest.TestCase):
             }
             & called_attributes
         )
+        simulation_app_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "SimulationApp"
+        ]
+        self.assertEqual(len(simulation_app_calls), 1)
+        launch_config = simulation_app_calls[0].args[0]
+        self.assertIsInstance(launch_config, ast.Dict)
+        config_values = {
+            key.value: value.value
+            for key, value in zip(launch_config.keys, launch_config.values)
+            if isinstance(key, ast.Constant) and isinstance(value, ast.Constant)
+        }
+        self.assertIn("fast_shutdown", config_values)
+        self.assertIs(config_values["fast_shutdown"], False)
 
     def test_smoke_arguments_fail_before_isaac_for_invalid_values(self):
         valid = {
@@ -442,6 +459,102 @@ class IsaacFeedbackTests(unittest.TestCase):
                 self.assertFalse(report["runtime_invoked"])
                 self.assertEqual(report["error"], error)
                 self.assertFalse(launched["value"])
+
+    def test_runtime_success_and_exception_are_reported_after_runner_returns(self):
+        class MemoryStatusFile:
+            def __init__(self):
+                self.text = ""
+
+            def write_text(self, text, **_kwargs):
+                self.text = text
+
+            def is_file(self):
+                return bool(self.text)
+
+            def read_text(self, **_kwargs):
+                return self.text
+
+        class MemoryOutput:
+            def __init__(self):
+                self.status = MemoryStatusFile()
+
+            def resolve(self):
+                return self
+
+            def exists(self):
+                return False
+
+            def mkdir(self, **_kwargs):
+                pass
+
+            def __truediv__(self, _name):
+                return self.status
+
+            def __str__(self):
+                return "memory://runtime-output"
+
+        initial_identity = {"source": {"candidate_sha": "candidate"}}
+
+        def identity_reader(*_args, **_kwargs):
+            return copy.deepcopy(initial_identity)
+
+        def make_args(output):
+            return Namespace(
+                output=output,
+                expected_candidate_sha="candidate",
+                expected_candidate_tree_sha="tree",
+                acceptance_spec=Path("owner.md"),
+            )
+
+        success_output = MemoryOutput()
+        returned = {"schema_version": 1, "status": "pass", "shutdown_returned": True}
+
+        def successful_runner(*_args, **_kwargs):
+            return copy.deepcopy(returned)
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            success_code = _execute_smoke(
+                make_args(success_output),
+                ROOT,
+                identity_reader=identity_reader,
+                runtime_runner=successful_runner,
+            )
+        self.assertEqual(success_code, 0)
+        self.assertEqual(json.loads(success_output.status.text), returned)
+
+        failed_output = MemoryOutput()
+
+        def failed_runner(*_args, **_kwargs):
+            return {"schema_version": 1, "status": "fail", "shutdown_returned": True}
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            failed_code = _execute_smoke(
+                make_args(failed_output),
+                ROOT,
+                identity_reader=identity_reader,
+                runtime_runner=failed_runner,
+            )
+        self.assertEqual(failed_code, 1)
+        self.assertEqual(json.loads(failed_output.status.text)["status"], "fail")
+
+        error_output = MemoryOutput()
+
+        def failing_runner(*_args, **_kwargs):
+            raise RuntimeError("shutdown returned runtime failure")
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            error_code = _execute_smoke(
+                make_args(error_output),
+                ROOT,
+                identity_reader=identity_reader,
+                runtime_runner=failing_runner,
+            )
+        self.assertEqual(error_code, 2)
+        failure = json.loads(error_output.status.text)
+        self.assertEqual(failure["status"], "error")
+        self.assertEqual(failure["phase"], "runtime")
+        self.assertTrue(failure["runtime_invoked"])
+        self.assertEqual(failure["error"], "shutdown returned runtime failure")
 
 
 if __name__ == "__main__":
