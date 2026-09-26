@@ -22,6 +22,7 @@ from robot_spike.production.isaac_feedback import (
 from robot_spike.production.locomotion import (
     FootFeedback,
     FootPose,
+    GaitConfig,
     LEG_JOINTS,
     LocomotionFeedback,
     PlanarPose,
@@ -37,6 +38,7 @@ from robot_spike.production.run_locomotion_smoke import (
     _persist_feedback_failure,
     _persist_pre_shutdown_runtime_error,
     _record_identity_boundary,
+    _startup_feedback_failures,
     _staged_double_support_startup,
     _terminate_process,
     _validate_arguments,
@@ -114,12 +116,22 @@ class FakeSensor:
 
 
 def startup_diagnostics(
-    *, root_pitch: float = 0.0, linear_speed: float = 0.0
+    *,
+    root_pitch: float = 0.0,
+    linear_speed: float = 0.0,
+    root_z: float = 0.635,
+    ankle_roll: float = 0.0,
 ) -> dict[str, object]:
+    half_roll = 0.5 * ankle_roll
     ankle = {
         "link_position_world_m": [0.0, 0.0, 0.034],
-        "link_orientation_world_wxyz": [1.0, 0.0, 0.0, 0.0],
-        "link_roll_pitch_yaw_rad": [0.0, 0.0, 0.0],
+        "link_orientation_world_wxyz": [
+            math.cos(half_roll),
+            math.sin(half_roll),
+            0.0,
+            0.0,
+        ],
+        "link_roll_pitch_yaw_rad": [ankle_roll, 0.0, 0.0],
         "sole_reference_world_m": [0.0385, 0.0, 0.0],
         "sphere_centers_world_m": [
             [center[0], center[1], 0.005]
@@ -134,7 +146,7 @@ def startup_diagnostics(
         "kinematics": {
             "sample_time_s": 1.0,
             "root": {
-                "position_world_m": [0.0, 0.0, 0.635],
+                "position_world_m": [0.0, 0.0, root_z],
                 "orientation_world_wxyz": [1.0, 0.0, 0.0, 0.0],
                 "roll_pitch_yaw_rad": [0.0, root_pitch, 0.0],
                 "linear_velocity_world_mps": [linear_speed, 0.0, 0.0],
@@ -207,6 +219,15 @@ class StartupFeedbackSource:
         self.read_count += 1
         if self.mode == "unavailable":
             raise FeedbackUnavailableError("measured support is not yet available")
+        if self.mode == "unavailable_sole_tilt":
+            self.adapter.current = startup_diagnostics(ankle_roll=math.radians(30.0))
+            raise FeedbackUnavailableError("measured support is not yet available")
+        if self.mode == "unavailable_clearance":
+            self.adapter.current = startup_diagnostics(root_z=0.20)
+            raise FeedbackUnavailableError("measured support is not yet available")
+        if self.mode == "nonbilateral_sole_tilt":
+            self.adapter.current = startup_diagnostics(ankle_roll=math.radians(30.0))
+            return startup_feedback(right_contact=False)
         if self.mode == "unsafe_root":
             self.adapter.current = startup_diagnostics(root_pitch=math.radians(13.0))
             return startup_feedback(root_pitch=math.radians(13.0))
@@ -946,6 +967,40 @@ class IsaacFeedbackTests(unittest.TestCase):
             {"joint": 2.0},
         )
 
+    def test_sole_normal_tilt_rejects_thirty_degrees_and_honors_boundary(self):
+        config = GaitConfig()
+        feedback = startup_feedback()
+        at_boundary, boundary_metrics = _startup_feedback_failures(
+            feedback,
+            startup_diagnostics(ankle_roll=config.maximum_root_tilt_rad),
+            None,
+            config,
+        )
+        over_boundary, _over_metrics = _startup_feedback_failures(
+            feedback,
+            startup_diagnostics(
+                ankle_roll=config.maximum_root_tilt_rad + math.radians(0.01)
+            ),
+            None,
+            config,
+        )
+        thirty_degrees, thirty_metrics = _startup_feedback_failures(
+            feedback,
+            startup_diagnostics(ankle_roll=math.radians(30.0)),
+            None,
+            config,
+        )
+
+        self.assertFalse(any("sole tilt" in failure for failure in at_boundary))
+        self.assertAlmostEqual(
+            boundary_metrics["left_sole_tilt_rad"], config.maximum_root_tilt_rad
+        )
+        self.assertTrue(any("sole tilt" in failure for failure in over_boundary))
+        self.assertTrue(any("sole tilt" in failure for failure in thirty_degrees))
+        self.assertAlmostEqual(
+            thirty_metrics["left_sole_tilt_rad"], math.radians(30.0)
+        )
+
     def test_staged_startup_aborts_on_contact_loss_with_diagnostics(self):
         controller = StartupController()
         source = StartupFeedbackSource(controller)
@@ -994,6 +1049,36 @@ class IsaacFeedbackTests(unittest.TestCase):
             all("kinematics" in event["diagnostics"] for event in progress[-2]["events"])
         )
         self.assertEqual(controller.commands, [])
+
+    def test_acquisition_without_bilateral_support_gates_sole_tilt_and_clearance(self):
+        for mode, expected in (
+            ("unavailable_sole_tilt", "sole tilt"),
+            ("unavailable_clearance", "root clearance"),
+            ("nonbilateral_sole_tilt", "sole tilt"),
+        ):
+            with self.subTest(mode=mode):
+                controller = StartupController()
+                source = StartupFeedbackSource(controller)
+                source.mode = mode
+                physics_steps = []
+                with self.assertRaisesRegex(StartupValidationError, expected) as raised:
+                    _staged_double_support_startup(
+                        feedback_source=source,  # type: ignore[arg-type]
+                        joint_controller=controller,  # type: ignore[arg-type]
+                        step_physics=lambda: physics_steps.append(1),
+                        crouch_targets={name: 0.18 for name in LEG_JOINTS},
+                        physics_dt=0.1,
+                        maximum_duration_s=2.0,
+                    )
+
+                self.assertEqual(physics_steps, [1])
+                self.assertEqual(controller.commands, [])
+                event = raised.exception.report["events"][-1]
+                self.assertEqual(event["status"], "rejected")
+                self.assertTrue(
+                    any(expected in failure for failure in event["gate_failures"])
+                )
+                self.assertIn("kinematics", event["diagnostics"])
 
     def test_staged_startup_aborts_on_unstable_root_before_any_target(self):
         controller = StartupController()

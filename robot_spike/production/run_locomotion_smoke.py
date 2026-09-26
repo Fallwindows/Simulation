@@ -351,6 +351,67 @@ def _kinematic_safety_failures(
     }
 
 
+def _sole_tilt_rad(orientation_world_wxyz: Any) -> float:
+    """Return the angle between the authored sole normal and world up.
+
+    The four ankle collision-sphere centers share one local Z coordinate, so
+    ankle-link +Z is the authored sole-plane normal.  Using its world direction
+    is yaw invariant and rejects wrapped or upside-down Euler representations.
+    """
+
+    if not isinstance(orientation_world_wxyz, (list, tuple)) or len(
+        orientation_world_wxyz
+    ) != 4:
+        raise ValueError("ankle orientation must contain four wxyz values")
+    quaternion = tuple(float(value) for value in orientation_world_wxyz)
+    if not all(math.isfinite(value) for value in quaternion):
+        raise ValueError("ankle orientation contains a nonfinite value")
+    norm = math.sqrt(sum(value * value for value in quaternion))
+    if norm <= 1.0e-12:
+        raise ValueError("ankle orientation has zero magnitude")
+    _w, x, y, _z = (value / norm for value in quaternion)
+    world_normal_z = max(-1.0, min(1.0, 1.0 - 2.0 * (x * x + y * y)))
+    return math.acos(world_normal_z)
+
+
+def _diagnostic_startup_failures(
+    diagnostics: dict[str, Any], config: GaitConfig
+) -> tuple[list[str], dict[str, float]]:
+    """Gate every measured startup pose, including support-read failures."""
+
+    failures, metrics = _kinematic_safety_failures(diagnostics, config)
+    try:
+        kinematics = diagnostics["kinematics"]
+        root_z = float(kinematics["root"]["position_world_m"][2])
+        ankles = kinematics["ankles"]
+        sole_z = {
+            side: float(ankles[side]["sole_reference_world_m"][2])
+            for side in ("left", "right")
+        }
+        if not all(math.isfinite(value) for value in (root_z, *sole_z.values())):
+            raise ValueError("root/sole clearance inputs contain a nonfinite value")
+        root_clearance = root_z - max(sole_z.values())
+        metrics["root_clearance_m"] = root_clearance
+        if not (
+            config.minimum_root_clearance_m
+            <= root_clearance
+            <= config.maximum_root_clearance_m
+        ):
+            failures.append("root clearance left the configured envelope")
+        for side in ("left", "right"):
+            sole_tilt = _sole_tilt_rad(
+                ankles[side]["link_orientation_world_wxyz"]
+            )
+            metrics[f"{side}_sole_tilt_rad"] = sole_tilt
+            if sole_tilt > config.maximum_root_tilt_rad:
+                failures.append(
+                    f"{side} sole tilt exceeded configured tilt envelope"
+                )
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        failures.append(f"measured root/ankle geometry unavailable: {exc}")
+    return failures, metrics
+
+
 def _startup_feedback_failures(
     feedback: LocomotionFeedback,
     diagnostics: dict[str, Any],
@@ -359,49 +420,12 @@ def _startup_feedback_failures(
 ) -> tuple[list[str], dict[str, Any]]:
     """Check true double support, stability, sole flatness, and target tracking."""
 
-    failures, metrics = _kinematic_safety_failures(diagnostics, config)
+    failures, metrics = _diagnostic_startup_failures(diagnostics, config)
     if not (feedback.left_foot.in_contact and feedback.right_foot.in_contact):
         failures.append("both measured feet are not in contact")
-    contacting_heights = [
-        foot.pose.position_m[2]
-        for foot in (feedback.left_foot, feedback.right_foot)
-        if foot.in_contact
-    ]
-    if contacting_heights:
-        root_clearance = feedback.root_height_m - max(contacting_heights)
-        metrics["root_clearance_m"] = root_clearance
-        if not (
-            config.minimum_root_clearance_m
-            <= root_clearance
-            <= config.maximum_root_clearance_m
-        ):
-            failures.append("root clearance left the configured envelope")
-    else:
-        failures.append("root clearance is unavailable without measured contact")
     metrics["support_margin_m"] = feedback.support_margin_m
     if feedback.support_margin_m < config.minimum_support_margin_m:
         failures.append("COM projection left the configured support margin")
-
-    sole_span = max(
-        math.dist(first, second)
-        for first in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m
-        for second in ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m
-    )
-    maximum_height_spread = sole_span * math.sin(config.maximum_root_tilt_rad)
-    metrics["maximum_sole_sphere_height_spread_m"] = maximum_height_spread
-    try:
-        ankle_diagnostics = diagnostics["kinematics"]["ankles"]
-        for side in ("left", "right"):
-            points = ankle_diagnostics[side]["sphere_world_lowest_points_m"]
-            heights = [float(point[2]) for point in points]
-            if len(heights) != len(ASIMOV_SOLE_GEOMETRY.collision_sphere_centers_m):
-                raise ValueError(f"{side} sole sphere count is invalid")
-            spread = max(heights) - min(heights)
-            metrics[f"{side}_sole_sphere_height_spread_m"] = spread
-            if not math.isfinite(spread) or spread > maximum_height_spread:
-                failures.append(f"{side} sole flatness exceeded configured tilt envelope")
-    except (KeyError, TypeError, ValueError) as exc:
-        failures.append(f"measured ankle/sole kinematics unavailable: {exc}")
 
     if targets is not None:
         try:
@@ -468,7 +492,8 @@ def _staged_double_support_startup(
             "minimum_root_clearance_m": config.minimum_root_clearance_m,
             "maximum_root_clearance_m": config.maximum_root_clearance_m,
             "minimum_support_margin_m": config.minimum_support_margin_m,
-            "sole_flatness_source": "sole span times sine(maximum_root_tilt_rad)",
+            "maximum_sole_tilt_rad": config.maximum_root_tilt_rad,
+            "sole_flatness_source": "measured ankle quaternion rotates authored sole +Z normal",
         },
         "events": [],
     }
@@ -491,36 +516,50 @@ def _staged_double_support_startup(
             feedback = feedback_source.read_feedback()
         except FeedbackUnavailableError as exc:
             diagnostics = feedback_source.adapter.diagnostics()
-            root_failures, root_metrics = _kinematic_safety_failures(diagnostics, config)
+            gate_failures, gate_metrics = _diagnostic_startup_failures(
+                diagnostics, config
+            )
             report["events"].append(
                 {
                     "stage": "contact_acquisition",
                     "step": step_index,
-                    "status": "waiting_for_measured_double_support",
+                    "status": (
+                        "rejected"
+                        if gate_failures
+                        else "waiting_for_measured_double_support"
+                    ),
                     "feedback_error": str(exc),
-                    "root_metrics": root_metrics,
+                    "gate_metrics": gate_metrics,
+                    "gate_failures": gate_failures,
                     "diagnostics": diagnostics,
                 }
             )
             publish()
-            if root_failures:
-                abort("contact_acquisition", "; ".join(root_failures))
+            if gate_failures:
+                abort("contact_acquisition", "; ".join(gate_failures))
             continue
         diagnostics = feedback_source.adapter.diagnostics()
         if not (feedback.left_foot.in_contact and feedback.right_foot.in_contact):
-            root_failures, root_metrics = _kinematic_safety_failures(diagnostics, config)
+            gate_failures, gate_metrics = _diagnostic_startup_failures(
+                diagnostics, config
+            )
             report["events"].append(
                 {
                     "stage": "contact_acquisition",
                     "step": step_index,
-                    "status": "waiting_for_measured_double_support",
-                    "root_metrics": root_metrics,
+                    "status": (
+                        "rejected"
+                        if gate_failures
+                        else "waiting_for_measured_double_support"
+                    ),
+                    "gate_metrics": gate_metrics,
+                    "gate_failures": gate_failures,
                     "diagnostics": diagnostics,
                 }
             )
             publish()
-            if root_failures:
-                abort("contact_acquisition", "; ".join(root_failures))
+            if gate_failures:
+                abort("contact_acquisition", "; ".join(gate_failures))
             continue
         failures, metrics = _startup_feedback_failures(
             feedback, diagnostics, None, config

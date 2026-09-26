@@ -258,6 +258,22 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   crouch with drive targets, then hold a verified dwell. Every increment checks
   contact/support, root tilt and speed, clearance, target tracking, and sole
   flatness. Failure aborts before the gait controller.
+- `RST-004-R2-F01`: fixed after exact review of `eba801d`. The first staged
+  candidate approximated sole tilt with the four-sphere footprint's diagonal
+  height spread; a narrow-foot 30 degree roll could pass that proxy. The gate
+  now rotates the authored sole-plane normal (ankle-link local +Z, established
+  by all four sphere centers sharing one local Z) through the normalized
+  measured ankle quaternion and measures its angle to world +Z. This is yaw and
+  Euler-wrap invariant, rejects an upside-down sole, accepts at most the exact
+  existing 12 degree limit, and rejects the reviewer's reproduced 30 degree
+  pure roll.
+- `RST-004-R2-F02`: fixed after the same review. Every contact-acquisition read,
+  including unavailable support and nonbilateral feedback, now evaluates root
+  tilt/speed, geometric root-to-sole clearance, and both measured sole-normal
+  angles before another physics step. It does not claim either sole is support.
+  A failed gate is stored with the causal kinematics and aborts immediately.
+  CPU regressions cover unavailable support with 30 degree ankle roll and a
+  0.20 m root height.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -333,8 +349,9 @@ double-support duration and verifies another 0.30 s dwell. Each increment uses
 the existing control gates: 12 degree root/sole tilt envelope, 0.35 m/s root
 linear speed, 1.0 rad/s root angular component, 0.30 rad joint target error,
 `[-0.015 m]` minimum support margin, and `[0.45, 0.80] m` root clearance. Sole
-flatness maps the same 12 degree gate to the authored sphere footprint's maximum
-world-Z spread; it does not add or loosen a physical threshold. Any loss of
+flatness applies the same 12 degree gate directly to the measured angle between
+the authored sole normal and world up; it does not add or loosen a physical
+threshold. Any loss of
 contact/support, instability, sole tilt, or tracking aborts before constructing
 the gait controller. It writes every controller step to one JSONL measured sample stream per
 repeat plus an incrementally durable status report containing root motion,
