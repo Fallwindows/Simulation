@@ -380,6 +380,25 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   sample with nonzero roll, lateral velocity, and roll rate saturates lateral
   correction at 0.045 rad; its issued roll targets remain within the unchanged
   URDF and 0.30 rad measured-target-error gates.
+- `RST-004-F14`: exact combined integration
+  `e95721e641ea6a82ee53b4e49f118fe0574a0df4` reached the revised verified
+  dwell but never produced one settled confirmation. The fixed ramp had begun
+  at about 0.0425 m/s root speed and kept advancing after angular speed exceeded
+  the existing 0.10 rad/s handoff tolerance. Across ramp and dwell, measured
+  pitch and backward motion grew monotonically; dwell step 40 rejected margin
+  -0.015189933 m at 0.10408 m/s linear and 0.2793 rad/s angular speed. The
+  successor requires the existing 0.035 m/s and 0.10 rad/s handoff speeds during
+  pre-ramp stabilization and before advancing each of the same 36 target-ramp
+  interpolation increments. An unsettled sample repeats the current fraction
+  while retaining the full measured restoring offset instead of scaling that
+  offset down with crouch progress. The target remains inside the convex envelope
+  of measured start, nominal crouch, and validated balanced target, plus the
+  existing 0.30 rad measured-target-error gate. The original two-second startup
+  bound reserves the complete final dwell; hard-gate failure or ramp-budget
+  exhaustion still aborts before dwell and gait. The receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-e95721e\locomotion_smoke_status.json`;
+  the Kit log is
+  `C:\isaacsim\kit\logs\Kit\Isaac-Sim Python\6.1\kit_20260926_073705.log`.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -458,11 +477,16 @@ the existing 1.2 s timeout as a shared pre-ramp stabilization window. The reset
 targets stay active without another command. Contact or support loss resets the
 consecutive counter, and the ramp remains locked until 0.30 s of fresh positive
 bilateral contact, advancing timestamps, adequate support margin, target
-  tracking, and root/sole safety has accumulated. It then interpolates from the
-measured stable joint state toward the existing balance-corrected symmetric
-crouch over the existing 0.30 s double-support duration and verifies another
-0.30 s consecutive settled dwell while refreshing that target from each measured sample.
-The dwell is bounded by the original startup duration. Each increment uses
+  tracking, root/sole safety, and the existing 0.035 m/s linear and 0.10 rad/s
+  angular handoff speeds has accumulated. It then interpolates from the measured
+stable joint state toward the existing balance-corrected symmetric crouch in 36
+nominal progress increments at 120 Hz. A progress increment advances only after
+the same handoff speed gates pass; while moving, the harness repeats that small
+fraction and refreshes the full measured restoring offset. That offset and the
+nominal fraction remain within the convex envelope of validated start/nominal/
+balanced targets and the existing measured-target-error limit. The original
+startup duration reserves all steps for the required 0.30 s consecutive final
+dwell. Each increment uses
 the existing control gates: 12 degree root/sole tilt envelope, 0.35 m/s root
 linear speed, 1.0 rad/s root angular component, 0.30 rad joint target error,
 `[-0.015 m]` minimum support margin, and `[0.45, 0.80] m` root clearance. Sole
