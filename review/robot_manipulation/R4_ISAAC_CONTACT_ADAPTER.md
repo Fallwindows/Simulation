@@ -244,6 +244,43 @@ larger violation, strict command rejection, durable diagnostic failure, and
 native exit 1. No Isaac, PhysX, or GPU rerun occurred before fresh exact
 review.
 
+## Pickup-board collision and collision-clear pregrasp
+
+Exact reviewed integration `6735df61347cda74f5eb811088a6361444fc8b48`
+(tree `e3e83de6d951d699efed5821ebe3d26066fee187`) exited 1 after 152
+measured approach samples. Its durable receipt is
+`R4-grasp-6735df6/grasp_smoke_status.json`; the Kit log is
+`kit_20260926_084359.log`. At sample 122 the elbow reached
+`-0.1072244793` rad toward a `-0.1385341110` rad target. From sample 123 it
+reversed while every later target continued farther negative, then crossed its
+physical upper bound at sample 151 and was correctly rejected by the unchanged
+`1e-5` rad measured-noise tolerance. The wrist reversed on the same sample and
+shoulder pitch/roll tracking stalled at the same time.
+
+The measured palm at the reversal was world
+`(-4.2888894, 0.7662259, 0.6710637)` m. The collision-enabled pickup board
+occupies world Y `[0.80, 1.50]` m and Z `[0.70, 0.78]` m. The synchronized
+start-to-goal interpolation was therefore driving the open hand/forearm into
+the board's front/lower edge before it could rise above the support. The raw
+product sensor continued to report only product/support contacts, as expected;
+it is not a robot/fixture collision sensor.
+
+The bounded correction supplies three explicit right-arm via configurations to
+the existing R3 approach port. It first folds the elbow to `-1.6` rad while
+raising shoulder pitch to `0.25` rad in front of the board, raises the folded
+arm to `0.50` rad shoulder pitch, then raises/aligns the arm at the folded
+elbow before extending to the exact solved R3 goal. Every segment is
+interpolated with the existing per-joint URDF velocity bound and every via and
+goal is validated against the unchanged URDF joint limits. At 120 Hz the full
+source path remains within the existing three-second deadline. CPU forward
+kinematics verifies that once the palm center crosses the board's front plane,
+it stays at least 0.12 m above the board surface. Runtime evidence records the
+via maps. The measured pose confirmation, physical contact gates, dynamic
+product, strict measured limit rejection, and command-only control path are
+unchanged. No Isaac, PhysX, SimulationApp, or GPU run occurred for this source
+correction; physical clearance and final grasp remain runtime gates after fresh
+exact review.
+
 ## Source-only validation limits
 
 CPU fakes cover path resolution, impulse conversion, orientation conversion,

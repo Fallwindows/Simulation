@@ -410,6 +410,7 @@ class IsaacArmApproachPort:
         timestamp_source: Callable[[], float],
         *,
         command_period_s: float,
+        joint_space_vias: Sequence[Mapping[str, float]] = (),
         position_tolerance_m: float = 0.015,
         orientation_tolerance_rad: float = 0.08,
     ) -> None:
@@ -433,12 +434,46 @@ class IsaacArmApproachPort:
         self._dof_names = tuple(str(name) for name in articulation.dof_names)
         if not set(ARM_DOF_NAMES).issubset(self._dof_names):
             raise ValueError("articulation is missing a right-arm DOF")
+        self._joint_space_vias = tuple(
+            self._validated_arm_configuration(via) for via in joint_space_vias
+        )
         self._target: ToolPose | None = None
         self._goal: dict[str, float] = {}
         self._waypoints: list[dict[str, float]] = []
         self._deadline_s: float | None = None
         self._measured_limit_noise_projection_rad: dict[str, float] = {}
         self.last_error: str | None = None
+
+    def _validated_arm_configuration(
+        self, positions: Mapping[str, float]
+    ) -> dict[str, float]:
+        if set(positions) != set(ARM_DOF_NAMES):
+            raise ValueError("approach via must specify every and only right-arm DOF")
+        checked = self.kinematics.spec.validate_targets(positions)
+        return {name: checked[name] for name in ARM_DOF_NAMES}
+
+    def _bounded_segment(
+        self, start: Mapping[str, float], goal: Mapping[str, float]
+    ) -> list[dict[str, float]]:
+        steps = max(
+            1,
+            max(
+                math.ceil(
+                    abs(goal[name] - start[name])
+                    / self.planner.maximum_step_for_joint(name)
+                )
+                for name in ARM_DOF_NAMES
+            ),
+        )
+        segment = [
+            {
+                name: start[name] + (goal[name] - start[name]) * step / steps
+                for name in ARM_DOF_NAMES
+            }
+            for step in range(1, steps + 1)
+        ]
+        segment[-1] = {name: float(goal[name]) for name in ARM_DOF_NAMES}
+        return segment
 
     def _measured_arm(self) -> dict[str, float]:
         row = _single_row(
@@ -480,24 +515,16 @@ class IsaacArmApproachPort:
             return False
         try:
             start = self._measured_arm_for_fk()
-            self._goal = self.kinematics.solve(target, start).as_mapping()
-            steps = max(
-                1,
-                max(
-                    math.ceil(
-                        abs(self._goal[name] - start[name])
-                        / self.planner.maximum_step_for_joint(name)
-                    )
-                    for name in ARM_DOF_NAMES
-                ),
+            self._goal = self._validated_arm_configuration(
+                self.kinematics.solve(target, start).as_mapping()
             )
-            self._waypoints = [
-                {
-                    name: start[name] + (self._goal[name] - start[name]) * step / steps
-                    for name in ARM_DOF_NAMES
-                }
-                for step in range(1, steps + 1)
-            ]
+            self._waypoints = []
+            segment_start = start
+            for segment_goal in (*self._joint_space_vias, self._goal):
+                self._waypoints.extend(
+                    self._bounded_segment(segment_start, segment_goal)
+                )
+                segment_start = segment_goal
         except Exception as exc:
             self.last_error = str(exc)
             self._waypoints = []

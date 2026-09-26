@@ -54,6 +54,16 @@ PREGRASP_ARM_JOINTS_RAD = dict(
     # pitch joint. The nearly straight elbow stays inside the same URDF limits.
     zip(ARM_DOF_NAMES, (1.500, 0.200, 0.000, -0.200, 0.000, 0.000))
 )
+# The direct synchronized joint interpolation reached the pickup board's
+# front/lower edge before lifting the hand over its 0.78 m surface. Fold the
+# elbow while still in front of the board, then raise the folded arm before
+# extending to the exact R3 solution. These remain ordinary bounded drive
+# targets; measured pose/contact gates retain authority.
+PREGRASP_CLEARANCE_VIAS_RAD = (
+    dict(zip(ARM_DOF_NAMES, (0.250, 0.000, 0.000, -1.600, 0.000, 0.000))),
+    dict(zip(ARM_DOF_NAMES, (0.500, 0.000, 0.000, -1.600, 0.000, 0.000))),
+    dict(zip(ARM_DOF_NAMES, (1.500, 0.200, 0.000, -1.600, 0.000, 0.000))),
+)
 PREGRASP_MAXIMUM_DURATION_S = 3.0
 PREGRASP_CONFIRMATION_SAMPLES = 3
 
@@ -218,6 +228,9 @@ class PickupResetPlan:
             "predicted_palm_position_world_m": self.predicted_palm_position_world_m,
             "product_position_world_m": self.product_position_world_m,
             "arm_seed_joint_positions_rad": dict(PREGRASP_ARM_JOINTS_RAD),
+            "arm_clearance_vias_rad": [
+                dict(via) for via in PREGRASP_CLEARANCE_VIAS_RAD
+            ],
             "load_distribution": {
                 "primary_support_joint": "right_shoulder_pitch_joint",
                 "primary_support_effort_limit_nm": 30.0,
@@ -703,6 +716,7 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
             kinematics,
             SimulationManager.get_simulation_time,
             command_period_s=physics_dt,
+            joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
         )
         lift = IsaacArmLiftPort(
             joint_controller, articulation, kinematics,
