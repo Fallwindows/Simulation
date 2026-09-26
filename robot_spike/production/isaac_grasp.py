@@ -476,13 +476,21 @@ class IsaacArmApproachPort:
         self._deadline_s = now + maximum_duration_s
         return True
 
-    def advance(self) -> bool:
+    def _observation_within_deadline(self) -> bool:
         if self._target is None or self._deadline_s is None:
             return False
-        now = float(self.timestamp_source())
+        try:
+            now = float(self.timestamp_source())
+        except (TypeError, ValueError, OverflowError):
+            now = math.nan
         if not math.isfinite(now) or now > self._deadline_s:
             self.last_error = "arm approach deadline expired"
             self._waypoints.clear()
+            return False
+        return True
+
+    def advance(self) -> bool:
+        if not self._observation_within_deadline():
             return False
         if not self._waypoints:
             return True
@@ -514,6 +522,11 @@ class IsaacArmApproachPort:
         return position_error, orientation_error
 
     def target_reached(self) -> bool:
+        # This gate is called after the physics step and measured observation.
+        # Rechecking the same latched deadline here prevents a late sample from
+        # being counted merely because advance() ran before the step.
+        if not self._observation_within_deadline():
+            return False
         position_error, orientation_error = self.measured_error()
         return (
             not self._waypoints

@@ -370,6 +370,8 @@ class GraspSmokeRunner:
                 try:
                     self.approach_observer()
                     reached = self.arm_approach.target_reached()
+                    if not reached and self.arm_approach.last_error is not None:
+                        error = self.arm_approach.last_error
                 except Exception as exc:
                     error = f"arm approach measurement failed: {exc}"
                     reached = False

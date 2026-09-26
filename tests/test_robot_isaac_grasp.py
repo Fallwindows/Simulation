@@ -405,6 +405,69 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertTrue(port.target_reached())
         self.assertTrue(port.diagnostics()["target_reached"])
 
+    def test_runner_accepts_exact_deadline_confirmation_and_rejects_late_tick(self):
+        target = ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0))
+
+        def run_with_timestamps(timestamps):
+            clock = [0.0]
+            articulation = FakeArticulation(self.spec)
+            command = RecordingController()
+            approach = IsaacArmApproachPort(
+                command,
+                articulation,
+                FakeKinematics(),
+                lambda: clock[0],
+                command_period_s=0.01,
+            )
+            approach.planner = FakePlanner()
+
+            class ScheduledPhysics:
+                def __init__(self):
+                    self.index = 0
+
+                def step(self):
+                    clock[0] = timestamps[self.index]
+                    self.index += 1
+
+            class StartRecordingController:
+                phase = GraspPhase.IDLE
+                failure = None
+
+                def __init__(self):
+                    self.start_calls = 0
+
+                @property
+                def status(self):
+                    return self
+
+                def start(self):
+                    self.start_calls += 1
+
+            controller = StartRecordingController()
+            with tempfile.TemporaryDirectory() as temporary:
+                result = GraspSmokeRunner(
+                    ScheduledPhysics(),
+                    controller,
+                    approach,
+                    object(),
+                    lambda: None,
+                    target,
+                    lambda: {},
+                    maximum_physics_steps=3,
+                    status_path=Path(temporary) / "status.json",
+                    preflight={"test": True},
+                ).run()
+            return controller, result
+
+        on_deadline, boundary_result = run_with_timestamps((1.0, 2.0, 3.0))
+        self.assertEqual(on_deadline.start_calls, 1)
+        self.assertEqual(boundary_result.samples[-1]["approach_confirmations"], 3)
+
+        late, late_result = run_with_timestamps((1.0, 2.0, 3.000001))
+        self.assertEqual(late.start_calls, 0)
+        self.assertEqual(late_result.status, "fail")
+        self.assertEqual(late_result.failure, "arm approach deadline expired")
+        self.assertEqual(late_result.samples[-1]["approach_confirmations"], 0)
     def test_pickup_reset_plan_stages_base_and_preserves_dynamic_product(self):
         from robot_spike.production.arm_reach import RightArmKinematics
 
