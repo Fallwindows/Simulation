@@ -6,7 +6,10 @@ from pathlib import Path
 
 from simulator.config.loader import load_scenario
 from simulator.environment.aisle_builder import build_aisle_layout
-from simulator.environment.isaac_restocking_builder import IsaacRestockingBuilder
+from simulator.environment.isaac_restocking_builder import (
+    IsaacRestockingBuilder,
+    _author_initial_product_pose,
+)
 from simulator.environment.restocking_layout import (
     ASSUMED_PRODUCT_DYNAMIC_FRICTION,
     ASSUMED_PRODUCT_MASS_KG,
@@ -18,6 +21,59 @@ from simulator.environment.restocking_layout import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class _Vec3d(tuple):
+    def __new__(cls, *values):
+        return super().__new__(cls, values)
+
+
+class _Vec3f(tuple):
+    def __new__(cls, *values):
+        return super().__new__(cls, values)
+
+
+class _Quatf:
+    def __init__(self, real, imaginary):
+        if not isinstance(imaginary, _Vec3f):
+            raise TypeError("Quatf requires Vec3f")
+        self.real = real
+        self.imaginary = imaginary
+
+
+class _FakeGf:
+    Vec3d = _Vec3d
+    Vec3f = _Vec3f
+    Quatf = _Quatf
+
+
+class _TypedOp:
+    def __init__(self, expected_type):
+        self.expected_type = expected_type
+        self.value = None
+
+    def Set(self, value):
+        if not isinstance(value, self.expected_type):
+            raise TypeError(
+                f"expected {self.expected_type.__name__}, got {type(value).__name__}"
+            )
+        self.value = value
+
+
+class _FakeXformable:
+    def __init__(self):
+        self.cleared = False
+        self.translate = _TypedOp(_Vec3d)
+        self.orient = _TypedOp(_Quatf)
+
+    def ClearXformOpOrder(self):
+        self.cleared = True
+
+    def AddTranslateOp(self):
+        return self.translate
+
+    def AddOrientOp(self):
+        return self.orient
 
 
 class RestockingPhysicsSpecTests(unittest.TestCase):
@@ -85,6 +141,20 @@ class RestockingPhysicsSpecTests(unittest.TestCase):
         self.assertNotEqual(
             self.layout.product.source_reset_pose,
             self.layout.product.destination_support_pose,
+        )
+
+    def test_product_pose_matches_default_usd_translate_and_orient_types(self):
+        xformable = _FakeXformable()
+        pose = self.layout.product.source_reset_pose
+
+        _author_initial_product_pose(xformable, _FakeGf, pose)
+
+        self.assertTrue(xformable.cleared)
+        self.assertEqual(tuple(xformable.translate.value), pose.position_m)
+        self.assertIsInstance(xformable.orient.value, _Quatf)
+        self.assertEqual(xformable.orient.value.real, pose.orientation_xyzw[3])
+        self.assertEqual(
+            tuple(xformable.orient.value.imaginary), pose.orientation_xyzw[:3]
         )
 
 
