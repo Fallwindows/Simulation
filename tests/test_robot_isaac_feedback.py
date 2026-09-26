@@ -22,6 +22,7 @@ from robot_spike.production.isaac_feedback import (
     support_polygon_center_and_margin,
 )
 from robot_spike.production.locomotion import (
+    BalanceCorrection,
     BalanceFeedbackController,
     ConservativeGaitTargetGenerator,
     FootFeedback,
@@ -43,6 +44,7 @@ from robot_spike.production.run_locomotion_smoke import (
     _interpolate_joint_targets,
     _persist_feedback_failure,
     _persist_pre_shutdown_runtime_error,
+    _pre_ramp_recovery_correction,
     _record_identity_boundary,
     _startup_step_budget,
     _startup_feedback_failures,
@@ -329,6 +331,30 @@ class StartupFeedbackSource:
                     timestamp=1.0 + self.read_count / 120.0,
                 )
             if not self.controller.commands:
+                return startup_feedback(
+                    timestamp=1.0 + self.read_count / 120.0,
+                    root_pitch=-0.020,
+                    root_linear=(-0.040, 0.0, 0.0),
+                    root_angular=(0.0, -0.110, 0.0),
+                )
+            first = self.controller.commands[0]
+            left_chain = sum(
+                first[name]
+                for name in (
+                    "left_hip_pitch_joint",
+                    "left_knee_joint",
+                    "left_ankle_pitch_joint",
+                )
+            )
+            right_chain = sum(
+                first[name]
+                for name in (
+                    "right_hip_pitch_joint",
+                    "right_knee_joint",
+                    "right_ankle_pitch_joint",
+                )
+            )
+            if left_chain > -0.08 or right_chain < 0.08:
                 return startup_feedback(
                     timestamp=1.0 + self.read_count / 120.0,
                     root_pitch=-0.020,
@@ -1363,7 +1389,10 @@ class IsaacFeedbackTests(unittest.TestCase):
         )
 
         def balanced_hold(feedback: LocomotionFeedback) -> dict[str, float]:
-            correction = balance.evaluate(feedback)
+            correction = _pre_ramp_recovery_correction(
+                feedback,
+                balance.evaluate(feedback),
+            )
             self.assertIsNone(correction.unsafe_reason)
             return hold_generator.targets(
                 feedback,
@@ -1396,6 +1425,18 @@ class IsaacFeedbackTests(unittest.TestCase):
         self.assertTrue(pre_ramp[34]["balance_recovery_active"])
         first_targets = pre_ramp[34]["commanded_balance_hold_targets_rad"]
         self.assertIsNotNone(first_targets)
+        self.assertAlmostEqual(
+            sum(
+                first_targets[name]
+                for name in (
+                    "left_hip_pitch_joint",
+                    "left_knee_joint",
+                    "left_ankle_pitch_joint",
+                )
+            ),
+            -GaitConfig().maximum_balance_correction_rad
+            + GaitConfig().joint_limit_margin_rad,
+        )
         self.assertLessEqual(
             max(abs(value) for value in first_targets.values()),
             GaitConfig().maximum_target_error_rad,
@@ -1413,6 +1454,50 @@ class IsaacFeedbackTests(unittest.TestCase):
                 event["commanded_balance_hold_targets_rad"] is None
                 for event in pre_ramp[:34]
             )
+        )
+
+    def test_pre_ramp_recovery_uses_existing_sagittal_cap_only_when_unsettled(self):
+        config = GaitConfig()
+        evaluated = BalanceCorrection(
+            sagittal_rad=0.024646587896420272,
+            lateral_rad=0.0044073721683587355,
+        )
+        unsettled = startup_feedback(
+            root_pitch=-0.01972,
+            root_linear=(-0.03526, 0.0, 0.0),
+            root_angular=(0.0, -0.06054, 0.0),
+        )
+        applied = _pre_ramp_recovery_correction(unsettled, evaluated, config)
+        self.assertEqual(
+            applied.sagittal_rad, config.maximum_balance_correction_rad
+        )
+        self.assertEqual(applied.lateral_rad, evaluated.lateral_rad)
+        reverse = _pre_ramp_recovery_correction(
+            unsettled,
+            BalanceCorrection(sagittal_rad=-0.024, lateral_rad=-0.004),
+            config,
+        )
+        self.assertEqual(
+            reverse.sagittal_rad, -config.maximum_balance_correction_rad
+        )
+        self.assertEqual(reverse.lateral_rad, -0.004)
+
+        settled = startup_feedback(
+            root_linear=(-0.035, 0.0, 0.0),
+            root_angular=(0.0, -0.10, 0.0),
+        )
+        self.assertEqual(
+            _pre_ramp_recovery_correction(settled, evaluated, config),
+            evaluated,
+        )
+        unsafe = BalanceCorrection(
+            sagittal_rad=0.024,
+            lateral_rad=0.004,
+            unsafe_reason="support margin",
+        )
+        self.assertIs(
+            _pre_ramp_recovery_correction(unsettled, unsafe, config),
+            unsafe,
         )
 
     def test_target_ramp_holds_each_increment_until_root_settles(self):

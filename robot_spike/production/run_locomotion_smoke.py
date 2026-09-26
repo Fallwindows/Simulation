@@ -26,6 +26,7 @@ from robot_spike.production.isaac_feedback import (
     Isaac61LocomotionFeedbackAdapter,
 )
 from robot_spike.production.locomotion import (
+    BalanceCorrection,
     BalanceFeedbackController,
     BipedLocomotionController,
     ConservativeGaitTargetGenerator,
@@ -711,6 +712,33 @@ def _startup_feedback_failures(
         failures.extend(tracking_failures)
         metrics.update(tracking_metrics)
     return failures, metrics
+
+
+def _pre_ramp_recovery_correction(
+    feedback: LocomotionFeedback,
+    correction: BalanceCorrection,
+    config: GaitConfig = GaitConfig(),
+) -> BalanceCorrection:
+    """Use reviewed sagittal authority once measured sagittal speed is unsettled."""
+
+    if correction.unsafe_reason is not None:
+        return correction
+    forward_unsettled = (
+        abs(float(feedback.root_linear_velocity_body_mps[0]))
+        > config.dock_linear_speed_tolerance_mps
+    )
+    pitch_unsettled = (
+        abs(float(feedback.root_angular_velocity_body_rps[1]))
+        > config.dock_angular_speed_tolerance_rps
+    )
+    sagittal = float(correction.sagittal_rad)
+    if (forward_unsettled or pitch_unsettled) and sagittal != 0.0:
+        sagittal = math.copysign(config.maximum_balance_correction_rad, sagittal)
+    return BalanceCorrection(
+        sagittal_rad=sagittal,
+        lateral_rad=correction.lateral_rad,
+        unsafe_reason=None,
+    )
 
 
 def _staged_double_support_startup(
@@ -1612,8 +1640,19 @@ def run_isaac(
                 feedback: LocomotionFeedback,
                 target_generator: ConservativeGaitTargetGenerator,
                 target_pose: str,
+                *,
+                maximum_sagittal_recovery: bool = False,
             ) -> dict[str, float]:
-                correction = startup_balance.evaluate(feedback)
+                evaluated_correction = startup_balance.evaluate(feedback)
+                correction = (
+                    _pre_ramp_recovery_correction(
+                        feedback,
+                        evaluated_correction,
+                        startup_balance.config,
+                    )
+                    if maximum_sagittal_recovery
+                    else evaluated_correction
+                )
                 dx_world = (
                     feedback.com_position_world_m[0]
                     - feedback.support_center_world_m[0]
@@ -1654,6 +1693,11 @@ def run_isaac(
                             "sagittal": correction.sagittal_rad,
                             "lateral": correction.lateral_rad,
                         },
+                        "evaluated_correction_rad": {
+                            "sagittal": evaluated_correction.sagittal_rad,
+                            "lateral": evaluated_correction.lateral_rad,
+                        },
+                        "maximum_sagittal_recovery": maximum_sagittal_recovery,
                         "target_pose": target_pose,
                         "unsafe_reason": correction.unsafe_reason,
                     }
@@ -1674,6 +1718,7 @@ def run_isaac(
                     feedback,
                     startup_hold_target_generator,
                     "all-zero reset pose with measured balance correction",
+                    maximum_sagittal_recovery=True,
                 )
 
             def balanced_crouch(feedback: LocomotionFeedback) -> dict[str, float]:

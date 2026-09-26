@@ -448,6 +448,34 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   until a new complete 0.30 s stable dwell succeeds. The receipt is
   `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-09e7526\locomotion_smoke_status.json`;
   no installed Kit-log path was supplied with this handoff.
+- `RST-004-F17`: exact independently reviewed integration
+  `6735df61347cda74f5eb811088a6361444fc8b48` activated measured pre-ramp
+  recovery at the expected step 35 but exhausted the bounded 1.2 s window
+  without 36 consecutive stable samples. The recovery direction and cadence
+  were correct: at activation measured left/right physical pitch-chain sums
+  were +0.0194/-0.0199 rad while commanded sums were -0.0269/+0.0338 rad,
+  opposing the fall, and new commands were issued at every eligible sample.
+  Authority was insufficient. The evaluated sagittal correction began at only
+  +0.0246466 rad and rose gradually to +0.0714021 rad by step 120; it never
+  reached the already reviewed +0.090 rad cap before margin left the existing
+  support gate and commands correctly stopped. Root speed nevertheless grew
+  from 0.0353 m/s at activation to 0.17 m/s by step 144, with pitch -0.167 rad
+  and margin -0.039 m. Ramp and gait never began.
+
+  The successor changes pre-ramp recovery authority only. When measured body
+  forward speed or pitch angular speed itself exceeds the corresponding
+  existing handoff tolerance, it keeps the balance controller's measured
+  direction but applies the existing reviewed 0.090 rad sagittal cap. The
+  minimum-knee joint-limit margin leaves an actual zero-pose physical chain
+  target of 0.085 rad; per-joint target error remains subject to the unchanged
+  0.30 rad gate and every URDF limit. Evaluated and applied corrections are
+  both recorded. Lateral correction remains exactly as evaluated and within
+  its separately reviewed 0.045 rad cap. Unsafe input, contact/support loss,
+  stale time, geometry/tracking failure, or any hard-gate failure still issues
+  no recovery target. A full stable dwell remains mandatory before crouch or
+  gait. The receipt is
+  `C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\R2-smoke-6735df6\locomotion_smoke_status.json`;
+  the supplied Kit-log filename is `kit_20260926_084122.log`.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
