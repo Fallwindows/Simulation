@@ -17,6 +17,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import traceback
 from typing import Callable, Protocol
 
 from robot_spike.production.arm_reach import ARM_DOF_NAMES, RightArmKinematics, ToolPose
@@ -338,6 +339,18 @@ class GraspSmokeRunner:
         self.status_path = status_path
         self.preflight = dict(preflight)
 
+    @staticmethod
+    def _safe_diagnostics(
+        label: str, source: Callable[[], dict[str, object]]
+    ) -> dict[str, object]:
+        try:
+            return source()
+        except Exception as exc:
+            return {
+                "status": "unavailable",
+                "error": f"{label} diagnostics failed: {exc}",
+            }
+
     def _report(self, status: str, samples: list[dict[str, object]], error: str | None = None):
         result = {
             "schema_version": 1,
@@ -351,7 +364,9 @@ class GraspSmokeRunner:
                 "product_motion": "physics_only",
             },
             "samples": samples,
-            "last_adapter_diagnostics": self.diagnostics(),
+            "last_adapter_diagnostics": self._safe_diagnostics(
+                "adapter", self.diagnostics
+            ),
             "error": error,
         }
         write_durable_json(self.status_path, result)
@@ -393,10 +408,12 @@ class GraspSmokeRunner:
                     "phase": "idle",
                     "failure": error,
                     "approach_confirmations": approach_confirmations,
-                    "approach": self.arm_approach.diagnostics(),
+                    "approach": self._safe_diagnostics(
+                        "arm approach", self.arm_approach.diagnostics
+                    ),
                     "contact_confirmations": 0,
                     "lift_confirmations": 0,
-                    "adapter": self.diagnostics(),
+                    "adapter": self._safe_diagnostics("adapter", self.diagnostics),
                 }
                 samples.append(sample)
                 self._report("running", samples, error)
@@ -419,7 +436,7 @@ class GraspSmokeRunner:
                 "phase_observations": status.phase_observations,
                 "contact_confirmations": status.contact_confirmations,
                 "lift_confirmations": status.lift_confirmations,
-                "adapter": self.diagnostics(),
+                "adapter": self._safe_diagnostics("adapter", self.diagnostics),
             }
             samples.append(sample)
             self._report("running", samples, error)
@@ -786,5 +803,18 @@ def _terminate_process(
     hard_exit(int(exit_code))
 
 
+def _entrypoint(
+    main_callable: Callable[[], int] = main,
+    *,
+    hard_exit: Callable[[int], object] = os._exit,
+) -> None:
+    exit_code = 1
+    try:
+        exit_code = int(main_callable())
+    except BaseException:
+        traceback.print_exc()
+    _terminate_process(exit_code, hard_exit=hard_exit)
+
+
 if __name__ == "__main__":
-    _terminate_process(main())
+    _entrypoint()

@@ -15,6 +15,7 @@ from robot_spike.production.isaac_grasp import (
     IsaacArmApproachPort,
     IsaacArmLiftPort,
     IsaacContactBindings,
+    MEASURED_JOINT_LIMIT_NOISE_RAD,
 )
 from robot_spike.production.arm_reach import ARM_DOF_NAMES, ToolPose
 from robot_spike.production.model import load_production_spec
@@ -29,6 +30,7 @@ from robot_spike.production.physical_grasp import (
 from robot_spike.production.run_grasp_smoke import (
     GraspSmokeRunner,
     PREGRASP_ARM_JOINTS_RAD,
+    _entrypoint,
     _terminate_process,
     diagnostic_fingertip_paths,
     exact_contact_bindings,
@@ -179,6 +181,9 @@ class FakeIK:
 
 
 class FakeKinematics:
+    def __init__(self, spec=None):
+        self.spec = spec
+
     def forward(self, positions):
         return ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0))
 
@@ -427,7 +432,7 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         port = IsaacArmApproachPort(
             control,
             articulation,
-            FakeKinematics(),
+            FakeKinematics(self.spec),
             lambda: clock[0],
             command_period_s=0.01,
         )
@@ -437,6 +442,49 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertTrue(port.advance())
         self.assertTrue(port.target_reached())
         self.assertTrue(port.diagnostics()["target_reached"])
+
+    def test_measured_limit_noise_is_projected_only_for_fk(self):
+        from robot_spike.production.arm_reach import RightArmKinematics
+
+        articulation = FakeArticulation(self.spec)
+        control = ArticulationController(self.spec, articulation)
+        kinematics = RightArmKinematics(self.spec)
+        clock = [1.0]
+        port = IsaacArmApproachPort(
+            control,
+            articulation,
+            kinematics,
+            lambda: clock[0],
+            command_period_s=0.01,
+        )
+        zero = {name: 0.0 for name in ARM_DOF_NAMES}
+        target = kinematics.forward(zero)
+        articulation.positions["right_elbow_joint"] = 6.1739928e-7
+        self.assertTrue(port.request_approach(target, 0.1))
+        self.assertTrue(port.advance())
+
+        articulation.positions["right_elbow_joint"] = 6.1739928e-7
+        self.assertTrue(port.target_reached())
+        diagnostics = port.diagnostics()
+        self.assertEqual(
+            diagnostics["measured_joint_limit_noise_tolerance_rad"],
+            MEASURED_JOINT_LIMIT_NOISE_RAD,
+        )
+        self.assertAlmostEqual(
+            diagnostics["measured_joint_limit_noise_projection_rad"][
+                "right_elbow_joint"
+            ],
+            -6.1739928e-7,
+        )
+
+        with self.assertRaisesRegex(ValueError, "allowed range"):
+            control.command_joint_positions({"right_elbow_joint": 6.1739928e-7})
+
+        articulation.positions["right_elbow_joint"] = (
+            2.0 * MEASURED_JOINT_LIMIT_NOISE_RAD
+        )
+        with self.assertRaisesRegex(FeedbackUnavailableError, "above its physical"):
+            port.target_reached()
 
     def test_runner_accepts_exact_deadline_confirmation_and_rejects_late_tick(self):
         target = ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0))
@@ -448,7 +496,7 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             approach = IsaacArmApproachPort(
                 command,
                 articulation,
-                FakeKinematics(),
+                FakeKinematics(self.spec),
                 lambda: clock[0],
                 command_period_s=0.01,
             )
@@ -644,6 +692,57 @@ class IsaacGraspAdapterTests(unittest.TestCase):
         self.assertIn("unbound contact body", result.failure)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["state_write_policy"]["post_reset_direct_state_writes"], 0)
+
+    def test_diagnostic_exception_is_durable_and_hard_exits_nonzero(self):
+        class BrokenApproach(ImmediateApproach):
+            def target_reached(self):
+                raise RuntimeError("measured joint outside physical limit")
+
+            def diagnostics(self):
+                raise RuntimeError("approach diagnostics unavailable")
+
+        class IdleController:
+            phase = GraspPhase.IDLE
+            failure = None
+
+            @property
+            def status(self):
+                return self
+
+            def start(self):
+                raise AssertionError("grasp must not start")
+
+        clock = [0.0]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "failed.json"
+            result = GraspSmokeRunner(
+                FakePhysics(clock),
+                IdleController(),
+                BrokenApproach(),
+                object(),
+                lambda: None,
+                ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)),
+                lambda: (_ for _ in ()).throw(
+                    RuntimeError("adapter diagnostics unavailable")
+                ),
+                maximum_physics_steps=1,
+                status_path=path,
+                preflight={"test": True},
+            ).run()
+            report = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(result.status, "fail")
+        self.assertIn("arm approach measurement failed", result.failure)
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["samples"][0]["approach"]["status"], "unavailable")
+        self.assertEqual(report["last_adapter_diagnostics"]["status"], "unavailable")
+
+        captured = []
+        with mock.patch.object(grasp_smoke.traceback, "print_exc"):
+            _entrypoint(
+                lambda: (_ for _ in ()).throw(RuntimeError("escaped runtime failure")),
+                hard_exit=captured.append,
+            )
+        self.assertEqual(captured, [1])
 
     def test_runtime_fail_result_reaches_hard_exit_status(self):
         failed = grasp_smoke.SmokeResult("fail", "failed", "contact_not_verified", 1, ())
