@@ -154,7 +154,10 @@ class RobotArmReachTests(unittest.TestCase):
         self.assertEqual(plan.base_frame, KINEMATIC_BASE_FRAME)
         self.assertEqual(plan.tool_frame, TOOL_FRAME)
         self.assertEqual(plan.arm_dof_names, ARM_DOF_NAMES)
-        self.assertEqual(tuple(phase.name for phase in plan.phases), ("pre_grasp", "pre_place"))
+        self.assertEqual(
+            tuple(phase.name for phase in plan.phases),
+            ("pre_grasp", "pre_place"),
+        )
         previous = initial
         for waypoint in plan.waypoints:
             current = waypoint.as_mapping()
@@ -171,6 +174,35 @@ class RobotArmReachTests(unittest.TestCase):
             plan.phases[-1].target.position_m,
             atol=2e-4,
         )
+
+    def test_public_planner_accepts_exact_nearby_reachable_pose_regression(self):
+        seed = positions(
+            2.4133200316,
+            0.6381190972,
+            -0.5759378288,
+            -0.2697494082,
+            -0.2746968126,
+            0.2041844893,
+        )
+        goal = positions(
+            2.3592557653,
+            0.7069025202,
+            -0.6263545122,
+            -0.2054228484,
+            -0.2192737796,
+            0.1574238059,
+        )
+        target = self.kinematics.forward(goal)
+        plan = ArmReachPlanner(self.kinematics).plan_pregrasp_preplacement(
+            seed,
+            target,
+            target,
+        )
+        self.assertEqual(tuple(phase.name for phase in plan.phases), ("pre_grasp", "pre_place"))
+        self.assertLessEqual(plan.phases[0].ik_result.position_error_m, 2e-4)
+        self.assertLessEqual(plan.phases[0].ik_result.orientation_error_rad, 2e-3)
+        achieved = self.kinematics.forward(plan.phases[0].ik_result.as_mapping())
+        np.testing.assert_allclose(achieved.position_m, target.position_m, atol=2e-4)
 
     def test_waypoint_uses_existing_drive_targets_without_leg_or_waist_writes(self):
         runtime_names = tuple(reversed(self.spec.canonical_dof_order))

@@ -396,11 +396,17 @@ class RightArmKinematics:
             rotation_error = _rotation_vector(target_rotation @ current[:3, :3].T)
             position_norm = float(np.linalg.norm(position_error))
             orientation_norm = float(np.linalg.norm(rotation_error))
-            metric = position_norm + orientation_weight_m_per_rad * orientation_norm
-            return np.concatenate((position_error, rotation_error)), position_norm, orientation_norm, metric
+            error = np.concatenate((position_error, rotation_error))
+            weighted_error = error.copy()
+            weighted_error[3:] *= orientation_weight_m_per_rad
+            # DLS computes a Gauss-Newton step for this weighted least-squares
+            # objective.  The line search must use the same objective or it can
+            # reject a valid descent step near the convergence tolerances.
+            merit = 0.5 * float(weighted_error @ weighted_error)
+            return error, position_norm, orientation_norm, merit
 
         for iteration in range(max_iterations + 1):
-            error, position_error, orientation_error, metric = errors(values)
+            error, position_error, orientation_error, merit = errors(values)
             if (
                 position_error <= position_tolerance_m
                 and orientation_error <= orientation_tolerance_rad
@@ -455,8 +461,8 @@ class RightArmKinematics:
             scale = 1.0
             for _ in range(10):
                 candidate = np.clip(values + scale * delta, lower, upper)
-                _, _, _, candidate_metric = errors(candidate)
-                if candidate_metric < metric - 1e-12:
+                _, _, _, candidate_merit = errors(candidate)
+                if candidate_merit < merit:
                     values = candidate
                     accepted = True
                     break
