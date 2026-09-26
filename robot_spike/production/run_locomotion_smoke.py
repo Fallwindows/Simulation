@@ -85,6 +85,40 @@ def _arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _startup_step_budget(
+    physics_dt: float,
+    maximum_duration_s: float,
+    config: GaitConfig = GaitConfig(),
+) -> dict[str, int]:
+    """Return the discrete startup budget used by preflight and runtime."""
+
+    if not math.isfinite(physics_dt) or physics_dt <= 0.0:
+        raise ValueError("physics timestep must be finite and positive")
+    if not math.isfinite(maximum_duration_s) or maximum_duration_s <= 0.0:
+        raise ValueError("startup duration must be finite and positive")
+    total_steps = max(1, math.ceil(maximum_duration_s / physics_dt))
+    phase_steps = max(1, math.ceil(config.double_support_duration_s / physics_dt))
+    pre_ramp_steps = min(
+        max(1, math.ceil(config.double_support_timeout_s / physics_dt)),
+        total_steps - 2 * phase_steps,
+    )
+    minimum_total_steps = 3 * phase_steps + 1
+    if total_steps < minimum_total_steps or pre_ramp_steps <= phase_steps:
+        raise ValueError(
+            "startup duration must provide at least "
+            f"{minimum_total_steps} physics steps: one acquisition step plus "
+            f"{phase_steps} each for pre-ramp stabilization, target ramp, and "
+            "verified dwell"
+        )
+    return {
+        "total": total_steps,
+        "pre_ramp_stabilization": pre_ramp_steps,
+        "required_consecutive_stable_samples": phase_steps,
+        "target_ramp": phase_steps,
+        "verified_dwell": phase_steps,
+    }
+
+
 def _validate_arguments(args: argparse.Namespace) -> None:
     """Reject invalid run parameters before importing or starting Isaac."""
 
@@ -93,12 +127,7 @@ def _validate_arguments(args: argparse.Namespace) -> None:
     durations_and_distance = (args.forward_m, args.settle_s, args.timeout_s)
     if not all(math.isfinite(value) and value > 0.0 for value in durations_and_distance):
         raise ValueError("forward-m, settle-s, and timeout-s must be finite and positive")
-    minimum_startup_s = 3.0 * GaitConfig().double_support_duration_s + 1.0 / args.physics_hz
-    if args.settle_s < minimum_startup_s:
-        raise ValueError(
-            "settle-s must allow one acquisition step plus the configured "
-            "pre-ramp stabilization, target ramp, and verified dwell"
-        )
+    _startup_step_budget(1.0 / args.physics_hz, args.settle_s)
 
 
 def _sha256(path: Path) -> str:
@@ -478,39 +507,22 @@ def _staged_double_support_startup(
     targets.  No pose, velocity, or joint-state setter is used.
     """
 
-    if not math.isfinite(physics_dt) or physics_dt <= 0.0:
-        raise ValueError("physics timestep must be finite and positive")
-    if not math.isfinite(maximum_duration_s) or maximum_duration_s <= 0.0:
-        raise ValueError("startup duration must be finite and positive")
     if set(crouch_targets) != set(LEG_JOINTS):
         raise ValueError("startup crouch targets must name every leg joint exactly once")
     if set(reset_hold_targets) != set(LEG_JOINTS):
         raise ValueError("startup reset hold targets must name every leg joint exactly once")
-    total_steps = max(1, math.ceil(maximum_duration_s / physics_dt))
-    ramp_steps = max(1, math.ceil(config.double_support_duration_s / physics_dt))
-    dwell_steps = max(1, math.ceil(config.double_support_duration_s / physics_dt))
-    stabilization_dwell_steps = max(
-        1, math.ceil(config.double_support_duration_s / physics_dt)
-    )
-    pre_ramp_steps = min(
-        max(1, math.ceil(config.double_support_timeout_s / physics_dt)),
-        total_steps - ramp_steps - dwell_steps,
-    )
-    if pre_ramp_steps <= stabilization_dwell_steps:
-        raise ValueError(
-            "startup duration must leave an acquisition step plus the full "
-            "pre-ramp stabilization dwell"
-        )
+    step_budget = _startup_step_budget(physics_dt, maximum_duration_s, config)
+    ramp_steps = step_budget["target_ramp"]
+    dwell_steps = step_budget["verified_dwell"]
+    stabilization_dwell_steps = step_budget[
+        "required_consecutive_stable_samples"
+    ]
+    pre_ramp_steps = step_budget["pre_ramp_stabilization"]
     report: dict[str, Any] = {
         "status": "running",
         "physics_dt_s": physics_dt,
         "maximum_duration_s": maximum_duration_s,
-        "step_budget": {
-            "pre_ramp_stabilization": pre_ramp_steps,
-            "required_consecutive_stable_samples": stabilization_dwell_steps,
-            "target_ramp": ramp_steps,
-            "verified_dwell": dwell_steps,
-        },
+        "step_budget": step_budget,
         "pre_ramp_hold": {
             "targets_rad": dict(reset_hold_targets),
             "source": "targets seeded by the sole explicit reset",

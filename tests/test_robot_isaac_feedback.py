@@ -11,7 +11,9 @@ import json
 import math
 from pathlib import Path
 import unittest
+from unittest import mock
 
+import robot_spike.production.run_locomotion_smoke as smoke_module
 from robot_spike.production.isaac_feedback import (
     ASIMOV_SOLE_GEOMETRY,
     FeedbackUnavailableError,
@@ -38,6 +40,7 @@ from robot_spike.production.run_locomotion_smoke import (
     _persist_feedback_failure,
     _persist_pre_shutdown_runtime_error,
     _record_identity_boundary,
+    _startup_step_budget,
     _startup_feedback_failures,
     _staged_double_support_startup,
     _terminate_process,
@@ -560,6 +563,44 @@ class IsaacFeedbackTests(unittest.TestCase):
             with self.subTest(name=name, value=value):
                 with self.assertRaises(ValueError):
                     _validate_arguments(Namespace(**invalid))
+
+    def test_nonintegral_physics_rate_uses_discrete_startup_budget_preflight(self):
+        invalid = Namespace(
+            physics_hz=14,
+            repeats=1,
+            forward_m=0.06,
+            settle_s=3.0 * 0.30 + 1.0 / 14.0,
+            timeout_s=12.0,
+        )
+        with self.assertRaisesRegex(ValueError, "16 physics steps"):
+            _validate_arguments(invalid)
+        with mock.patch.object(smoke_module, "_execute_smoke") as runtime:
+            with self.assertRaisesRegex(ValueError, "16 physics steps"):
+                smoke_module.main(
+                    [
+                        "--output",
+                        "unused",
+                        "--expected-candidate-sha",
+                        "candidate",
+                        "--expected-candidate-tree-sha",
+                        "tree",
+                        "--physics-hz",
+                        "14",
+                        "--settle-s",
+                        str(invalid.settle_s),
+                    ]
+                )
+            runtime.assert_not_called()
+
+        valid_boundary_s = 16.0 / 14.0
+        valid = Namespace(**{**vars(invalid), "settle_s": valid_boundary_s})
+        _validate_arguments(valid)
+        budget = _startup_step_budget(1.0 / 14.0, valid_boundary_s)
+        self.assertEqual(budget["total"], 16)
+        self.assertEqual(budget["required_consecutive_stable_samples"], 5)
+        self.assertEqual(budget["target_ramp"], 5)
+        self.assertEqual(budget["verified_dwell"], 5)
+        self.assertEqual(budget["pre_ramp_stabilization"], 6)
 
     def test_acceptance_spec_bytes_and_consumed_metadata_are_in_identity(self):
         self.assertIn(

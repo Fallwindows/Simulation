@@ -291,6 +291,14 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   tracking, root stability/clearance, and both soles within 12 degrees. Contact
   or support loss resets the dwell; a hard safety violation aborts; timeout
   remains fail closed. No crouch target is sent before stability passes.
+- `RST-004-R3-F01`: fixed after exact review of `f81801a`. The seconds-only
+  argument check understated the budget when 0.30 s maps to a nonintegral
+  number of physics steps. Preflight and runtime now call one discrete budget
+  function. At 14 Hz each 0.30 s phase needs five steps, so the minimum is 16
+  total steps: one acquisition step plus five each for stabilization, ramp, and
+  final dwell. The previously accepted 0.9714285714 s value now fails before
+  `SimulationApp`; the exact 16/14 s boundary produces a six-step pre-ramp
+  window and passes.
 - `RST-004-N01`: corrected to the exact official Isaac Sim 6.1 generated API
   URL above.
 
@@ -353,7 +361,9 @@ nonzero before the Isaac runtime boundary is called. The preserved initial
 vector is re-read and compared at both boundaries of every repeat and before
 final success. Checks, including failures, are written to the durable status
 report; a missing or changed byte prevents a passing result. A run uses a fixed
-physics rate, verifies metre stage units, and launches `SimulationApp` with
+physics rate. CPU preflight converts every startup phase to integer physics
+steps and requires one acquisition step plus complete stabilization, ramp, and
+final-dwell budgets before launching Isaac. It verifies metre stage units and launches `SimulationApp` with
 `fast_shutdown: false`. Successful or exceptional shutdown therefore returns
 to the reporting boundary. Pass/fail state is written before shutdown and
 rewritten after `close()`; a runtime exception is likewise written as a terminal
