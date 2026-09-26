@@ -173,6 +173,7 @@ def create_perception_run(
         "final_map_graph_frame_id": "map",
         "final_cloud_frame_id": "map",
         "optimized_pose_graph_complete": True, "map_pose_frame_id": "map", "map_pose_sample_count": 2,
+        "ground_truth_subscribed": False,
         "odom_sample_count": 2,
     }
     write_json(slam / "slam_observer.json", observer)

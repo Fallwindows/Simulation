@@ -433,6 +433,12 @@ def _verify_corrected_pose_artifact_contract(path: Path) -> dict[str, object]:
         raise ValueError("Top-level SLAM manifest is not complete")
     if observer.get("status") != "complete" or embedded_observer.get("status") != "complete":
         raise ValueError("Corrected pose stream integrity manifests are not complete")
+    if (
+        slam_manifest.get("ground_truth_subscribed") is not False
+        or observer.get("ground_truth_subscribed") is not False
+        or embedded_observer.get("ground_truth_subscribed") is not False
+    ):
+        raise ValueError("Perception cannot consume truth-subscribed SLAM pose provenance")
 
     version_fields = (
         "pose_source", "graph_pose_version", "pre_publish_graph_version",
@@ -449,6 +455,7 @@ def _verify_corrected_pose_artifact_contract(path: Path) -> dict[str, object]:
         "final_map_graph_stamp_s", "final_cloud_stamp_s",
         "final_map_graph_frame_id", "final_cloud_frame_id",
         "map_pose_frame_id", "map_pose_sample_count", "dense_pose_version", "map_version",
+        "ground_truth_subscribed",
     )
     if any(observer.get(key) != embedded_observer.get(key) for key in version_fields):
         raise ValueError("Observer and SLAM manifest disagree on optimized map pose version")
@@ -462,6 +469,7 @@ def _verify_corrected_pose_artifact_contract(path: Path) -> dict[str, object]:
         "pre_publish_source_graph_link_type_histogram", "final_source_graph_link_type_histogram",
         "map_data_graph_fingerprint", "map_graph_fingerprint", "map_data_matches_map_graph",
         "cached_cloud_graph_fingerprint", "final_cloud_graph_fingerprint", "map_graph_matches_final_cloud",
+        "ground_truth_subscribed",
     )):
         raise ValueError("Authoritative SLAM manifest disagrees with the observer pose version")
     sample_count = observer.get("map_pose_sample_count")
@@ -897,7 +905,7 @@ def _select_lidar_point_indices(points: np.ndarray, max_decimation_factor: int =
     return np.sort(selected_original)
 
 
-def _read_lidar_scans(bag_dir: Path):
+def _read_lidar_scans(bag_dir: Path, diagnostics: dict[str, int] | None = None):
     """Yield sampled XYZ, original decoded indices, and scan header timestamps."""
 
     import rosbag2_py
@@ -913,10 +921,14 @@ def _read_lidar_scans(bag_dir: Path):
         topic, serialized, _ = reader.read_next()
         if topic != "/sim/lidar/points":
             continue
+        if diagnostics is not None:
+            diagnostics["raw_lidar_message_count"] = diagnostics.get("raw_lidar_message_count", 0) + 1
         message = deserialize_message(serialized, PointCloud2)
         points = _decode_pointcloud2_xyz(message)
         if points is None:
             continue
+        if diagnostics is not None:
+            diagnostics["valid_decoded_scan_count"] = diagnostics.get("valid_decoded_scan_count", 0) + 1
         source_indices = _select_lidar_point_indices(points)
         if len(source_indices):
             stamp = float(message.header.stamp.sec) + float(message.header.stamp.nanosec) / 1_000_000_000.0
@@ -964,6 +976,8 @@ def _augment_with_lidar_estimates(
     slam: Path,
     frames: list[dict[str, object]],
     frame_annotations: list[dict[str, object]],
+    *,
+    expected_lidar_message_count: int | None = None,
 ) -> tuple[dict[int, np.ndarray], dict[int, np.ndarray], dict[str, object], dict[int, dict[str, object]]]:
     """Associate projected LiDAR returns with RGB proposals and make start-relative estimates."""
 
@@ -984,10 +998,14 @@ def _augment_with_lidar_estimates(
     observations_map: dict[int, list[np.ndarray]] = {}
     observation_support: dict[int, dict[str, object]] = {}
     seen_scan_stamps: set[float] = set()
-    scan_count = 0
+    lidar_read_diagnostics: dict[str, int] = {}
+    yielded_scan_count = 0
+    pose_covered_scan_count = 0
+    projected_scan_count = 0
     projected_point_count = 0
 
-    for scan in _read_lidar_scans(capture / "sensors_bag"):
+    for scan in _read_lidar_scans(capture / "sensors_bag", diagnostics=lidar_read_diagnostics):
+        yielded_scan_count += 1
         if len(scan) == 2:  # Preserve simple injected readers used by callers/tests.
             stamp_s, lidar_points = scan
             source_indices = np.arange(len(lidar_points), dtype=np.int64)
@@ -1009,11 +1027,12 @@ def _augment_with_lidar_estimates(
         if frame_index is None:
             continue
         frame_record = annotations_by_frame.get(int(frames[frame_index]["frame_index"]))
-        if frame_record is None or not frame_record["detections"]:
-            continue
         rgb_stamp_s = frame_timestamps[frame_index]
         rgb_pose = interpolate_pose(poses, rgb_stamp_s, max_gap_s=0.5)
         if rgb_pose is None:
+            continue
+        pose_covered_scan_count += 1
+        if frame_record is None or not frame_record["detections"]:
             continue
         rig_lidar_t = geometry["rig_lidar_t"]
         rig_lidar_r = geometry["rig_lidar_r"]
@@ -1043,6 +1062,7 @@ def _augment_with_lidar_estimates(
         v = v[in_image]
         if not len(points_optical):
             continue
+        projected_scan_count += 1
         projected_point_count += len(points_optical)
         # Index detections into coarse image cells first.  This avoids creating
         # a full boolean cloud mask for every box on every LiDAR scan.
@@ -1104,9 +1124,6 @@ def _augment_with_lidar_estimates(
                 "point_timestamp_reference": "PointCloud2 header timestamp; per-return timestamps unavailable",
                 "source_point_indices": retained_source_indices,
             })
-
-        scan_count += 1
-
     map_estimates = {track_id: np.median(np.stack(values), axis=0) for track_id, values in observations_map.items() if values}
     track_estimates = _map_estimates_to_start_relative(
         map_estimates, start_t, poses[0].orientation_xyzw
@@ -1163,8 +1180,28 @@ def _augment_with_lidar_estimates(
                 for stamp, source_indices in sorted(support["source_indices_by_scan"].items())
             ],
         }
-    return track_estimates, map_estimates, {
-        "status": "complete",
+    raw_lidar_message_count = int(lidar_read_diagnostics.get("raw_lidar_message_count", yielded_scan_count))
+    valid_decoded_scan_count = int(lidar_read_diagnostics.get("valid_decoded_scan_count", yielded_scan_count))
+    incomplete_reasons = []
+    if raw_lidar_message_count <= 0:
+        incomplete_reasons.append("no_lidar_messages_read")
+    if valid_decoded_scan_count <= 0:
+        incomplete_reasons.append("no_valid_lidar_scans_decoded")
+    if expected_lidar_message_count is not None:
+        if raw_lidar_message_count != expected_lidar_message_count:
+            incomplete_reasons.append("lidar_message_count_mismatch")
+        if valid_decoded_scan_count != expected_lidar_message_count:
+            incomplete_reasons.append("valid_lidar_scan_count_mismatch")
+    if pose_covered_scan_count <= 0:
+        incomplete_reasons.append("no_pose_covered_lidar_scans")
+    if projected_scan_count <= 0 or projected_point_count <= 0:
+        incomplete_reasons.append("no_lidar_points_projected_into_rgb")
+    if not track_estimates:
+        incomplete_reasons.append("no_lidar_supported_estimates")
+
+    localization_summary = {
+        "status": "incomplete" if incomplete_reasons else "complete",
+        "reason": ",".join(incomplete_reasons) if incomplete_reasons else None,
         "start_pose_world_m": [round(float(value), 6) for value in start_t],
         "start_pose_orientation_xyzw": [round(float(value), 8) for value in poses[0].orientation_xyzw],
         "start_pose_world_m_exact": [float(value) for value in start_t],
@@ -1183,16 +1220,23 @@ def _augment_with_lidar_estimates(
                 "child_frame": "camera_link",
             },
         ),
-        "lidar_input_stream_read": True,
+        "lidar_input_stream_read": raw_lidar_message_count > 0,
         "position_quantity": "median_of_associated_front_surface_lidar_returns",
         "lidar_pose_time_reference": "PointCloud2 header timestamp; per-return timing and deskew are unavailable",
         "lidar_point_sampling_max_decimation_factor": LIDAR_POINT_MAX_DECIMATION_FACTOR,
         "lidar_point_sampling_policy": "deterministic equal-azimuth buckets with radially stratified samples; original decoded indices retained",
         "lidar_point_timestamp_reference": "PointCloud2 header timestamp; per-return timestamps unavailable",
-        "scan_count_used": scan_count,
+        "expected_lidar_message_count": expected_lidar_message_count,
+        "raw_lidar_message_count": raw_lidar_message_count,
+        "valid_decoded_scan_count": valid_decoded_scan_count,
+        "unique_lidar_scan_count": len(seen_scan_stamps),
+        "pose_covered_scan_count": pose_covered_scan_count,
+        "projected_scan_count": projected_scan_count,
+        "scan_count_used": projected_scan_count,
         "projected_point_count": projected_point_count,
         "track_count_with_3d_estimate": len(track_estimates),
-    }, support_summary
+    }
+    return track_estimates, map_estimates, localization_summary, support_summary
 
 
 def _maximum_cardinality_minimum_cost_assignment(
@@ -1438,7 +1482,14 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         raise RuntimeError(f"RGB frame/index mismatch: decoded={decoded}, indexed={len(frames_index)}")
 
     track_estimates, map_estimates, localization, lidar_scan_observation_counts = _augment_with_lidar_estimates(
-        capture, slam, frames_index, frame_annotations
+        capture,
+        slam,
+        frames_index,
+        frame_annotations,
+        expected_lidar_message_count=(
+            int(input_bindings["raw_lidar"]["message_count"])
+            if input_bindings is not None else None
+        ),
     )
     co_visible_pairs = _co_visible_raw_track_pairs(frame_annotations)
     raw_to_canonical, canonical_map_estimates, canonical_members = _consolidate_track_estimates(
@@ -1572,6 +1623,21 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     localization_complete = localization.get("status") == "complete"
     if localization_complete and input_bindings is None:
         raise ValueError("complete perception requires repaired-v1 capture and SLAM input bindings")
+    if localization_complete:
+        expected_lidar_messages = int(input_bindings["raw_lidar"]["message_count"])
+        exact_counts = (
+            int(localization.get("expected_lidar_message_count", -1)) == expected_lidar_messages,
+            int(localization.get("raw_lidar_message_count", -1)) == expected_lidar_messages,
+            int(localization.get("valid_decoded_scan_count", -1)) == expected_lidar_messages,
+        )
+        positive_support = (
+            int(localization.get("pose_covered_scan_count", 0)) > 0,
+            int(localization.get("projected_scan_count", 0)) > 0,
+            int(localization.get("projected_point_count", 0)) > 0,
+            int(localization.get("track_count_with_3d_estimate", 0)) > 0,
+        )
+        if not all(exact_counts + positive_support):
+            raise ValueError("complete perception lacks exact LiDAR message coverage and projected estimate support")
     summary = {
         "status": "complete" if localization_complete else "incomplete",
         "detector_status": "rgb_color_connected_component_baseline",

@@ -105,6 +105,7 @@ def _write_pose_integrity_manifests(slam_directory: Path, map_pose_count: int) -
         "final_map_graph_frame_id": "map",
         "final_cloud_frame_id": "map",
         "optimized_pose_graph_complete": True,
+        "ground_truth_subscribed": False,
         "map_pose_frame_id": "map",
         "map_pose_sample_count": map_pose_count,
         "odom_sample_count": map_pose_count,
@@ -113,6 +114,7 @@ def _write_pose_integrity_manifests(slam_directory: Path, map_pose_count: int) -
     (slam_directory / "slam_observer.json").write_bytes(observer_bytes)
     manifest = {
         "status": "complete",
+        "ground_truth_subscribed": False,
         "dense_pose_version": dense_pose_version,
         "map_version": map_version,
         "map_frame_id": "map",
@@ -1014,6 +1016,78 @@ class PerceptionTests(unittest.TestCase):
                     run_rgb_tracking(capture, corrupt_slam, corrupt_output)
             self.assertFalse((corrupt_output / "perception_manifest.json").exists())
 
+    def test_empty_lidar_stream_cannot_complete_localization(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            rows = [
+                {"timestamp_s": 0.0, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0,
+                 "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0, "frame_id": "map"},
+                {"timestamp_s": 0.1, "x_m": 0.1, "y_m": 0.0, "z_m": 0.0,
+                 "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0, "frame_id": "map"},
+            ]
+            odom_rows = [{**row, "x_m": 0.0, "frame_id": "odom"} for row in rows]
+            slam = _write_pose_contract_case(root, "empty_lidar", rows, odom_rows)
+            geometry = {
+                "rig_lidar_t": np.zeros(3), "rig_lidar_r": np.eye(3),
+                "rig_camera_t": np.zeros(3), "rig_camera_r": np.eye(3),
+                "link_optical_r": np.eye(3), "fx": 1.0, "fy": 1.0, "cx": 50.0, "cy": 50.0,
+            }
+            frames = [{"frame_index": 0, "stamp_s": 0.0, "width": 100, "height": 100}]
+            annotations = [{
+                "frame_index": 0,
+                "detections": [{"track_id": 1, "raw_track_id": 1, "bbox_xyxy": [0, 0, 99, 99]}],
+            }]
+            with patch("simulator.perception.rgb_tracking._load_sensor_geometry", return_value=geometry), \
+                 patch("simulator.perception.rgb_tracking._read_lidar_scans", return_value=[]):
+                estimates, map_estimates, localization, support = _augment_with_lidar_estimates(
+                    root / "capture", slam, frames, annotations, expected_lidar_message_count=1
+                )
+            self.assertEqual(estimates, {})
+            self.assertEqual(map_estimates, {})
+            self.assertEqual(support, {})
+            self.assertEqual(localization["status"], "incomplete")
+            self.assertFalse(localization["lidar_input_stream_read"])
+            self.assertEqual(localization["raw_lidar_message_count"], 0)
+            self.assertEqual(localization["valid_decoded_scan_count"], 0)
+            self.assertEqual(localization["pose_covered_scan_count"], 0)
+            self.assertEqual(localization["projected_point_count"], 0)
+            self.assertEqual(localization["track_count_with_3d_estimate"], 0)
+            self.assertIn("lidar_message_count_mismatch", localization["reason"])
+
+    def test_generic_validator_rejects_self_declared_legacy_waiver(self):
+        legacy = {
+            "legacy_capture_id_omitted": False,
+            "legacy_capture_manifest_v0": True,
+            "ground_truth_consumed": False,
+            "slam_consumed_for_estimation": True,
+            "lidar_consumed_for_estimation": True,
+            "slam_artifact": "../slam/slam_map.pcd",
+        }
+        missing = Path("does-not-exist")
+        with self.assertRaisesRegex(ValueError, "external catalog-pinned path"):
+            validate_perception_manifest_bindings(legacy, missing / "capture", missing / "slam", missing / "perception")
+
+    def test_perception_bindings_reject_truth_subscribed_slam_chain(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            fixture = create_perception_run(Path(temporary_directory), frame_count=2, capture_id="truth-chain")
+            capture = Path(fixture["capture"])
+            slam = Path(fixture["slam"])
+            output = Path(fixture["perception"])
+            manifest_path = slam / "slam_manifest.json"
+            original = manifest_path.read_bytes()
+            payload = json.loads(original)
+            payload["ground_truth_subscribed"] = True
+            manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "truth-subscribed SLAM result"):
+                build_perception_input_bindings(capture, slam, output)
+
+            payload = json.loads(original)
+            payload["observer"]["ground_truth_subscribed"] = True
+            manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "truth-subscribed SLAM observer"):
+                build_perception_input_bindings(capture, slam, output)
+            manifest_path.write_bytes(original)
+
     def test_expired_track_remains_in_localized_inventory_and_annotations(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -1050,6 +1124,13 @@ class PerceptionTests(unittest.TestCase):
                 "start_pose_world_m_exact": [10.0, 0.0, 0.0],
                 "start_pose_orientation_xyzw_exact": [0.0, 0.0, 0.0, 1.0],
                 "lidar_input_stream_read": True,
+                "expected_lidar_message_count": 2,
+                "raw_lidar_message_count": 2,
+                "valid_decoded_scan_count": 2,
+                "pose_covered_scan_count": 1,
+                "projected_scan_count": 1,
+                "projected_point_count": 3,
+                "track_count_with_3d_estimate": 1,
                 "pose_provenance": {
                     "map_version": "e" * 64,
                     "pre_publish_source_graph_identity": "b" * 64,

@@ -164,6 +164,8 @@ def build_perception_input_bindings(
     slam = _json(slam_manifest_path)
     if slam.get("status") != "complete":
         raise ValueError("SLAM manifest is not complete")
+    if slam.get("ground_truth_subscribed") is not False:
+        raise ValueError("perception cannot consume a truth-subscribed SLAM result")
     if str(slam.get("capture_id", "")) != capture_id:
         raise ValueError("capture and SLAM capture_id do not match")
     if str(slam.get("capture_sha256", "")).lower() != canonical_capture_sha:
@@ -171,6 +173,22 @@ def build_perception_input_bindings(
     expected_bag = (capture_root / str(capture["bag"]["uri"])).resolve()
     if Path(str(slam.get("bag_replayed", ""))).resolve() != expected_bag:
         raise ValueError("SLAM manifest was not produced from the capture bag")
+
+    observer = slam.get("observer")
+    observer_binding = slam.get("observer_artifact")
+    if observer is not None or observer_binding is not None:
+        if not isinstance(observer, dict) or not isinstance(observer_binding, dict):
+            raise ValueError("SLAM observer provenance is incomplete")
+        if observer.get("ground_truth_subscribed") is not False:
+            raise ValueError("perception cannot consume a truth-subscribed SLAM observer")
+        observer_path = _resolved_child(slam_root, str(observer_binding.get("path", "")), "SLAM observer")
+        observer_sha = str(observer_binding.get("sha256", "")).lower()
+        if not SHA256_PATTERN.fullmatch(observer_sha) or sha256_file(observer_path) != observer_sha:
+            raise ValueError("SLAM observer bytes do not match its producer binding")
+        if int(observer_binding.get("size_bytes", -1)) != observer_path.stat().st_size:
+            raise ValueError("SLAM observer size does not match its producer binding")
+        if _json(observer_path) != observer:
+            raise ValueError("embedded and file-backed SLAM observer provenance differ")
 
     artifacts = slam.get("artifacts")
     trajectory_binding = next(
@@ -253,68 +271,49 @@ def validate_perception_manifest_bindings(
     legacy_capture_id_omitted = perception.get("legacy_capture_id_omitted")
     legacy_capture_manifest_v0 = perception.get("legacy_capture_manifest_v0")
     modern = legacy_capture_id_omitted is False and legacy_capture_manifest_v0 is False
-    legacy = legacy_capture_id_omitted is True or legacy_capture_manifest_v0 is True
-    if not modern and not legacy:
-        raise ValueError("perception manifest must explicitly declare modern or reviewed legacy provenance")
-    if modern and (legacy_capture_id_omitted is not False or legacy_capture_manifest_v0 is not False):
-        raise ValueError("modern perception provenance must explicitly disable all legacy waivers")
+    if not modern:
+        raise ValueError(
+            "generic perception validation accepts only explicit modern provenance; "
+            "historical compatibility requires the external catalog-pinned path"
+        )
     if perception.get("ground_truth_consumed") is not False:
         raise ValueError("perception manifest must remain ground-truth-free")
     if perception.get("slam_consumed_for_estimation") is not True or perception.get("lidar_consumed_for_estimation") is not True:
         raise ValueError("perception manifest must consume SLAM and LiDAR")
 
-    # The documented v0 historical source is catalog-pinned and validated by its
-    # presentation compatibility path.  It cannot satisfy the repaired-v1 input
-    # builder, so retain only its explicit, fail-closed legacy declaration here.
-    if legacy_capture_manifest_v0 is True:
-        if perception.get("slam_artifact") != "../slam/slam_map.pcd":
-            raise ValueError("legacy perception provenance must name its bound SLAM map artifact")
-        return {}
-
     expected = build_perception_input_bindings(capture_dir, slam_dir, output_dir)
     capture = expected["capture"]
     slam = expected["slam"]
-    if modern and perception.get("capture_id") != capture["capture_id"]:
+    if perception.get("capture_id") != capture["capture_id"]:
         raise ValueError("modern perception capture_id does not match its capture")
-    if not modern and perception.get("capture_id") not in (None, capture["capture_id"]):
-        raise ValueError("perception capture_id does not match its capture")
-    if modern and perception.get("capture_sha256") != capture["capture_sha256"]:
+    if perception.get("capture_sha256") != capture["capture_sha256"]:
         raise ValueError("modern perception capture_sha256 does not match its canonical capture")
-    if not modern and perception.get("capture_sha256") not in (None, capture["capture_sha256"]):
-        raise ValueError("perception capture_sha256 does not match its canonical capture")
-    if modern and perception.get("capture_manifest_sha256") != capture["manifest"]["sha256"]:
+    if perception.get("capture_manifest_sha256") != capture["manifest"]["sha256"]:
         raise ValueError("modern perception capture manifest hash does not match")
-    if not modern and perception.get("capture_manifest_sha256") not in (None, capture["manifest"]["sha256"]):
-        raise ValueError("perception capture manifest hash does not match")
     if perception.get("slam_manifest_sha256") != slam["manifest"]["sha256"]:
         raise ValueError("perception SLAM manifest hash does not match")
-    if modern and perception.get("inputs") != expected:
+    if perception.get("inputs") != expected:
         raise ValueError("modern perception input bindings do not match the consumed capture, bag, RGB, and SLAM bytes")
-    if not modern and "inputs" in perception and perception.get("inputs") != expected:
-        raise ValueError("perception input bindings do not match the consumed capture, bag, RGB, and SLAM bytes")
-    if modern and perception.get("slam_trajectory") != slam["trajectory"]["path"]:
+    if perception.get("slam_trajectory") != slam["trajectory"]["path"]:
         raise ValueError("modern perception provenance must name the consumed SLAM trajectory")
-    if modern and perception.get("allowed_depth_sources") != [LIDAR_PROJECTED_DEPTH_SOURCE]:
+    if perception.get("allowed_depth_sources") != [LIDAR_PROJECTED_DEPTH_SOURCE]:
         raise ValueError("modern perception provenance must permit only LiDAR projected with SLAM pose depth")
-    if modern and perception.get("slam_artifact") != "../slam/slam_map.pcd":
+    if perception.get("slam_artifact") != "../slam/slam_map.pcd":
         raise ValueError("modern perception provenance must preserve its bound SLAM map artifact")
-    if modern and perception.get("estimated_inventory") != "estimated_inventory.csv":
+    if perception.get("estimated_inventory") != "estimated_inventory.csv":
         raise ValueError("modern perception provenance must name estimated_inventory.csv")
-    if modern:
-        inventory_path = _resolved_child(Path(output_dir).resolve(), "estimated_inventory.csv", "estimated inventory")
-        with inventory_path.open(newline="", encoding="utf-8") as handle:
-            reader = csv.DictReader(handle)
-            if reader.fieldnames is None or "depth_source" not in reader.fieldnames:
-                raise ValueError("estimated inventory lacks depth_source provenance")
-            invalid_sources = {
-                str(row.get("depth_source", "")).strip()
-                for row in reader
-                if str(row.get("depth_source", "")).strip() != LIDAR_PROJECTED_DEPTH_SOURCE
-            }
-        if invalid_sources:
-            raise ValueError("estimated inventory contains a depth source outside the modern perception contract")
-    if not modern and "inputs" not in perception and perception.get("slam_artifact") != "../slam/slam_map.pcd":
-        raise ValueError("repaired v1 perception provenance must name its bound SLAM map artifact")
+    inventory_path = _resolved_child(Path(output_dir).resolve(), "estimated_inventory.csv", "estimated inventory")
+    with inventory_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None or "depth_source" not in reader.fieldnames:
+            raise ValueError("estimated inventory lacks depth_source provenance")
+        invalid_sources = {
+            str(row.get("depth_source", "")).strip()
+            for row in reader
+            if str(row.get("depth_source", "")).strip() != LIDAR_PROJECTED_DEPTH_SOURCE
+        }
+    if invalid_sources:
+        raise ValueError("estimated inventory contains a depth source outside the modern perception contract")
     return expected
 
 
