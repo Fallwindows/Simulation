@@ -29,6 +29,11 @@ import cv2
 import numpy as np
 
 from evaluation.metrics import PoseSample, interpolate_pose, safe_quaternion
+from simulator.perception.provenance import (
+    LIDAR_PROJECTED_DEPTH_SOURCE,
+    build_perception_input_bindings,
+    validate_perception_manifest_bindings,
+)
 from simulator.sensors.scan_projection import resolve_transform
 from simulator.technical_lidar import load_camera_head_transform_artifact
 
@@ -1400,6 +1405,9 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     slam = Path(slam_dir).resolve()
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
+    input_bindings = None
+    if (capture / "capture_manifest.json").is_file() and (slam / "slam_manifest.json").is_file():
+        input_bindings = build_perception_input_bindings(capture, slam, output)
     frames_index = _read_timestamp_index(capture / "rgb_frames.jsonl")
     if not frames_index:
         raise ValueError("RGB timestamp index is empty")
@@ -1517,7 +1525,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
             "map_x_m": round(float(canonical_map_estimates[canonical_id][0]), 3) if canonical_id in canonical_map_estimates else None,
             "map_y_m": round(float(canonical_map_estimates[canonical_id][1]), 3) if canonical_id in canonical_map_estimates else None,
             "map_z_m": round(float(canonical_map_estimates[canonical_id][2]), 3) if canonical_id in canonical_map_estimates else None,
-            "depth_source": "lidar_projected_with_slam_pose",
+            "depth_source": LIDAR_PROJECTED_DEPTH_SOURCE,
             "position_quantity": "median_of_associated_front_surface_lidar_returns",
             "supporting_lidar_scan_timestamps_s": supporting_stamps,
             "supporting_lidar_source_points": source_point_support,
@@ -1562,6 +1570,8 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
     (output / "estimated_inventory.json").write_text(json.dumps(track_rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     localization_complete = localization.get("status") == "complete"
+    if localization_complete and input_bindings is None:
+        raise ValueError("complete perception requires repaired-v1 capture and SLAM input bindings")
     summary = {
         "status": "complete" if localization_complete else "incomplete",
         "detector_status": "rgb_color_connected_component_baseline",
@@ -1569,10 +1579,18 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "capture_only": True,
         "ground_truth_consumed": False,
         "ground_truth_required": False,
+        "legacy_capture_id_omitted": False,
+        "legacy_capture_manifest_v0": False,
         "slam_consumed_for_estimation": localization_complete,
         "lidar_consumed_for_estimation": bool(localization.get("lidar_input_stream_read", False)),
+        "capture_id": input_bindings["capture"]["capture_id"] if input_bindings else None,
+        "capture_sha256": input_bindings["capture"]["capture_sha256"] if input_bindings else None,
+        "capture_manifest_sha256": input_bindings["capture"]["manifest"]["sha256"] if input_bindings else None,
+        "inputs": input_bindings,
+        "slam_trajectory": input_bindings["slam"]["trajectory"]["path"] if input_bindings else None,
+        "allowed_depth_sources": [LIDAR_PROJECTED_DEPTH_SOURCE],
         "localization": localization,
-        "slam_artifact": str((slam / "slam_map.pcd").relative_to(output.parent)).replace("\\", "/") if (slam / "slam_map.pcd").exists() else None,
+        "slam_artifact": "../slam/slam_map.pcd" if (slam / "slam_map.pcd").exists() else None,
         "slam_cloud_sha256": pose_provenance.get("slam_cloud_sha256"),
         "slam_cloud_size_bytes": pose_provenance.get("slam_cloud_size_bytes"),
         "slam_artifact_sha256": pose_provenance.get("slam_cloud_sha256"),
@@ -1584,7 +1602,7 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "final_source_graph_identity": pose_provenance.get("final_source_graph_identity"),
         "graph_pose_version": pose_provenance.get("graph_pose_version"),
         "dense_pose_version": pose_provenance.get("dense_pose_version"),
-        "slam_manifest_sha256": pose_provenance.get("slam_manifest_sha256"),
+        "slam_manifest_sha256": input_bindings["slam"]["manifest"]["sha256"] if input_bindings else pose_provenance.get("slam_manifest_sha256"),
         "slam_manifest_size_bytes": pose_provenance.get("slam_manifest_size_bytes"),
         "slam_map_pose_sha256": pose_provenance.get("slam_map_pose_sha256"),
         "slam_map_keyframes_sha256": pose_provenance.get("slam_map_keyframes_sha256"),
@@ -1603,6 +1621,8 @@ def run_rgb_tracking(capture_dir: str | Path, slam_dir: str | Path, output_dir: 
         "git_sha": _git_sha(Path(repo_root).resolve()) if repo_root else None,
         "notes": "RGB connected components are product-like proposals, not product instances. Localized positions are medians of associated front-surface LiDAR returns projected using scan-time and RGB-time SLAM poses; they are not full-product centers or extents.",
     }
+    if localization_complete:
+        validate_perception_manifest_bindings(summary, capture, slam, output)
     (output / "perception_manifest.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary
 

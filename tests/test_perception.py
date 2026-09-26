@@ -13,7 +13,12 @@ import cv2
 import numpy as np
 
 from evaluation.metrics import PoseSample
+from tests.perception_provenance_fixture import create_perception_run
 from simulator.technical_lidar import CameraHeadTransformTrajectory
+from simulator.perception.provenance import (
+    build_perception_input_bindings,
+    validate_perception_manifest_bindings,
+)
 from simulator.perception.rgb_tracking import (
     BlobTracker,
     Detection,
@@ -1012,10 +1017,10 @@ class PerceptionTests(unittest.TestCase):
     def test_expired_track_remains_in_localized_inventory_and_annotations(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            capture, slam, output = root / "capture", root / "slam", root / "perception"
-            capture.mkdir()
-            slam.mkdir()
-            (slam / "slam_manifest.json").write_text("fixture manifest", encoding="utf-8")
+            fixture = create_perception_run(root, frame_count=2, capture_id="producer-manifest-contract")
+            capture = Path(fixture["capture"])
+            slam = Path(fixture["slam"])
+            output = Path(fixture["perception"])
             pcd_bytes, ply_bytes = b"fixture pcd", b"fixture ply"
             (slam / "slam_map.pcd").write_bytes(pcd_bytes)
             (slam / "slam_map.ply").write_bytes(ply_bytes)
@@ -1092,6 +1097,33 @@ class PerceptionTests(unittest.TestCase):
                 summary = run_rgb_tracking(capture, slam, output)
 
             self.assertEqual(summary["status"], "complete")
+            bindings = build_perception_input_bindings(capture, slam, output)
+            self.assertEqual(summary["inputs"], bindings)
+            self.assertEqual(summary["capture_id"], "producer-manifest-contract")
+            self.assertEqual(summary["capture_sha256"], bindings["capture"]["capture_sha256"])
+            self.assertEqual(summary["capture_manifest_sha256"], bindings["capture"]["manifest"]["sha256"])
+            self.assertEqual(summary["slam_manifest_sha256"], bindings["slam"]["manifest"]["sha256"])
+            self.assertEqual(summary["slam_trajectory"], "../slam/slam_map_poses.csv")
+            self.assertEqual(summary["allowed_depth_sources"], ["lidar_projected_with_slam_pose"])
+            self.assertEqual(summary["slam_artifact"], "../slam/slam_map.pcd")
+            self.assertEqual(summary["estimated_inventory"], "estimated_inventory.csv")
+            self.assertFalse(summary["legacy_capture_id_omitted"])
+            self.assertFalse(summary["legacy_capture_manifest_v0"])
+            self.assertFalse(summary["ground_truth_consumed"])
+            validate_perception_manifest_bindings(summary, capture, slam, output)
+            missing_inputs = dict(summary)
+            missing_inputs.pop("inputs")
+            with self.assertRaisesRegex(ValueError, "modern perception input bindings"):
+                validate_perception_manifest_bindings(missing_inputs, capture, slam, output)
+            inventory_path = output / "estimated_inventory.csv"
+            inventory_bytes = inventory_path.read_bytes()
+            inventory_path.write_text(
+                inventory_bytes.decode("utf-8").replace("lidar_projected_with_slam_pose", "ground_truth"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "depth source outside"):
+                validate_perception_manifest_bindings(summary, capture, slam, output)
+            inventory_path.write_bytes(inventory_bytes)
             self.assertEqual(summary["detection_count"], 1)
             self.assertEqual(summary["raw_rgb_track_count"], 1)
             self.assertEqual(summary["track_count"], 1)

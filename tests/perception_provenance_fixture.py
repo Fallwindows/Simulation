@@ -136,6 +136,7 @@ def create_perception_run(
         "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n",
         encoding="utf-8",
     )
+    (slam / "slam_map.pcd").write_bytes(b"generated repaired-v1 map fixture")
     map_version = "a" * 64
     dense_pose_version = "b" * 64
     trajectory_binding = {
@@ -215,6 +216,8 @@ def create_perception_run(
         "status": "complete", "capture_only": True, "ground_truth_consumed": False,
         "ground_truth_required": False, "lidar_consumed_for_estimation": True,
         "slam_consumed_for_estimation": True, "capture_id": capture_id,
+        "legacy_capture_id_omitted": False, "legacy_capture_manifest_v0": False,
+        "allowed_depth_sources": ["lidar_projected_with_slam_pose"],
         "capture_sha256": inputs["capture"]["capture_sha256"],
         "capture_manifest_sha256": inputs["capture"]["manifest"]["sha256"],
         "slam_manifest_sha256": inputs["slam"]["manifest"]["sha256"],
