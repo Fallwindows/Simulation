@@ -242,6 +242,68 @@ class RobotLocomotionTests(unittest.TestCase):
         for targets in commands:
             self.assertEqual(self.spec.validate_targets(targets), targets)
 
+    def test_hip_yaw_sign_matches_both_negative_z_axes_for_both_turn_directions(self):
+        feedback = self.feedback(0.5)
+        generator = ConservativeGaitTargetGenerator(self.spec, self.config)
+        for side in FootSide:
+            start_pose = feedback.foot(side).pose
+            phase = (
+                GaitPhase.LEFT_SWING
+                if side is FootSide.LEFT
+                else GaitPhase.RIGHT_SWING
+            )
+            for desired_yaw in (math.radians(5.0), math.radians(-5.0)):
+                with self.subTest(side=side, desired_yaw=desired_yaw):
+                    step = Footstep(
+                        side,
+                        PlanarPose(0.02, 0.0, desired_yaw),
+                        FootPose(
+                            (
+                                start_pose.position_m[0] + 0.02,
+                                start_pose.position_m[1],
+                                start_pose.position_m[2],
+                            ),
+                            desired_yaw,
+                        ),
+                    )
+                    targets = generator.targets(
+                        feedback,
+                        phase,
+                        1.0,
+                        BalanceCorrection(0.0, 0.0),
+                        step=step,
+                        swing_start_pose=start_pose,
+                        swing_start_joint_positions=feedback.joint_position_rad,
+                    )
+                    self.assertAlmostEqual(
+                        targets[f"{side.value}_hip_yaw_joint"],
+                        -desired_yaw,
+                    )
+
+    def test_touchdown_rejects_materially_wrong_measured_foot_yaw(self):
+        source = MutableFeedbackSource(self.feedback(0.0))
+        controller = BipedLocomotionController(
+            self.spec, RecordingJointController(self.spec), source, config=self.config
+        )
+        controller.start_route([PlanarPose(0.0, 0.0, math.radians(10.0))])
+        controller.update()
+        source.feedback = self.feedback(0.31)
+        self.assertEqual(controller.update().phase, GaitPhase.LEFT_SWING)
+        source.feedback = self.feedback(0.45, left_contact=False)
+        controller.update()
+
+        target = controller.steps[0].foot_target
+        wrong_yaw_pose = FootPose(target.position_m, -target.yaw_rad)
+        source.feedback = self.feedback(
+            1.05,
+            left_pose=wrong_yaw_pose,
+            left_contact=True,
+        )
+        rejected = controller.update()
+        self.assertEqual(rejected.state, LocomotionState.ACTIVE)
+        self.assertEqual(rejected.phase, GaitPhase.LEFT_SWING)
+        self.assertEqual(rejected.active_step_index, 0)
+
     def test_measured_off_nominal_foot_distance_or_yaw_faults_before_liftoff(self):
         cases = (
             FootPose((-0.10, 0.0675, 0.0), 0.0),
@@ -414,9 +476,32 @@ class RobotLocomotionTests(unittest.TestCase):
         self.assertEqual(commands.commands, [])
 
         source.feedback = self.feedback(0.1, root_height_m=float("nan"))
-        with self.assertRaisesRegex(ValueError, "root height must be finite"):
-            controller.update()
+        self.assertEqual(controller.update().state, LocomotionState.FAULT)
         self.assertEqual(commands.commands, [])
+
+    def test_nonfinite_safety_sample_latches_fault_from_active_and_never_resumes(self):
+        source = MutableFeedbackSource(self.feedback(0.0))
+        commands = RecordingJointController(self.spec)
+        controller = BipedLocomotionController(
+            self.spec, commands, source, config=self.config
+        )
+        controller.start_route([PlanarPose(0.03, 0.0, 0.0)])
+        healthy = controller.update()
+        self.assertEqual(healthy.state, LocomotionState.ACTIVE)
+        self.assertEqual(len(commands.commands), 1)
+
+        source.feedback = self.feedback(0.1, root_height_m=float("nan"))
+        invalid = controller.update()
+        self.assertEqual(invalid.state, LocomotionState.FAULT)
+        self.assertIn("root height must be finite", invalid.failure_reason)
+        self.assertEqual(invalid.joint_targets_rad, {})
+        self.assertEqual(len(commands.commands), 1)
+
+        source.feedback = self.feedback(0.2)
+        latched = controller.update()
+        self.assertEqual(latched.state, LocomotionState.FAULT)
+        self.assertEqual(latched.joint_targets_rad, {})
+        self.assertEqual(len(commands.commands), 1)
 
     def test_direct_root_and_joint_state_writes_are_confined_to_explicit_reset(self):
         forbidden = {

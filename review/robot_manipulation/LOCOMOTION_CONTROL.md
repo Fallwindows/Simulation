@@ -28,6 +28,31 @@ shelf placement, release, withdrawal, and stable-placement run. A deterministic
 waypoint route is allowed. Teleporting the robot between phases, a substitute
 wheeled base, reinforcement learning, and VLA control are outside this task.
 
+## Acceptance and relevant-input identity
+
+The formal RST-003 acceptance authority is the readable, hash-verified owner
+specification at:
+
+`C:\Users\suyog\.codex\visualizations\2026\09\26\01a0dc8d-fcfa-7782-bd3d-8b3cb5f8fa3e\ROBOT_BACKROOM_RESTOCKING_IMPLEMENTATION_SPEC.md`
+
+Its raw-file SHA-256 is
+`7ea5ca5fa7558aa0a58bf94999adf545a7f6b53232fd155e2cc051cb15bcf0ad`.
+The owner download at
+`C:\Users\suyog\Downloads\ROBOT_BACKROOM_RESTOCKING_IMPLEMENTATION_SPEC.md`
+is byte-identical with the same hash. The checked-in video implementation
+specification is an operating reference, not this task's acceptance spec.
+
+The one formal relevant input manifest is
+`robot_spike/production/production_manifest.json`. Its SHA-256 over the raw Git
+blob payload resolved from the candidate tree is
+`8c4f698803a8e877eb714a3c1d0964d284480eb95f6fe055efec9dd2ddf2b542`.
+Supporting raw Git blob identities are:
+
+- `robot_spike/production/robot_config.json`:
+  `9bad70e436732051436f50d731e2b157d9ff2402aaad29cfc14fb4b47ed459b1`;
+- `robot_spike/production/asimov_orcahand_restocking.urdf`:
+  `b605c9a54f4a8494d333fd7cc5a20de3b4c76ffc83e33bd8027e6bafb7a1f59c`.
+
 ## Actual base architecture and command boundary
 
 The reviewed R1 production model is the owner's Asimov biped with the right
@@ -91,6 +116,15 @@ safety assumption pending measured Isaac settling data, not a hardware limit.
   root height and contacting-foot world height and enforces the documented
   envelope. Collapsed, over-height, and nonfinite inputs are covered; unsafe
   feedback and latched faults issue no further gait target.
+- `RST-003-R2-F04`: addressed in revision 3. Both hip-yaw axes are `-Z`, so
+  desired physical foot yaw is mapped to the opposite numeric joint sign for
+  both legs and turn directions. Touchdown also requires measured yaw within
+  the configured 5 degree tolerance.
+- `RST-003-R2-F05`: addressed in revision 3. Invalid/nonfinite feedback is
+  converted into a latched, command-free controller fault. A later valid sample
+  cannot resume commands without a new controller/reset lifecycle.
+- `RST-003-R2-I01`: addressed in revision 3 with the exact acceptance-spec path
+  and SHA-256 plus one formal raw-Git-blob input-manifest identity above.
 
 These are programmer changes awaiting fresh independent review; this note does
 not mark any finding accepted or the R2 gate passed.

@@ -168,6 +168,7 @@ class GaitConfig:
     minimum_touchdown_progress: float = 0.70
     touchdown_position_tolerance_m: float = 0.045
     touchdown_height_tolerance_m: float = 0.025
+    touchdown_yaw_tolerance_rad: float = math.radians(5.0)
     dock_position_tolerance_m: float = 0.050
     dock_yaw_tolerance_rad: float = math.radians(5.0)
     dock_linear_speed_tolerance_mps: float = 0.035
@@ -206,6 +207,7 @@ class GaitConfig:
             self.minimum_touchdown_progress,
             self.touchdown_position_tolerance_m,
             self.touchdown_height_tolerance_m,
+            self.touchdown_yaw_tolerance_rad,
             self.dock_position_tolerance_m,
             self.dock_yaw_tolerance_rad,
             self.dock_linear_speed_tolerance_mps,
@@ -550,8 +552,11 @@ class ConservativeGaitTargetGenerator:
                 f"{prefix}_hip_pitch_joint": sign * physical_hip,
                 f"{prefix}_knee_joint": sign * knee,
                 f"{prefix}_ankle_pitch_joint": sign * physical_ankle,
-                f"{prefix}_hip_yaw_joint": blend
-                * _wrap_angle(step.foot_target.yaw_rad - swing_start_pose.yaw_rad),
+                # Both hip-yaw axes are -Z in the supplied URDF, so the joint
+                # target is the negative of the desired physical/world yaw.
+                f"{prefix}_hip_yaw_joint": -_wrap_angle(
+                    step.foot_target.yaw_rad - swing_start_pose.yaw_rad
+                ),
                 f"{prefix}_hip_roll_joint": lateral_scale
                 * self.config.landing_hip_roll_rad,
                 # Both hip-roll axes are +X and both ankle-roll axes are -X,
@@ -680,9 +685,16 @@ class BipedLocomotionController:
 
     def update(self) -> LocomotionCommand:
         feedback = self.feedback_source.read_feedback()
-        _validate_feedback(feedback)
-        if self._last_timestamp_s is not None and feedback.timestamp_s <= self._last_timestamp_s:
-            raise LocomotionError("feedback timestamps must increase strictly")
+        try:
+            _validate_feedback(feedback)
+            if (
+                self._last_timestamp_s is not None
+                and feedback.timestamp_s <= self._last_timestamp_s
+            ):
+                raise LocomotionError("feedback timestamps must increase strictly")
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            self._fault(f"invalid locomotion feedback: {exc}")
+            return self._fault_command()
         self._last_timestamp_s = feedback.timestamp_s
 
         if self.state is LocomotionState.ACTIVE and not self._steps:
@@ -857,12 +869,14 @@ class BipedLocomotionController:
             foot.pose.position_m[1] - step.foot_target.position_m[1],
         )
         height_error = abs(foot.pose.position_m[2] - step.foot_target.position_m[2])
+        yaw_error = abs(_wrap_angle(foot.pose.yaw_rad - step.foot_target.yaw_rad))
         valid_touchdown = (
             self._saw_swing_unloaded
             and foot.in_contact
             and progress >= self.config.minimum_touchdown_progress
             and position_error_xy <= self.config.touchdown_position_tolerance_m
             and height_error <= self.config.touchdown_height_tolerance_m
+            and yaw_error <= self.config.touchdown_yaw_tolerance_rad
         )
         if valid_touchdown:
             self._step_index += 1
