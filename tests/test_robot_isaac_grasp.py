@@ -30,6 +30,7 @@ from robot_spike.production.physical_grasp import (
 from robot_spike.production.run_grasp_smoke import (
     GraspSmokeRunner,
     PREGRASP_ARM_JOINTS_RAD,
+    PREGRASP_CLEARANCE_VIAS_RAD,
     _entrypoint,
     _terminate_process,
     diagnostic_fingertip_paths,
@@ -594,6 +595,195 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             self.spec.model.joint_limits["right_shoulder_pitch_joint"].effort,
             self.spec.model.joint_limits["right_elbow_joint"].effort,
         )
+
+    def test_6735_board_collision_reversal_uses_bounded_clearance_vias(self):
+        from robot_spike.production.arm_reach import RightArmKinematics
+
+        # Exact measured/target samples bracketing the 6735 physical reversal.
+        # The elbow and wrist both reversed after sample 122 while their drive
+        # targets continued in the original direction.
+        elbow_samples = (
+            (122, -0.1072244793176651, -0.1385341110151554),
+            (123, -0.10671626031398773, -0.13966040460064447),
+            (124, -0.10134857892990112, -0.1407866981861335),
+            (151, 0.0001753749093040824, -0.17119662499433838),
+        )
+        self.assertLess(elbow_samples[0][1], elbow_samples[1][1])
+        self.assertTrue(all(
+            later[2] < earlier[2]
+            for earlier, later in zip(elbow_samples, elbow_samples[1:])
+        ))
+
+        kinematics = RightArmKinematics(self.spec)
+        plan = pickup_reset_plan(self.spec, self.layout, kinematics)
+        articulation = FakeArticulation(self.spec)
+        port = IsaacArmApproachPort(
+            RecordingController(),
+            articulation,
+            kinematics,
+            lambda: 0.0,
+            command_period_s=1.0 / 120.0,
+            joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
+            required_final_confirmations=grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES,
+        )
+        self.assertTrue(port.request_approach(plan.arm_target, 3.0))
+        waypoints = tuple(port._waypoints)
+        self.assertEqual(len(waypoints), 324)
+        self.assertLessEqual(
+            len(waypoints) + grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES, 360
+        )
+        self.assertEqual(waypoints[-1], port._goal)
+        via_indices = [waypoints.index(via) for via in PREGRASP_CLEARANCE_VIAS_RAD]
+        self.assertEqual(via_indices, sorted(via_indices))
+
+        previous = {name: 0.0 for name in ARM_DOF_NAMES}
+        for waypoint in waypoints:
+            checked = self.spec.validate_targets(waypoint)
+            self.assertEqual(set(checked), set(ARM_DOF_NAMES))
+            for name in ARM_DOF_NAMES:
+                self.assertLessEqual(
+                    abs(waypoint[name] - previous[name]),
+                    port.planner.maximum_step_for_joint(name) + 1.0e-12,
+                )
+            previous = waypoint
+
+        yaw = 2.0 * math.atan2(
+            plan.root_orientation_wxyz[3], plan.root_orientation_wxyz[0]
+        )
+        cosine, sine = math.cos(yaw), math.sin(yaw)
+        board = self.layout.pickup_support.fixture
+        world_palm = []
+        for waypoint in waypoints:
+            local = kinematics.forward(waypoint).position_m
+            root_x = grasp_smoke.WAIST_ORIGIN_IN_ROOT_M[0] + local[0]
+            root_y = grasp_smoke.WAIST_ORIGIN_IN_ROOT_M[1] + local[1]
+            world_palm.append((
+                plan.root_position_m[0] + cosine * root_x - sine * root_y,
+                plan.root_position_m[1] + sine * root_x + cosine * root_y,
+                plan.root_position_m[2]
+                + grasp_smoke.WAIST_ORIGIN_IN_ROOT_M[2]
+                + local[2],
+            ))
+        # Once the palm crosses the fixture's front face, its center is already
+        # above the board with a physical clearance margin. The old trace put
+        # it at y=.7662/z=.6711 immediately before the coupled reversal.
+        crossing = [pose for pose in world_palm if pose[1] >= board.minimum_m[1]]
+        self.assertTrue(crossing)
+        self.assertGreaterEqual(
+            min(pose[2] for pose in crossing), board.maximum_m[2] + 0.12
+        )
+
+        # Check every authored collision geometry on the complete robot at
+        # every command. Mesh bounds use all vertices. Primitive bounds use a
+        # conservative enclosing box, so disjoint bounds prove the authored
+        # geometry cannot intersect the pickup-board AABB.
+        import xml.etree.ElementTree as ET
+
+        import numpy as np
+        import trimesh
+
+        from robot_spike.validate_combined_model import _fk, _origin
+
+        robot = ET.parse(self.spec.model.path).getroot()
+        children = {}
+        for joint in robot.findall("joint"):
+            parent = joint.find("parent").attrib["link"]
+            children.setdefault(parent, []).append(joint)
+        collision_geometry = []
+        for link in robot.findall("link"):
+            for collision in link.findall("collision"):
+                geometry = collision.find("geometry")
+                mesh_element = geometry.find("mesh")
+                if mesh_element is not None:
+                    mesh_path = (
+                        self.spec.model.path.parent / mesh_element.attrib["filename"]
+                    ).resolve()
+                    vertices = np.asarray(
+                        trimesh.load_mesh(mesh_path, process=False).vertices,
+                        dtype=float,
+                    )
+                else:
+                    sphere = geometry.find("sphere")
+                    cylinder = geometry.find("cylinder")
+                    if sphere is not None:
+                        radius = float(sphere.attrib["radius"])
+                        half_extents = (radius, radius, radius)
+                    elif cylinder is not None:
+                        radius = float(cylinder.attrib["radius"])
+                        half_extents = (
+                            radius,
+                            radius,
+                            float(cylinder.attrib["length"]) / 2.0,
+                        )
+                    else:
+                        self.fail(
+                            f"unsupported authored collision geometry on {link.attrib['name']}"
+                        )
+                    vertices = np.asarray([
+                        (x, y, z)
+                        for x in (-half_extents[0], half_extents[0])
+                        for y in (-half_extents[1], half_extents[1])
+                        for z in (-half_extents[2], half_extents[2])
+                    ])
+                collision_geometry.append((
+                    link.attrib["name"],
+                    collision.attrib.get("name", ""),
+                    _origin(collision.find("origin")),
+                    vertices,
+                ))
+        self.assertEqual(len(collision_geometry), 82)
+
+        root_transform = np.eye(4)
+        root_transform[:3, :3] = (
+            (cosine, -sine, 0.0),
+            (sine, cosine, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+        root_transform[:3, 3] = plan.root_position_m
+        board_minimum = np.asarray(board.minimum_m)
+        board_maximum = np.asarray(board.maximum_m)
+        for step, waypoint in enumerate(waypoints):
+            link_transforms = _fk("pelvis_link", children, waypoint)
+            for link_name, collision_name, local, vertices in collision_geometry:
+                world = trimesh.transform_points(
+                    vertices, root_transform @ link_transforms[link_name] @ local
+                )
+                geometry_minimum = world.min(axis=0)
+                geometry_maximum = world.max(axis=0)
+                separated = bool(
+                    np.any(geometry_maximum < board_minimum)
+                    or np.any(geometry_minimum > board_maximum)
+                )
+                self.assertTrue(
+                    separated,
+                    f"step {step} {link_name}/{collision_name} overlaps pickup board",
+                )
+
+    def test_arm_approach_rejects_start_without_confirmation_reserve(self):
+        from robot_spike.production.arm_reach import RightArmKinematics
+
+        kinematics = RightArmKinematics(self.spec)
+        plan = pickup_reset_plan(self.spec, self.layout, kinematics)
+        articulation = FakeArticulation(self.spec)
+        articulation.positions["right_shoulder_pitch_joint"] = (
+            self.spec.model.joint_limits["right_shoulder_pitch_joint"].lower
+        )
+        port = IsaacArmApproachPort(
+            RecordingController(),
+            articulation,
+            kinematics,
+            lambda: 0.0,
+            command_period_s=1.0 / 120.0,
+            joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
+            required_final_confirmations=grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES,
+        )
+        self.assertFalse(port.request_approach(plan.arm_target, 3.0))
+        self.assertEqual(
+            port.last_error,
+            "bounded arm approach cannot finish and reserve final "
+            "confirmations before deadline",
+        )
+        self.assertEqual(port._waypoints, [])
 
     def test_pickup_reset_plan_stages_base_and_preserves_dynamic_product(self):
         from robot_spike.production.arm_reach import RightArmKinematics

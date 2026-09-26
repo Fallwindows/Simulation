@@ -1,8 +1,13 @@
+> **HISTORICAL / OPTIONAL — LEGACY VIDEO WORKFLOW.** Use this document only
+> when the current `/goal` explicitly invokes the legacy simulation-video
+> workflow. Current owner instructions, `AGENTS.md`, and
+> `EXECUTION_OVERRIDES.md` take precedence. This document does not impose model
+> routing, mandatory review, or push restrictions on other goals.
 # Agent roles and local code-review contract
 
 Version: 1.1 · Updated: 2026-09-20  
 Project: `Fallwindows/Simulation`  
-Status: Active role rules under `EXECUTION_OVERRIDES.md`. These files do not themselves start agents, configure the local runner, or enforce permissions; production begins after the owner's `/goal`.
+Status: Historical, optional workflow. These files do not themselves start agents, configure the local runner, or enforce permissions.
 
 ## Purpose and authority
 

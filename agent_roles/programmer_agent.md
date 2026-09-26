@@ -1,3 +1,8 @@
+> **HISTORICAL / OPTIONAL — LEGACY VIDEO WORKFLOW.** Use this document only
+> when the current `/goal` explicitly invokes the legacy simulation-video
+> workflow. Current owner instructions, `AGENTS.md`, and
+> `EXECUTION_OVERRIDES.md` take precedence. This document does not impose model
+> routing, mandatory review, or push restrictions on other goals.
 # General-purpose programmer — GPT-5.6 Sol
 
 Version: 1.1 · Project: `Fallwindows/Simulation`  

@@ -1,3 +1,8 @@
+> **HISTORICAL / GOAL-SCOPED SPECIFICATION.** This detailed simulation-video
+> specification retains its technical content for reference. Apply it only
+> when the current `/goal` explicitly invokes the simulation-video workflow.
+> It does not set global model, review, or push requirements. Current owner
+> instructions, `AGENTS.md`, and `EXECUTION_OVERRIDES.md` take precedence.
 # Grocery-store software demonstration — implementation specification
 
 **Project:** `Fallwindows/Simulation`  

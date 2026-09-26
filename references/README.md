@@ -1,3 +1,6 @@
+> **HISTORICAL / GOAL-SCOPED REFERENCES.** These storyboard assets and their
+> legacy usage notes apply only when the current `/goal` explicitly invokes the
+> simulation-video workflow.
 # Storyboard reference assets
 
 These are the 12 original user-supplied storyboard images, in shot order. Their original bytes are preserved under descriptive filenames. `manifest.json` maps every renamed file to its original upload, dimensions, SHA-256 checksum, and shot interval.

@@ -1,0 +1,106 @@
+{
+  "candidate": "1fe5ac5c42466b3ea581b73585e919e0a8e32117",
+  "command_target_rad": 0.2,
+  "commanded_joint": "right_shoulder_pitch_joint",
+  "commanded_joint_delta_rad": 0.1764313681051135,
+  "deterministic_reset_observed": true,
+  "dof_count": 40,
+  "dof_names": [
+    "left_hip_pitch_joint",
+    "right_hip_pitch_joint",
+    "waist_yaw_joint",
+    "left_hip_roll_joint",
+    "right_hip_roll_joint",
+    "right_shoulder_pitch_joint",
+    "left_shoulder_pitch_joint",
+    "left_hip_yaw_joint",
+    "right_hip_yaw_joint",
+    "right_shoulder_roll_joint",
+    "left_shoulder_roll_joint",
+    "left_knee_joint",
+    "right_knee_joint",
+    "right_shoulder_yaw_joint",
+    "left_shoulder_yaw_joint",
+    "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint",
+    "right_elbow_joint",
+    "left_elbow_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+    "right_wrist_yaw_joint",
+    "left_wrist_yaw_joint",
+    "right_wrist",
+    "right_thumb_mcp",
+    "right_index_abd",
+    "right_middle_abd",
+    "right_ring_abd",
+    "right_pinky_abd",
+    "right_thumb_abd",
+    "right_index_mcp",
+    "right_middle_mcp",
+    "right_ring_mcp",
+    "right_pinky_mcp",
+    "right_thumb_pip",
+    "right_index_pip",
+    "right_middle_pip",
+    "right_ring_pip",
+    "right_pinky_pip",
+    "right_thumb_dip"
+  ],
+  "drive_response_observed": true,
+  "exact_dof_set": true,
+  "foot_ground_contact_observed": true,
+  "foot_link_paths": {
+    "left_ankle_roll_link": "/World/Robot/Geometry/pelvis_link/left_hip_pitch_link/left_hip_roll_link/left_hip_yaw_link/left_knee_link/left_ankle_pitch_link/left_ankle_roll_link",
+    "right_ankle_roll_link": "/World/Robot/Geometry/pelvis_link/right_hip_pitch_link/right_hip_roll_link/right_hip_yaw_link/right_knee_link/right_ankle_pitch_link/right_ankle_roll_link"
+  },
+  "generated_usd": "C:\\Users\\suyog\\.codex\\worktrees\\restock-r1-runtime\\Simulation\\robot_spike\\evidence\\isaac_r1_runtime\\imported\\asimov_orcahand_restocking_6\\asimov_orcahand_restocking.usda",
+  "generated_usd_bytes": 788,
+  "neutral_pose_stable": false,
+  "physics_dt_s": 0.005,
+  "repeat_reset_joint_max_error_rad": 0.0,
+  "repeat_reset_orientation_max_error": 0.0,
+  "repeat_reset_root_position_max_error_m": 0.0,
+  "root_drift_from_reset_m": 0.1680669252835249,
+  "root_tilt_from_upright_deg": 18.827507861759205,
+  "settled_left_foot_ground_contact_force_n": [
+    1.9332625015522353e-05,
+    0.0,
+    143.88800048828125
+  ],
+  "settled_right_foot_ground_contact_force_n": [
+    2.156839400413446e-05,
+    0.0,
+    160.52828979492188
+  ],
+  "settled_root_pose": {
+    "orientation_wxyz": [
+      0.9865329265594482,
+      0.0011244416236877441,
+      -0.1635587364435196,
+      0.00022304058074951172
+    ],
+    "position": [
+      -0.168047696352005,
+      0.0006212275475263596,
+      0.6325348019599915
+    ]
+  },
+  "settled_root_velocity": {
+    "angular_rad_s": [
+      -0.000141248558065854,
+      -0.7209886908531189,
+      -3.2005241337174084e-06
+    ],
+    "linear_m_s": [
+      -0.4670848548412323,
+      -0.0017852355958893895,
+      -0.07001496851444244
+    ]
+  },
+  "stage_meters_per_unit": 1.0,
+  "status": "completed",
+  "task": "R1 free-base Isaac import, target response, contact, and reset smoke",
+  "usd_collision_prim_count": 48,
+  "usd_rigid_body_prim_count": 61
+}
