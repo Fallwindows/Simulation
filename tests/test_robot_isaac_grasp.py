@@ -16,6 +16,7 @@ from robot_spike.production.isaac_grasp import (
     IsaacArmLiftPort,
     IsaacContactBindings,
     MEASURED_JOINT_LIMIT_NOISE_RAD,
+    _approach_step_budget_fits,
 )
 from robot_spike.production.arm_reach import ARM_DOF_NAMES, ToolPose
 from robot_spike.production.model import load_production_spec
@@ -436,6 +437,7 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             FakeKinematics(self.spec),
             lambda: clock[0],
             command_period_s=0.01,
+            required_settling_samples=0,
         )
         port.planner = FakePlanner()
         target = ToolPose((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0))
@@ -457,6 +459,7 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             kinematics,
             lambda: clock[0],
             command_period_s=0.01,
+            required_settling_samples=0,
         )
         zero = {name: 0.0 for name in ARM_DOF_NAMES}
         target = kinematics.forward(zero)
@@ -500,6 +503,7 @@ class IsaacGraspAdapterTests(unittest.TestCase):
                 FakeKinematics(self.spec),
                 lambda: clock[0],
                 command_period_s=0.01,
+                required_settling_samples=0,
             )
             approach.planner = FakePlanner()
 
@@ -625,12 +629,16 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             command_period_s=1.0 / 120.0,
             joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
             required_final_confirmations=grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES,
+            required_settling_samples=grasp_smoke.PREGRASP_SETTLING_RESERVE_SAMPLES,
         )
         self.assertTrue(port.request_approach(plan.arm_target, 3.0))
         waypoints = tuple(port._waypoints)
         self.assertEqual(len(waypoints), 324)
         self.assertLessEqual(
-            len(waypoints) + grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES, 360
+            len(waypoints)
+            + grasp_smoke.PREGRASP_SETTLING_RESERVE_SAMPLES
+            + grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES,
+            360,
         )
         self.assertEqual(waypoints[-1], port._goal)
         via_indices = [waypoints.index(via) for via in PREGRASP_CLEARANCE_VIAS_RAD]
@@ -759,6 +767,60 @@ class IsaacGraspAdapterTests(unittest.TestCase):
                     f"step {step} {link_name}/{collision_name} overlaps pickup board",
                 )
 
+    def test_approach_settling_and_confirmation_budget_exact_boundary(self):
+        from robot_spike.production.arm_reach import RightArmKinematics
+
+        period = 1.0 / 120.0
+        settling = grasp_smoke.PREGRASP_SETTLING_RESERVE_SAMPLES
+        confirmations = grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES
+        self.assertTrue(
+            _approach_step_budget_fits(324, settling, confirmations, period, 339 * period)
+        )
+        self.assertFalse(
+            _approach_step_budget_fits(324, settling, confirmations, period, 338 * period)
+        )
+        self.assertTrue(_approach_step_budget_fits(357, 0, 3, period, 3.0))
+        self.assertFalse(_approach_step_budget_fits(357, settling, 3, period, 3.0))
+
+        kinematics = RightArmKinematics(self.spec)
+        plan = pickup_reset_plan(self.spec, self.layout, kinematics)
+        articulation = FakeArticulation(self.spec)
+        clock = [2.0]
+        port = IsaacArmApproachPort(
+            ArticulationController(self.spec, articulation),
+            articulation,
+            kinematics,
+            lambda: clock[0],
+            command_period_s=period,
+            joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
+            required_final_confirmations=confirmations,
+            required_settling_samples=settling,
+        )
+        self.assertTrue(port.request_approach(plan.arm_target, 339 * period))
+        self.assertEqual(len(port._waypoints), 324)
+
+        elapsed_steps = 0
+        for _ in range(324):
+            self.assertTrue(port.advance())
+            clock[0] += period
+            elapsed_steps += 1
+        self.assertFalse(port.target_reached())
+        for index in range(settling):
+            self.assertTrue(port.advance())
+            clock[0] += period
+            elapsed_steps += 1
+            self.assertFalse(port.target_reached())
+            diagnostics = port.diagnostics()
+            self.assertEqual(diagnostics["settling_samples_remaining"], settling - index - 1)
+        self.assertFalse(port.diagnostics()["settling_complete"])
+
+        for _ in range(confirmations):
+            self.assertTrue(port.advance())
+            clock[0] += period
+            elapsed_steps += 1
+            self.assertTrue(port.target_reached())
+        self.assertEqual(elapsed_steps, 339)
+
     def test_arm_approach_rejects_start_without_confirmation_reserve(self):
         from robot_spike.production.arm_reach import RightArmKinematics
 
@@ -776,11 +838,12 @@ class IsaacGraspAdapterTests(unittest.TestCase):
             command_period_s=1.0 / 120.0,
             joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
             required_final_confirmations=grasp_smoke.PREGRASP_CONFIRMATION_SAMPLES,
+            required_settling_samples=grasp_smoke.PREGRASP_SETTLING_RESERVE_SAMPLES,
         )
         self.assertFalse(port.request_approach(plan.arm_target, 3.0))
         self.assertEqual(
             port.last_error,
-            "bounded arm approach cannot finish and reserve final "
+            "bounded arm approach cannot finish, settle, and reserve final "
             "confirmations before deadline",
         )
         self.assertEqual(port._waypoints, [])

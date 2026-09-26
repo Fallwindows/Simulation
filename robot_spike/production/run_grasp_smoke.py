@@ -67,6 +67,7 @@ PREGRASP_CLEARANCE_VIAS_RAD = (
     dict(zip(ARM_DOF_NAMES, (1.500, 0.200, 0.000, -1.600, 0.000, -0.650))),
 )
 PREGRASP_MAXIMUM_DURATION_S = 3.0
+PREGRASP_SETTLING_RESERVE_SAMPLES = 12
 PREGRASP_CONFIRMATION_SAMPLES = 3
 
 
@@ -234,6 +235,9 @@ class PickupResetPlan:
                 dict(via) for via in PREGRASP_CLEARANCE_VIAS_RAD
             ],
             "arm_approach_maximum_duration_s": PREGRASP_MAXIMUM_DURATION_S,
+            "arm_approach_required_settling_samples": (
+                PREGRASP_SETTLING_RESERVE_SAMPLES
+            ),
             "arm_approach_required_final_confirmations": (
                 PREGRASP_CONFIRMATION_SAMPLES
             ),
@@ -724,6 +728,7 @@ def run_isaac(args: argparse.Namespace, repo: Path) -> SmokeResult:
             command_period_s=physics_dt,
             joint_space_vias=PREGRASP_CLEARANCE_VIAS_RAD,
             required_final_confirmations=PREGRASP_CONFIRMATION_SAMPLES,
+            required_settling_samples=PREGRASP_SETTLING_RESERVE_SAMPLES,
         )
         lift = IsaacArmLiftPort(
             joint_controller, articulation, kinematics,

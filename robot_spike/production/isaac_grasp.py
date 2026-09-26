@@ -397,6 +397,36 @@ class Isaac61GraspFeedbackAdapter:
 
 
 MEASURED_JOINT_LIMIT_NOISE_RAD = 1.0e-5
+APPROACH_DEADLINE_TOLERANCE_S = 1.0e-12
+
+
+def _approach_step_budget_fits(
+    waypoint_count: int,
+    required_settling_samples: int,
+    required_final_confirmations: int,
+    command_period_s: float,
+    maximum_duration_s: float,
+) -> bool:
+    counts = (
+        waypoint_count,
+        required_settling_samples,
+        required_final_confirmations,
+    )
+    if (
+        any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in counts
+        )
+        or not math.isfinite(command_period_s)
+        or command_period_s <= 0.0
+        or not math.isfinite(maximum_duration_s)
+        or maximum_duration_s <= 0.0
+    ):
+        return False
+    available_steps = math.floor(
+        (maximum_duration_s + APPROACH_DEADLINE_TOLERANCE_S) / command_period_s
+    )
+    return sum(counts) <= available_steps
 
 
 class IsaacArmApproachPort:
@@ -412,6 +442,7 @@ class IsaacArmApproachPort:
         command_period_s: float,
         joint_space_vias: Sequence[Mapping[str, float]] = (),
         required_final_confirmations: int = 1,
+        required_settling_samples: int,
         position_tolerance_m: float = 0.015,
         orientation_tolerance_rad: float = 0.08,
     ) -> None:
@@ -436,6 +467,16 @@ class IsaacArmApproachPort:
         ):
             raise ValueError("required final confirmations must be a positive integer")
         self.required_final_confirmations = required_final_confirmations
+        if (
+            isinstance(required_settling_samples, bool)
+            or not isinstance(required_settling_samples, int)
+            or required_settling_samples < 0
+        ):
+            raise ValueError("required settling samples must be a nonnegative integer")
+        self.required_settling_samples = required_settling_samples
+        self._settling_remaining = 0
+        self._settling_awaiting_confirmation_step = False
+        self._settling_complete = False
         self.position_tolerance_m = float(position_tolerance_m)
         self.orientation_tolerance_rad = float(orientation_tolerance_rad)
         self.planner = ArmReachPlanner(kinematics, command_period_s=command_period_s)
@@ -537,10 +578,15 @@ class IsaacArmApproachPort:
             self.last_error = str(exc)
             self._waypoints = []
             return False
-        reserved_steps = len(self._waypoints) + self.required_final_confirmations
-        if reserved_steps * self.command_period_s > maximum_duration_s + 1.0e-12:
+        if not _approach_step_budget_fits(
+            len(self._waypoints),
+            self.required_settling_samples,
+            self.required_final_confirmations,
+            self.command_period_s,
+            maximum_duration_s,
+        ):
             self.last_error = (
-                "bounded arm approach cannot finish and reserve final "
+                "bounded arm approach cannot finish, settle, and reserve final "
                 "confirmations before deadline"
             )
             self._waypoints = []
@@ -552,6 +598,9 @@ class IsaacArmApproachPort:
             return False
         self._target = target
         self._deadline_s = now + maximum_duration_s
+        self._settling_remaining = self.required_settling_samples
+        self._settling_awaiting_confirmation_step = False
+        self._settling_complete = self.required_settling_samples == 0
         return True
 
     def _observation_within_deadline(self) -> bool:
@@ -561,7 +610,10 @@ class IsaacArmApproachPort:
             now = float(self.timestamp_source())
         except (TypeError, ValueError, OverflowError):
             now = math.nan
-        if not math.isfinite(now) or now > self._deadline_s:
+        if (
+            not math.isfinite(now)
+            or now > self._deadline_s + APPROACH_DEADLINE_TOLERANCE_S
+        ):
             self.last_error = "arm approach deadline expired"
             self._waypoints.clear()
             return False
@@ -570,14 +622,22 @@ class IsaacArmApproachPort:
     def advance(self) -> bool:
         if not self._observation_within_deadline():
             return False
-        if not self._waypoints:
+        if self._waypoints:
+            targets = self._waypoints.pop(0)
+            commanded = tuple(self.controller.command_joint_positions(targets))
+            if commanded != ARM_DOF_NAMES:
+                self.last_error = f"unexpected arm approach command set: {commanded}"
+                self._waypoints.clear()
+                return False
             return True
-        targets = self._waypoints.pop(0)
-        commanded = tuple(self.controller.command_joint_positions(targets))
-        if commanded != ARM_DOF_NAMES:
-            self.last_error = f"unexpected arm approach command set: {commanded}"
-            self._waypoints.clear()
-            return False
+        if not self._settling_complete:
+            if self._settling_remaining > 0:
+                self._settling_remaining -= 1
+                if self._settling_remaining == 0:
+                    self._settling_awaiting_confirmation_step = True
+            elif self._settling_awaiting_confirmation_step:
+                self._settling_awaiting_confirmation_step = False
+                self._settling_complete = True
         return True
 
     def measured_error(self) -> tuple[float, float]:
@@ -605,6 +665,8 @@ class IsaacArmApproachPort:
         # being counted merely because advance() ran before the step.
         if not self._observation_within_deadline():
             return False
+        if not self._settling_complete:
+            return False
         position_error, orientation_error = self.measured_error()
         return (
             not self._waypoints
@@ -624,6 +686,9 @@ class IsaacArmApproachPort:
             },
             "goal_joint_positions_rad": dict(sorted(self._goal.items())),
             "remaining_waypoints": len(self._waypoints),
+            "required_settling_samples": self.required_settling_samples,
+            "settling_samples_remaining": self._settling_remaining,
+            "settling_complete": self._settling_complete,
             "required_final_confirmations": self.required_final_confirmations,
             "position_error_m": position_error,
             "orientation_error_rad": orientation_error,
@@ -631,6 +696,7 @@ class IsaacArmApproachPort:
             "orientation_tolerance_rad": self.orientation_tolerance_rad,
             "target_reached": self.target_reached(),
             "deadline_s": self._deadline_s,
+            "deadline_tolerance_s": APPROACH_DEADLINE_TOLERANCE_S,
             "measured_joint_limit_noise_tolerance_rad": (
                 MEASURED_JOINT_LIMIT_NOISE_RAD
             ),
