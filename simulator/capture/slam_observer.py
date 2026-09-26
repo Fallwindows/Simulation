@@ -21,6 +21,35 @@ def _stamp(stamp) -> float:
     return float(stamp.sec) + float(stamp.nanosec) / 1_000_000_000.0
 
 
+def _qos_policy_receipt(value) -> dict[str, object]:
+    name = getattr(value, "name", None)
+    if name is None:
+        name = str(value)
+    raw_value = getattr(value, "value", None)
+    if raw_value is None:
+        try:
+            raw_value = int(value)
+        except (TypeError, ValueError):
+            raw_value = None
+    return {"name": str(name).lower(), "value": raw_value}
+
+
+def _publisher_endpoint_qos_receipt(records: list[object]) -> list[dict[str, object]]:
+    receipts = []
+    for record in records:
+        qos = record.qos_profile
+        receipts.append({
+            "node_name": str(getattr(record, "node_name", "")),
+            "node_namespace": str(getattr(record, "node_namespace", "")),
+            "topic_type": str(getattr(record, "topic_type", "")),
+            "durability": _qos_policy_receipt(qos.durability),
+            "reliability": _qos_policy_receipt(qos.reliability),
+            "history": _qos_policy_receipt(qos.history),
+            "depth": int(qos.depth),
+        })
+    return receipts
+
+
 def _quat_normalize(q: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     norm = math.sqrt(sum(value * value for value in q))
     if not math.isfinite(norm) or norm <= 1e-12:
@@ -563,12 +592,18 @@ class SlamObserver:
         self.active_map_subscription_generation: int | None = 0
         self.map_subscription_rebinds = 0
         self.map_subscription_publisher_counts: dict[str, int] = {}
-        self.map_subscription_qos_premise = "all three publishers are volatile; late-joining readers receive only post-match samples"
+        self.map_subscription_endpoint_qos: dict[str, object] = {}
+        self.map_subscription_qos_premise = (
+            "each explicit reliable/volatile reader receives only post-match samples from an exactly reliable "
+            "writer with volatile or transient-local durability; unknown/system-default policies are rejected"
+        )
         self.map_subscription_qos_contract = {
             "history": "keep_last", "depth": 1, "reliability": "reliable", "durability": "volatile",
         }
         self.callback_executor_model = "single_threaded_explicit_rclpy_spin_once"
         self.volatile_durability_policy = DurabilityPolicy.VOLATILE
+        self.transient_local_durability_policy = DurabilityPolicy.TRANSIENT_LOCAL
+        self.reliable_policy = ReliabilityPolicy.RELIABLE
         self.map_subscription_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
@@ -854,24 +889,54 @@ class SlamObserver:
                 topic: int(subscription.get_publisher_count())
                 for topic, subscription in current_subscriptions
             }
-            if any(count > 1 for count in publisher_counts.values()):
-                self._retire_map_subscriptions(generation)
-                raise RuntimeError(f"fresh PublishMap subscription matched an unexpected publisher count: {publisher_counts}")
             endpoint_info = {
                 topic: list(self.node.get_publishers_info_by_topic(topic))
                 for topic, _ in current_subscriptions
             }
+            endpoint_qos = {
+                topic: {
+                    "publisher_count": publisher_counts[topic],
+                    "writers": _publisher_endpoint_qos_receipt(records),
+                }
+                for topic, records in endpoint_info.items()
+            }
+            self.map_subscription_publisher_counts = dict(publisher_counts)
+            self.map_subscription_endpoint_qos = endpoint_qos
+            if any(count > 1 for count in publisher_counts.values()):
+                self._retire_map_subscriptions(generation)
+                raise RuntimeError(
+                    "fresh PublishMap subscription matched an unexpected publisher count: "
+                    f"{json.dumps(endpoint_qos, sort_keys=True)}"
+                )
             if any(len(records) > 1 for records in endpoint_info.values()):
                 self._retire_map_subscriptions(generation)
-                raise RuntimeError("fresh PublishMap subscription discovered multiple publisher endpoints")
+                raise RuntimeError(
+                    "fresh PublishMap subscription discovered multiple publisher endpoints: "
+                    f"{json.dumps(endpoint_qos, sort_keys=True)}"
+                )
             ready = all(publisher_counts[topic] == 1 and len(endpoint_info[topic]) == 1 for topic in publisher_counts)
             if ready:
                 if any(
-                    records[0].qos_profile.durability != self.volatile_durability_policy
+                    records[0].qos_profile.durability not in {
+                        self.volatile_durability_policy,
+                        self.transient_local_durability_policy,
+                    }
                     for records in endpoint_info.values()
                 ):
                     self._retire_map_subscriptions(generation)
-                    raise RuntimeError("fresh PublishMap publisher is not volatile; generation rebinding is not a valid fence")
+                    raise RuntimeError(
+                        "fresh PublishMap writer durability cannot prove a new-samples-only volatile-reader fence: "
+                        f"{json.dumps(endpoint_qos, sort_keys=True)}"
+                    )
+                if any(
+                    records[0].qos_profile.reliability != self.reliable_policy
+                    for records in endpoint_info.values()
+                ):
+                    self._retire_map_subscriptions(generation)
+                    raise RuntimeError(
+                        "fresh PublishMap writer reliability is not exactly reliable: "
+                        f"{json.dumps(endpoint_qos, sort_keys=True)}"
+                    )
                 break
             if time.monotonic() >= deadline:
                 self._retire_map_subscriptions(generation)
@@ -1064,6 +1129,7 @@ class SlamObserver:
                 "subscription_generation": subscription_generation,
                 "subscriptions_matched": True,
                 "matched_publisher_counts": dict(publisher_counts),
+                "publisher_endpoint_qos": json.loads(json.dumps(self.map_subscription_endpoint_qos)),
                 "publisher_qos_premise": self.map_subscription_qos_premise,
                 "subscription_qos": dict(self.map_subscription_qos_contract),
                 "callback_executor_model": self.callback_executor_model,
@@ -1643,6 +1709,7 @@ class SlamObserver:
             "map_subscription_rebinds": getattr(self, "map_subscription_rebinds", 0),
             "retired_map_subscription_generations": getattr(self, "retired_map_subscription_generations", []),
             "map_subscription_publisher_counts": getattr(self, "map_subscription_publisher_counts", {}),
+            "map_subscription_endpoint_qos": getattr(self, "map_subscription_endpoint_qos", {}),
             "map_subscription_qos_premise": getattr(self, "map_subscription_qos_premise", None),
             "map_subscription_qos_contract": getattr(self, "map_subscription_qos_contract", {}),
             "callback_executor_model": getattr(self, "callback_executor_model", None),

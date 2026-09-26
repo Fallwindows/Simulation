@@ -1195,6 +1195,9 @@ $global:LASTEXITCODE = 0
                 def __init__(self):
                     self.subscriptions = []; self.publisher_count = 1
                     self.publisher_durability = "volatile"
+                    self.publisher_reliability = "reliable"
+                    self.publisher_history = "keep_last"
+                    self.publisher_depth = 1
                     self.create_failure_topic = None; self.destroy_failure_topics = set()
                 def create_subscription(self, message_type, topic, callback, depth):
                     if topic == self.create_failure_topic:
@@ -1209,7 +1212,17 @@ $global:LASTEXITCODE = 0
                     return True
                 def get_publishers_info_by_topic(self, topic):
                     return [
-                        types.SimpleNamespace(qos_profile=types.SimpleNamespace(durability=self.publisher_durability))
+                        types.SimpleNamespace(
+                            node_name="rtabmap",
+                            node_namespace="/",
+                            topic_type=f"fixture/{topic}",
+                            qos_profile=types.SimpleNamespace(
+                                durability=self.publisher_durability,
+                                reliability=self.publisher_reliability,
+                                history=self.publisher_history,
+                                depth=self.publisher_depth,
+                            ),
+                        )
                         for _ in range(self.publisher_count)
                     ]
                 def destroy_node(self): pass
@@ -1314,7 +1327,11 @@ $global:LASTEXITCODE = 0
             observer.map_subscription_generation = 0; observer.active_map_subscription_generation = 0
             observer.map_subscription_rebinds = 0; observer.retired_map_subscription_generations = []
             observer.map_subscription_publisher_counts = {}
-            observer.map_subscription_qos_premise = "all three publishers are volatile; late-joining readers receive only post-match samples"
+            observer.map_subscription_endpoint_qos = {}
+            observer.map_subscription_qos_premise = (
+                "each explicit reliable/volatile reader receives only post-match samples from an exactly reliable "
+                "writer with volatile or transient-local durability; unknown/system-default policies are rejected"
+            )
             observer.map_subscription_qos_contract = {
                 "history": "keep_last", "depth": 1, "reliability": "reliable", "durability": "volatile",
             }
@@ -1323,6 +1340,8 @@ $global:LASTEXITCODE = 0
             )
             observer.callback_executor_model = "single_threaded_explicit_rclpy_spin_once"
             observer.volatile_durability_policy = "volatile"
+            observer.transient_local_durability_policy = "transient_local"
+            observer.reliable_policy = "reliable"
             observer.ignored_stale_map_cloud_callbacks = 0
             observer.ignored_stale_map_graph_callbacks = 0
             observer.ignored_stale_map_data_callbacks = 0
@@ -1354,6 +1373,10 @@ $global:LASTEXITCODE = 0
             self.assertEqual(observer.map_subscription_publisher_counts, {
                 "/slam/map_cloud": 1, "/mapGraph": 1, "/mapData": 1,
             })
+            self.assertEqual(
+                observer.map_subscription_endpoint_qos["/mapGraph"]["writers"][0]["durability"],
+                {"name": "volatile", "value": None},
+            )
             self.assertEqual(observer.ignored_stale_map_cloud_callbacks, 1)
             self.assertEqual(observer.ignored_stale_map_graph_callbacks, 1)
             self.assertEqual(observer.ignored_stale_map_data_callbacks, 1)
@@ -1371,6 +1394,18 @@ $global:LASTEXITCODE = 0
             self.assertEqual(observer.publish_map_attempt_receipts[1]["matched_publisher_counts"], {
                 "/slam/map_cloud": 1, "/mapGraph": 1, "/mapData": 1,
             })
+            self.assertEqual(
+                observer.publish_map_attempt_receipts[1]["publisher_endpoint_qos"]["/mapData"]["writers"][0],
+                {
+                    "node_name": "rtabmap",
+                    "node_namespace": "/",
+                    "topic_type": "fixture//mapData",
+                    "durability": {"name": "volatile", "value": None},
+                    "reliability": {"name": "reliable", "value": None},
+                    "history": {"name": "keep_last", "value": None},
+                    "depth": 1,
+                },
+            )
             self.assertEqual(
                 observer.publish_map_attempt_receipts[1]["callback_executor_model"],
                 "single_threaded_explicit_rclpy_spin_once",
@@ -1444,6 +1479,7 @@ $global:LASTEXITCODE = 0
             self.assertEqual(result["publish_map_attempts"], 2)
             self.assertEqual(len(result["publish_map_attempt_receipts"]), 2)
             self.assertEqual(result["map_subscription_rebinds"], 2)
+            self.assertEqual(result["map_subscription_endpoint_qos"]["/mapGraph"]["publisher_count"], 1)
             self.assertEqual(result["ignored_stale_map_cloud_callbacks"], 1)
             self.assertEqual(result["ignored_stale_map_graph_callbacks"], 1)
             self.assertEqual(result["ignored_stale_map_data_callbacks"], 1)
@@ -1623,13 +1659,53 @@ $global:LASTEXITCODE = 0
             observer.node.create_failure_topic = None
 
             observer.node.publisher_durability = "transient_local"
-            with self.assertRaisesRegex(RuntimeError, "publisher is not volatile"):
-                observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+            transient_generation, transient_counts = observer._rebind_map_subscriptions(
+                __import__("time").monotonic() + 1.0
+            )
+            self.assertEqual(transient_counts, {
+                "/slam/map_cloud": 1, "/mapGraph": 1, "/mapData": 1,
+            })
+            self.assertEqual(
+                observer.map_subscription_endpoint_qos["/slam/map_cloud"]["writers"][0]["durability"],
+                {"name": "transient_local", "value": None},
+            )
+            observer._retire_map_subscriptions(transient_generation)
             self.assertIsNone(observer.active_map_subscription_generation)
             self.assertIsNone(observer.map_cloud_subscription)
             self.assertIsNone(observer.map_graph_subscription)
             self.assertIsNone(observer.map_data_subscription)
+
+            for unknown_durability in ("unknown", "system_default"):
+                with self.subTest(writer_durability=unknown_durability):
+                    observer.node.publisher_durability = unknown_durability
+                    with self.assertRaisesRegex(RuntimeError, "cannot prove a new-samples-only"):
+                        observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+                    diagnostic = observer.map_subscription_endpoint_qos["/mapData"]
+                    self.assertEqual(diagnostic["publisher_count"], 1)
+                    self.assertEqual(diagnostic["writers"][0]["durability"]["name"], unknown_durability)
+                    self.assertEqual(diagnostic["writers"][0]["reliability"]["name"], "reliable")
+                    self.assertEqual(diagnostic["writers"][0]["history"]["name"], "keep_last")
+                    self.assertEqual(diagnostic["writers"][0]["depth"], 1)
+                    self.assertIsNone(observer.active_map_subscription_generation)
+                    self.assertIsNone(observer.map_cloud_subscription)
+                    self.assertIsNone(observer.map_graph_subscription)
+                    self.assertIsNone(observer.map_data_subscription)
             observer.node.publisher_durability = "volatile"
+
+            for invalid_reliability in ("best_effort", "unknown", "system_default"):
+                with self.subTest(writer_reliability=invalid_reliability):
+                    observer.node.publisher_reliability = invalid_reliability
+                    with self.assertRaisesRegex(RuntimeError, "reliability is not exactly reliable"):
+                        observer._rebind_map_subscriptions(__import__("time").monotonic() + 1.0)
+                    diagnostic = observer.map_subscription_endpoint_qos["/mapData"]
+                    self.assertEqual(diagnostic["publisher_count"], 1)
+                    self.assertEqual(diagnostic["writers"][0]["durability"]["name"], "volatile")
+                    self.assertEqual(diagnostic["writers"][0]["reliability"]["name"], invalid_reliability)
+                    self.assertIsNone(observer.active_map_subscription_generation)
+                    self.assertIsNone(observer.map_cloud_subscription)
+                    self.assertIsNone(observer.map_graph_subscription)
+                    self.assertIsNone(observer.map_data_subscription)
+            observer.node.publisher_reliability = "reliable"
 
             observer.node.publisher_count = 0
             with self.assertRaisesRegex(RuntimeError, "did not match all three publishers"):
