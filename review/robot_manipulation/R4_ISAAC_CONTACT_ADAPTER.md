@@ -1,0 +1,96 @@
+# R4 Isaac 6.1 contact adapter candidate
+
+## Scope and identity
+
+This source-only candidate connects the reviewed R4 controller to measured
+Isaac Sim 6.1 state. It does not claim an Isaac or PhysX execution result.
+
+- Integration base commit: `2212593c7851833fc408c0c9317814a1de9c1ec4`
+- Integration base tree: `4f1a4ae42d09008a2445824bf638535ddba69c5b`
+- Owner specification: `C:\Users\suyog\Downloads\ROBOT_BACKROOM_RESTOCKING_IMPLEMENTATION_SPEC.md`
+- Owner specification SHA-256: `7ea5ca5fa7558aa0a58bf94999adf545a7f6b53232fd155e2cc051cb15bcf0ad`
+- Installed Isaac identity inspected without starting it: `6.1.0-rc.26+release.49347.2d230af4.gl`
+- Approved combined source URDF canonical SHA-256: `25c62dd8459721ea41e7c3325ab6d4a816e05b34daa89759297151d464be84ea`
+- Production URDF canonical SHA-256: `b605c9a54f4a8494d333fd7cc5a20de3b4c76ffc83e33bd8027e6bafb7a1f59c`
+- Production URDF byte SHA-256 in this checkout: `16fd6716e21260cce3bbaa439bb7ed22c5bb12bbce60709b94f52cb4ae917dfd`
+- Preserved model: 66 links, 65 joints, 40 revolute DOFs, 94 mesh references; no model file is changed by this candidate.
+
+## Installed API signal
+
+The installed file
+`C:\isaacsim\exts\isaacsim.sensors.experimental.physics\isaacsim\sensors\experimental\physics\impl\contact_sensor.py`
+defines `ContactSensor.get_raw_data()` as raw dictionaries containing
+`body0`, `body1`, `position`, `normal`, `impulse`, `time`, and `dt`. Its own
+`get_data()` implementation resolves integer body handles with
+`pxr.PhysicsSchemaTools.intToSdfPath`.
+
+`Isaac61GraspFeedbackAdapter` uses the same resolver. It accepts only exact
+paths in a validated `IsaacContactBindings` object:
+
+- imported rigid-body paths for `right_thumb_ip` and `right_thumb_dp`;
+- imported rigid-body paths for `right_index_ip`, `right_middle_ip`,
+  `right_ring_ip`, `right_pinky_ip`, and `right_palm`;
+- `/World/Restocking/Product` and its authored collider;
+- `/World/Restocking/Pickup/Support`.
+
+Fixed `*_fingertip` marker paths, unknown bodies, collapsed body pairs, a
+contact with no product side, and a product/product pair raise
+`FeedbackUnavailableError`. The semantic `robot_link_name` is derived from
+the exact resolved body path; no raw label is trusted.
+
+Each raw impulse magnitude is divided by that record's positive measured
+`dt`. Multiple contact points for one exact pair are summed. The aggregate
+sensor force is retained only as a diagnostic. The sensor is authored with a
+zero reporting threshold and radius filtering disabled, so the reviewed
+controller's `minimum_contact_force_n` remains the sole grasp threshold.
+
+## Pose, freshness, and lift
+
+The adapter reads finger positions from the articulation and palm/product
+world poses from `RigidPrim.get_world_poses()`. Isaac `wxyz` orientations are
+normalized and converted to the controller's `xyzw` convention. Simulation,
+aggregate contact, and every raw contact timestamp must be finite and fresh;
+simulation time must increase strictly.
+
+`IsaacArmLiftPort` reads the six named R3 arm DOFs, computes a bounded vertical
+right-palm goal with the reviewed production kinematics, and queues bounded
+joint-space waypoints. `advance()` sends only those six named targets through
+`ArticulationController.command_joint_positions`. It refuses a second active
+request and stops issuing targets after the requested deadline. Acceptance or
+command completion is never treated as lift evidence. The R4 controller still
+requires the product to leave the exact pickup support, rise by the verified
+distance, retain opposing physical contact, and remain secured relative to the
+measured palm pose before reporting completion.
+
+The hand continues to command only the 16 reviewed OrcaHand finger DOFs.
+`right_wrist` stays in the R3 arm set. The adapter and harness contain no
+attachment constraint, product transform setter, velocity setter, kinematic
+toggle, weld, teleport, or state-derived fake contact.
+
+## Smoke harness and evidence
+
+`run_grasp_smoke.py` delays every Isaac import until `run_isaac`. At that
+boundary it imports the unchanged production URDF, selects its PhysX variant,
+authors the existing aisle/restocking fixture and collision-enabled nonkinematic
+pasta box, locates the single full articulation, creates a product-parented
+contact sensor, and performs one explicit robot reset before the runner starts.
+All later robot motion uses named drive targets; all product motion is physics.
+
+The runner has a physics-step bound and writes an atomically replaced,
+file-flushed status document before motion, after every sample, and at the
+terminal result. The report contains candidate/model identity, exact bound
+paths, sensor setup, the state-write policy, controller phase/counters,
+adapter contact evidence, and durable error text on failure.
+The command line requires the expected candidate commit and tree, hashes the
+exact owner acceptance specification before SimulationApp starts, and refuses
+a dirty or mismatched checkout.
+
+## Source-only validation limits
+
+CPU fakes cover path resolution, impulse conversion, orientation conversion,
+freshness, invalid data, collapsed/marker paths, the controller's opposing
+contact sequence, support departure, measured lift, and durable failure
+records. They do not establish real PhysX collision reporting, imported drive
+tuning, contact stability, IK reachability from the actual pickup stance, or
+that the physical box can be lifted. Those remain fail-closed runtime gates.
+No Isaac, SimulationApp, PhysX, or GPU process was started for this candidate.
